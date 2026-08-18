@@ -1,0 +1,30 @@
+[package]
+name = "osier"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+default-run = "osier"
+
+[[bin]]
+name = "osier"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+osier-git.workspace = true
+osier-config.workspace = true
+osier-theme.workspace = true
+osier-auth.workspace = true
+
+[lints]
+workspace = true
