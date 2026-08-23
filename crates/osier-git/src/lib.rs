@@ -11,6 +11,7 @@
 // Tests may panic on unexpected results; production code may not (workspace lints).
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod blame;
 pub mod config;
 pub mod diff;
 pub mod error;
@@ -22,6 +23,7 @@ pub mod runner;
 pub mod show;
 pub mod stash;
 pub mod status;
+pub mod submodule;
 pub mod testing;
 pub mod version;
 
