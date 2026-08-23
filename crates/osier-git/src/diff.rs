@@ -117,11 +117,20 @@ impl DiffOptions {
     }
 }
 
-pub fn diff(repo: &Repository, options: &DiffOptions) -> Result<Vec<DiffFile>> {
+/// Arguments for `git diff` / `git show` matching `options`.
+fn args_for(options: &DiffOptions) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     match &options.target {
         DiffTarget::Commit(rev) => {
-            args.extend(["show".into(), "--format=".into(), rev.clone()]);
+            // A merge is compared with its first parent; the combined format has no two-sided
+            // representation.
+            args.extend([
+                "show".into(),
+                "--format=".into(),
+                "--first-parent".into(),
+                "--no-show-signature".into(),
+                rev.clone(),
+            ]);
         }
         other => {
             args.push("diff".into());
@@ -136,7 +145,10 @@ pub fn diff(repo: &Repository, options: &DiffOptions) -> Result<Vec<DiffFile>> {
     }
     args.push("--no-color".into());
     args.push("--no-ext-diff".into());
+    args.push("--no-textconv".into());
     args.push("--patch".into());
+    args.push("--src-prefix=a/".into());
+    args.push("--dst-prefix=b/".into());
     args.push(format!("-U{}", options.context_lines));
     args.push(if options.detect_renames {
         "-M".into()
@@ -146,16 +158,24 @@ pub fn diff(repo: &Repository, options: &DiffOptions) -> Result<Vec<DiffFile>> {
     if options.ignore_whitespace {
         args.push("-w".into());
     }
-    if !options.paths.is_empty() {
-        args.push("--".into());
-        args.extend(options.paths.iter().cloned());
-    }
-    let out = repo.git(&args)?;
-    parse(out.stdout_str()?)
+    args.push("--".into());
+    args.extend(options.paths.iter().cloned());
+    args
 }
 
-/// Diff of an untracked file against nothing, so it renders like an addition.
-pub fn diff_untracked(repo: &Repository, path: &str, context_lines: u32) -> Result<Vec<DiffFile>> {
+/// The raw unified diff text, for viewers that parse patches themselves.
+pub fn patch_text(repo: &Repository, options: &DiffOptions) -> Result<String> {
+    let out = repo.git(args_for(options))?;
+    Ok(out.stdout_str()?.to_string())
+}
+
+/// Parsed diff.
+pub fn diff(repo: &Repository, options: &DiffOptions) -> Result<Vec<DiffFile>> {
+    parse(&patch_text(repo, options)?)
+}
+
+/// Raw patch for an untracked file, rendered as an addition.
+pub fn untracked_patch_text(repo: &Repository, path: &str, context_lines: u32) -> Result<String> {
     let out = repo.runner().run_unchecked(
         Some(repo.workdir()),
         [
@@ -173,16 +193,27 @@ pub fn diff_untracked(repo: &Repository, path: &str, context_lines: u32) -> Resu
     // `--no-index` exits 1 when there are differences, which is the expected case.
     match out.record.status {
         Some(0) | Some(1) => {
-            let mut files = parse(out.stdout_str()?)?;
-            for f in &mut files {
-                f.status = FileStatus::Added;
-                f.path = path.to_string();
-            }
-            Ok(files)
+            // Rewrite the headers so the file shows under its repository path.
+            let text = out.stdout_str()?;
+            Ok(text.replacen(
+                &format!("diff --git a/dev/null b/{path}"),
+                &format!("diff --git a/{path} b/{path}"),
+                1,
+            ))
         }
         Some(s) => Err(GitError::failed(s, out.record)),
         None => Err(GitError::timeout(0, out.record)),
     }
+}
+
+/// Diff of an untracked file against nothing, so it renders like an addition.
+pub fn diff_untracked(repo: &Repository, path: &str, context_lines: u32) -> Result<Vec<DiffFile>> {
+    let mut files = parse(&untracked_patch_text(repo, path, context_lines)?)?;
+    for f in &mut files {
+        f.status = FileStatus::Added;
+        f.path = path.to_string();
+    }
+    Ok(files)
 }
 
 /// Parse unified diff text as produced by `git diff` / `git show`.

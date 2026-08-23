@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Osier config layer"
+description = "Osier settings, state and XDG paths"
 publish.workspace = true
 
 [dependencies]
@@ -14,6 +14,11 @@ anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 tracing.workspace = true
+directories = "6"
+toml = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
