@@ -150,6 +150,9 @@ impl GitRunner {
         // Stable, parseable messages.
         env.insert("LC_ALL".into(), "C".into());
         env.insert("LANG".into(), "C".into());
+        // Reads (status, diff) must never write the index: that would wake our own file watcher
+        // and loop. Mandatory locks for mutations are unaffected.
+        env.insert("GIT_OPTIONAL_LOCKS".into(), "0".into());
         Self {
             git: std::env::var_os("OSIER_GIT").unwrap_or_else(|| "git".into()),
             env,

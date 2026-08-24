@@ -95,7 +95,7 @@ pub struct StatusOptions {
     pub ignored: bool,
 }
 
-/// Query the status. Uses `GIT_OPTIONAL_LOCKS=0` so a read never writes the index.
+/// Query the status. The runner sets `GIT_OPTIONAL_LOCKS=0`, so this never writes the index.
 pub fn status(repo: &Repository, options: StatusOptions) -> Result<RepoStatus> {
     let mut args = vec![
         "status",
@@ -109,8 +109,7 @@ pub fn status(repo: &Repository, options: StatusOptions) -> Result<RepoStatus> {
     if options.ignored {
         args.push("--ignored=matching");
     }
-    let runner = repo.runner().clone().with_env("GIT_OPTIONAL_LOCKS", "0");
-    let out = runner.run(Some(repo.workdir()), args)?;
+    let out = repo.git(args)?;
     parse(&out.stdout)
 }
 

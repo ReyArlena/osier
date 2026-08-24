@@ -4477,6 +4477,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
+ "ignore",
  "notify",
  "osier-auth",
  "osier-config",

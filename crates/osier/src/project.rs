@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::Task;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use notify::{RecursiveMode, Watcher};
 use osier_git::config::Identity;
 use osier_git::graph::GraphRow;
@@ -90,18 +91,39 @@ impl Project {
 
     fn start_watcher(&mut self) {
         let (tx, rx) = mpsc::channel::<()>();
+        let git_dir = self.repo.git_dir().to_path_buf();
+        let ignore = build_gitignore(&self.path, &git_dir);
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
-                // Our own reads never write, but git's index refresh may touch `.git/index`.
-                // Lock files and ORIG_HEAD-style temp files are noise.
+                // Reads (our own git commands included) are not changes. Only content and
+                // structure changes matter.
+                let relevant = matches!(
+                    event.kind,
+                    notify::EventKind::Create(_)
+                        | notify::EventKind::Modify(_)
+                        | notify::EventKind::Remove(_)
+                );
+                // Lock files and editor temp files are noise. `.git/index` is kept: it is how
+                // `git add` from a terminal shows up.
+                // Ignored paths (build output, logs) never change git's view of the tree.
+                // Paths inside `.git` are always relevant (index, HEAD, refs).
                 let noise = event.paths.iter().all(|p| {
                     let name = p
                         .file_name()
                         .map(|n| n.to_string_lossy())
                         .unwrap_or_default();
-                    name.ends_with(".lock") || name.ends_with('~') || name == "index"
+                    if name.ends_with(".lock") || name.ends_with('~') || name.ends_with(".swp") {
+                        return true;
+                    }
+                    if p.starts_with(&git_dir) {
+                        return false;
+                    }
+                    ignore
+                        .as_ref()
+                        .is_some_and(|g| g.matched_path_or_any_parents(p, p.is_dir()).is_ignore())
                 });
-                if !noise {
+                if relevant && !noise {
+                    tracing::trace!(kind = ?event.kind, paths = ?event.paths, "fs event");
                     let _ = tx.send(());
                 }
             }
@@ -151,6 +173,43 @@ impl Project {
     pub fn commit_at(&self, ix: usize) -> Option<&Commit> {
         self.snapshot.as_ref()?.commits.get(ix)
     }
+}
+
+/// Matcher for the root `.gitignore` and `.git/info/exclude`. Nested ignore files are not
+/// read; a change under one of those just costs an extra refresh.
+fn build_gitignore(root: &Path, git_dir: &Path) -> Option<Gitignore> {
+    let mut b = GitignoreBuilder::new(root);
+    for file in [root.join(".gitignore"), git_dir.join("info/exclude")] {
+        if file.is_file() {
+            // A malformed line is reported but does not disable the rest.
+            if let Some(e) = b.add(&file) {
+                tracing::debug!(error = %e, file = %file.display(), "ignore file");
+            }
+        }
+    }
+    match b.build() {
+        Ok(g) if !g.is_empty() => Some(g),
+        Ok(_) => None,
+        Err(e) => {
+            tracing::debug!(error = %e, "gitignore matcher");
+            None
+        }
+    }
+}
+
+/// Files in the order the Changes tab shows them: conflicted, staged, unstaged, untracked.
+pub fn ordered_changes(status: &RepoStatus) -> Vec<(String, Area)> {
+    status
+        .conflicted()
+        .map(|e| (e.path.clone(), Area::Conflicted))
+        .chain(status.staged().map(|e| (e.path.clone(), Area::Staged)))
+        .chain(status.unstaged().map(|e| (e.path.clone(), Area::Unstaged)))
+        .chain(
+            status
+                .untracked()
+                .map(|e| (e.path.clone(), Area::Untracked)),
+        )
+        .collect()
 }
 
 /// Blocking read of everything the UI shows. Runs on the background executor.

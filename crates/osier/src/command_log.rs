@@ -19,6 +19,10 @@ impl UiCommandSink {
         self.records.lock().map(|r| r.clone()).unwrap_or_default()
     }
 
+    pub fn version(&self) -> u64 {
+        self.version.load(Ordering::Relaxed)
+    }
+
     pub fn clear(&self) {
         if let Ok(mut r) = self.records.lock() {
             r.clear();
