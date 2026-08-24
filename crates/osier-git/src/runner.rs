@@ -24,6 +24,9 @@ pub struct CommandRecord {
     pub duration: Duration,
     /// Exit status. `None` when the process was killed (timeout).
     pub status: Option<i32>,
+    /// Whether the caller considers `status` a success (some commands signal results through
+    /// non-zero exits, e.g. `diff --no-index` or `config --get` on a missing key).
+    pub expected: bool,
     pub stdout_len: usize,
     /// Stderr, lossy utf-8, capped to 64 KiB.
     pub stderr: String,
@@ -186,7 +189,7 @@ impl GitRunner {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let output = self.run_unchecked(repo, args, None)?;
+        let output = self.execute(repo, args, None, &[0])?;
         match output.record.status {
             Some(0) => Ok(output),
             Some(status) => Err(classify(status, output.record)),
@@ -200,6 +203,35 @@ impl GitRunner {
         repo: Option<&Path>,
         args: I,
         stdin: Option<&[u8]>,
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.execute(repo, args, stdin, &[0])
+    }
+
+    /// Like [`run_unchecked`](Self::run_unchecked), but exit codes in `allowed` are recorded as
+    /// expected so the command log does not flag them.
+    pub fn run_allowing<I, S>(
+        &self,
+        repo: Option<&Path>,
+        args: I,
+        allowed: &[i32],
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.execute(repo, args, None, allowed)
+    }
+
+    fn execute<I, S>(
+        &self,
+        repo: Option<&Path>,
+        args: I,
+        stdin: Option<&[u8]>,
+        allowed: &[i32],
     ) -> Result<Output>
     where
         I: IntoIterator<Item = S>,
@@ -292,11 +324,12 @@ impl GitRunner {
             started,
             duration: clock.elapsed(),
             status,
+            expected: status.is_some_and(|s| allowed.contains(&s)),
             stdout_len: stdout.len(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
         };
         self.sink.record(&record);
-        if status != Some(0) {
+        if !record.expected {
             tracing::debug!(id, ?status, stderr = %record.stderr.trim(), "git failed");
         }
         Ok(Output { record, stdout })
@@ -345,6 +378,7 @@ mod tests {
             started: SystemTime::UNIX_EPOCH,
             duration: Duration::ZERO,
             status: Some(0),
+            expected: true,
             stdout_len: 0,
             stderr: String::new(),
         };

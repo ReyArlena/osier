@@ -84,10 +84,13 @@ fn main() {
 
     let sink = Arc::new(UiCommandSink::default());
     let runner = osier_git::GitRunner::new(sink.clone());
-    if let Err(error) = osier_git::GitVersion::check(&runner) {
-        tracing::error!(%error, "git check failed");
-        // Keep going: the UI shows the error and the user can fix PATH.
-    }
+    // Keep going on failure: the UI shows the error and the user can fix PATH.
+    let startup_error = osier_git::GitVersion::check(&runner)
+        .map_err(|error| {
+            tracing::error!(%error, "git check failed");
+            error.to_string()
+        })
+        .err();
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
@@ -108,7 +111,17 @@ fn main() {
             };
             let opened = gpui_kit::open_window(options, cx, |window, cx| {
                 cx.new(|cx| {
-                    app::Osier::new(paths, settings, state, runner, sink, open_arg, window, cx)
+                    app::Osier::new(
+                        paths,
+                        settings,
+                        state,
+                        runner,
+                        sink,
+                        open_arg,
+                        startup_error,
+                        window,
+                        cx,
+                    )
                 })
             });
             if let Err(error) = opened {

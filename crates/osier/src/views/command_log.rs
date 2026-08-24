@@ -24,7 +24,7 @@ impl Osier {
             .font_family(mono.clone())
             .text_xs();
         for rec in records.iter().rev().take(shown) {
-            let ok = rec.status == Some(0);
+            let ok = rec.expected;
             let id = rec.id;
             let is_open = expanded == Some(id);
             let shell = rec.as_shell();
@@ -54,7 +54,9 @@ impl Osier {
                             .gap_2()
                             .items_center()
                             .child(if ok {
-                                Tag::success().xsmall().child("0")
+                                Tag::success()
+                                    .xsmall()
+                                    .child(rec.status.unwrap_or(0).to_string())
                             } else {
                                 Tag::danger().xsmall().child(
                                     rec.status

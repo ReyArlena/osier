@@ -140,10 +140,10 @@ pub fn parse_tags(text: &str) -> Result<Vec<Tag>> {
 }
 
 pub fn remotes(repo: &Repository) -> Result<Vec<Remote>> {
-    let out = repo.runner().run_unchecked(
+    let out = repo.runner().run_allowing(
         Some(repo.workdir()),
         ["config", "--get-regexp", r"^remote\..*\.(url|pushurl)$"],
-        None,
+        &[0, 1],
     )?;
     // Exit 1 means "no matches", which is a repo without remotes.
     match out.record.status {

@@ -19,9 +19,9 @@ pub fn identity(repo: &Repository) -> Result<Identity> {
 
 /// Read one config value as git resolves it in this repo. `None` when unset.
 pub fn get(repo: &Repository, key: &str) -> Result<Option<String>> {
-    let out = repo
-        .runner()
-        .run_unchecked(Some(repo.workdir()), ["config", "--get", key], None)?;
+    let out =
+        repo.runner()
+            .run_allowing(Some(repo.workdir()), ["config", "--get", key], &[0, 1])?;
     match out.record.status {
         Some(0) => Ok(Some(out.stdout_str()?.trim_end_matches('\n').to_string())),
         Some(1) => Ok(None),
@@ -32,10 +32,10 @@ pub fn get(repo: &Repository, key: &str) -> Result<Option<String>> {
 
 /// Read a boolean config value with git's own parsing. `None` when unset.
 pub fn get_bool(repo: &Repository, key: &str) -> Result<Option<bool>> {
-    let out = repo.runner().run_unchecked(
+    let out = repo.runner().run_allowing(
         Some(repo.workdir()),
         ["config", "--get", "--type=bool", key],
-        None,
+        &[0, 1],
     )?;
     match out.record.status {
         Some(0) => Ok(Some(out.stdout_str()?.trim() == "true")),

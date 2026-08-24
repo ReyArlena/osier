@@ -109,6 +109,7 @@ impl Osier {
         runner: GitRunner,
         sink: Arc<UiCommandSink>,
         open_arg: Option<PathBuf>,
+        startup_error: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -124,7 +125,9 @@ impl Osier {
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             sidebar_visible: state.layout.sidebar_visible,
-            command_log_visible: state.layout.command_log_visible || settings.git.show_command_log,
+            command_log_visible: state.layout.command_log_visible
+                || settings.git.show_command_log
+                || std::env::var_os("OSIER_SHOW_COMMAND_LOG").is_some(),
             paths,
             settings,
             state,
@@ -146,7 +149,7 @@ impl Osier {
             diff_error: None,
             diff_revision: 0,
             log_scroll: UniformListScrollHandle::new(),
-            global_error: None,
+            global_error: startup_error,
             diff_task: Task::ready(()),
         };
         this.apply_appearance(cx);

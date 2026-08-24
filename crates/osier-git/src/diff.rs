@@ -176,7 +176,7 @@ pub fn diff(repo: &Repository, options: &DiffOptions) -> Result<Vec<DiffFile>> {
 
 /// Raw patch for an untracked file, rendered as an addition.
 pub fn untracked_patch_text(repo: &Repository, path: &str, context_lines: u32) -> Result<String> {
-    let out = repo.runner().run_unchecked(
+    let out = repo.runner().run_allowing(
         Some(repo.workdir()),
         [
             "diff",
@@ -188,7 +188,7 @@ pub fn untracked_patch_text(repo: &Repository, path: &str, context_lines: u32) -
             "/dev/null",
             path,
         ],
-        None,
+        &[0, 1],
     )?;
     // `--no-index` exits 1 when there are differences, which is the expected case.
     match out.record.status {

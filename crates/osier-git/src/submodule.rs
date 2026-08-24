@@ -17,10 +17,10 @@ pub fn list(repo: &Repository) -> Result<Vec<Submodule>> {
     if !modules.is_file() {
         return Ok(Vec::new());
     }
-    let out = repo.runner().run_unchecked(
+    let out = repo.runner().run_allowing(
         Some(repo.workdir()),
         ["config", "--file", ".gitmodules", "--list", "-z"],
-        None,
+        &[0, 1],
     )?;
     let mut subs = match out.record.status {
         Some(0) => parse_config(&out.stdout)?,
