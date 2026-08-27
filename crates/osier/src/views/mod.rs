@@ -24,8 +24,15 @@ impl Osier {
     ) -> impl IntoElement {
         let active_ix = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
         v_flex()
+            .id("center")
             .size_full()
             .min_w_0()
+            .key_context("OsierList")
+            .track_focus(&self.list_focus)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.list_focus.focus(window, cx)),
+            )
             .child(
                 TabBar::new("main-tabs")
                     .w_full()

@@ -16,8 +16,19 @@ pub struct State {
     /// Most recent first.
     pub recent: Vec<PathBuf>,
     pub layout: Layout,
+    /// Last window position and size (logical pixels). Compositors may ignore it.
+    pub window: Option<WindowGeometry>,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct WindowGeometry {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

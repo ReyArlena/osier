@@ -63,6 +63,27 @@ impl Osier {
                 .child(Spinner::new())
                 .child(div().text_sm().text_color(muted).child("Reading diff…"))
                 .into_any_element()
+        } else if let Some(size) = self.diff_too_large {
+            let mb = size as f64 / (1024.0 * 1024.0);
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_6()
+                .child(div().font_medium().child("Large file"))
+                .child(div().text_sm().text_center().text_color(muted).child(format!(
+                    "This file is {mb:.1} MB, above the {:.1} MB limit (diff.large_file_bytes).",
+                    self.settings.diff.large_file_bytes as f64 / (1024.0 * 1024.0)
+                )))
+                .child(
+                    Button::new("load-anyway")
+                        .outline()
+                        .small()
+                        .label("Load anyway")
+                        .on_click(cx.listener(|this, _, _, cx| this.force_large_diff(cx))),
+                )
+                .into_any_element()
         } else if let Some(error) = &self.diff_error {
             v_flex()
                 .size_full()

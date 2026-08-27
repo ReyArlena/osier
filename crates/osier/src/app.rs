@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::diff::{DiffFile, DiffMode, DiffState};
-use gpui_kit::component::resizable::{h_resizable, resizable_panel};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -31,6 +31,8 @@ gpui_kit::actions!(
         TabLog,
         TabBranches,
         TabStashes,
+        SelectNext,
+        SelectPrev,
     ]
 );
 
@@ -48,6 +50,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-2", TabLog, None),
         KeyBinding::new("ctrl-3", TabBranches, None),
         KeyBinding::new("ctrl-4", TabStashes, None),
+        KeyBinding::new("down", SelectNext, Some("OsierList")),
+        KeyBinding::new("up", SelectPrev, Some("OsierList")),
+        KeyBinding::new("j", SelectNext, Some("OsierList")),
+        KeyBinding::new("k", SelectPrev, Some("OsierList")),
     ]);
 }
 
@@ -97,7 +103,19 @@ pub struct Osier {
     pub(crate) diff_revision: u64,
     pub(crate) log_scroll: UniformListScrollHandle,
     pub(crate) global_error: Option<String>,
+    /// Command log version last rendered, so the panel only re-renders on new records.
+    log_version_seen: u64,
+    /// Size of a file the diff refused to load, until "load anyway".
+    pub(crate) diff_too_large: Option<u64>,
+    diff_force_large: bool,
+    /// Focus for keyboard navigation in the center lists.
+    pub(crate) list_focus: FocusHandle,
+    /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
+    state_dirty: bool,
+    /// Command log opened by the dev env var: do not persist that as a preference.
+    command_log_from_env: bool,
     diff_task: Task<()>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Osier {
@@ -128,6 +146,7 @@ impl Osier {
             command_log_visible: state.layout.command_log_visible
                 || settings.git.show_command_log
                 || std::env::var_os("OSIER_SHOW_COMMAND_LOG").is_some(),
+            command_log_from_env: std::env::var_os("OSIER_SHOW_COMMAND_LOG").is_some(),
             paths,
             settings,
             state,
@@ -150,9 +169,33 @@ impl Osier {
             diff_revision: 0,
             log_scroll: UniformListScrollHandle::new(),
             global_error: startup_error,
+            log_version_seen: 0,
+            diff_too_large: None,
+            diff_force_large: false,
+            list_focus: cx.focus_handle(),
+            state_dirty: false,
             diff_task: Task::ready(()),
+            _subscriptions: Vec::new(),
         };
         this.apply_appearance(cx);
+        this._subscriptions
+            .push(cx.observe_window_appearance(window, |this, _, cx| {
+                if this.settings.appearance.mode == ThemeMode::System {
+                    this.apply_appearance(cx);
+                    cx.notify();
+                }
+            }));
+        this._subscriptions
+            .push(cx.observe_window_bounds(window, |this, window, _| {
+                let b = window.bounds();
+                this.state.window = Some(osier_config::state::WindowGeometry {
+                    x: f32::from(b.origin.x),
+                    y: f32::from(b.origin.y),
+                    width: f32::from(b.size.width),
+                    height: f32::from(b.size.height),
+                });
+                this.state_dirty = true;
+            }));
 
         // Restore open projects, then the CLI argument on top.
         let restore: Vec<PathBuf> = this.state.open_projects.clone();
@@ -222,7 +265,9 @@ impl Osier {
 
     pub(crate) fn save_state(&mut self) {
         self.state.layout.sidebar_visible = self.sidebar_visible;
-        self.state.layout.command_log_visible = self.command_log_visible;
+        if !self.command_log_from_env {
+            self.state.layout.command_log_visible = self.command_log_visible;
+        }
         if let Err(error) = self.state.save(&self.paths) {
             tracing::warn!(%error, "could not save state");
         }
@@ -403,8 +448,20 @@ impl Osier {
         }
         project.loading = false;
         project.mark_refreshed();
+        let mut reload = false;
         match result {
             Ok(snapshot) => {
+                // Reload the diff only when the working tree or HEAD moved. Reloading resets the
+                // diff view's scroll position, so avoid it for no-op refreshes.
+                let status_changed = project
+                    .snapshot
+                    .as_ref()
+                    .is_none_or(|old| old.status != snapshot.status);
+                reload = match &project.selection {
+                    Selection::None => false,
+                    Selection::File { .. } => status_changed,
+                    Selection::Commit { .. } => false,
+                };
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
                     project.selected_commit = snapshot.commits.iter().position(|c| &c.hash == hash);
@@ -420,13 +477,14 @@ impl Osier {
                     && let Some((path, area)) = first_change(&snapshot.status)
                 {
                     project.selection = Selection::File { path, area };
+                    reload = true;
                 }
                 project.snapshot = Some(snapshot);
                 project.error = None;
             }
             Err(error) => project.error = Some(error),
         }
-        if is_active {
+        if is_active && reload {
             self.reload_selection(cx);
         }
         cx.notify();
@@ -448,8 +506,14 @@ impl Osier {
                     for ix in due {
                         this.refresh_project(ix, cx);
                     }
+                    if this.state_dirty {
+                        this.state_dirty = false;
+                        this.save_state();
+                    }
                     // The command log panel shows new records as they land.
-                    if this.command_log_visible {
+                    let version = this.sink.version();
+                    if this.command_log_visible && version != this.log_version_seen {
+                        this.log_version_seen = version;
                         cx.notify();
                     }
                 });
@@ -464,6 +528,7 @@ impl Osier {
     // ----- selection and diff -----
 
     pub(crate) fn select_file(&mut self, path: String, area: Area, cx: &mut Context<Self>) {
+        self.diff_force_large = false;
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::File { path, area };
             p.selected_commit = None;
@@ -473,6 +538,7 @@ impl Osier {
     }
 
     pub(crate) fn select_commit(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.diff_force_large = false;
         let Some(p) = self.active_project_mut() else {
             return;
         };
@@ -505,9 +571,15 @@ impl Osier {
         }
         self.diff_loading = true;
         self.diff_error = None;
+        self.diff_too_large = None;
+        let limit = if self.diff_force_large {
+            u64::MAX
+        } else {
+            self.settings.diff.large_file_bytes
+        };
         self.diff_task = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { load_patch(&repo, &selection, context) })
+                .background_spawn(async move { load_patch(&repo, &selection, context, limit) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.diff_revision != revision {
@@ -516,7 +588,11 @@ impl Osier {
                 this.diff_loading = false;
                 match result {
                     Ok(files) => this.set_diff_files(files, cx),
-                    Err(error) => {
+                    Err(LoadError::TooLarge(size)) => {
+                        this.diff_too_large = Some(size);
+                        this.set_diff_files(Vec::new(), cx);
+                    }
+                    Err(LoadError::Git(error)) => {
                         this.diff_error = Some(error);
                         this.set_diff_files(Vec::new(), cx);
                     }
@@ -530,6 +606,62 @@ impl Osier {
     fn set_diff_files(&mut self, files: Vec<DiffFile>, cx: &mut Context<Self>) {
         self.diff_files = files.len();
         self.diff.update(cx, |state, cx| state.set_files(files, cx));
+    }
+
+    /// "Load anyway" for a file over the size limit.
+    pub(crate) fn force_large_diff(&mut self, cx: &mut Context<Self>) {
+        self.diff_force_large = true;
+        self.reload_selection(cx);
+    }
+
+    /// Move the selection in the visible list (Changes or Log) by `delta`.
+    pub(crate) fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(project) = self.active_project() else {
+            return;
+        };
+        let Some(snapshot) = &project.snapshot else {
+            return;
+        };
+        match self.tab {
+            Tab::Changes => {
+                let items = crate::project::ordered_changes(&snapshot.status);
+                if items.is_empty() {
+                    return;
+                }
+                let current = match &project.selection {
+                    Selection::File { path, area } => {
+                        items.iter().position(|(p, a)| p == path && a == area)
+                    }
+                    _ => None,
+                };
+                let next = match current {
+                    Some(i) => i.saturating_add_signed(delta).min(items.len() - 1),
+                    None => 0,
+                };
+                let (path, area) = items[next].clone();
+                self.select_file(path, area, cx);
+            }
+            Tab::Log => {
+                if snapshot.commits.is_empty() {
+                    return;
+                }
+                let next = match project.selected_commit {
+                    Some(i) => i
+                        .saturating_add_signed(delta)
+                        .min(snapshot.commits.len() - 1),
+                    None => 0,
+                };
+                self.select_commit(next, cx);
+            }
+            Tab::Branches | Tab::Stashes => {}
+        }
+    }
+
+    pub(crate) fn on_pane_resize(&mut self, sizes: &[Pixels]) {
+        if let Some(first) = sizes.first() {
+            self.state.layout.center_width = Some(f32::from(*first));
+            self.state_dirty = true;
+        }
     }
 
     pub(crate) fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
@@ -577,38 +709,55 @@ fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)
         .next()
 }
 
+pub(crate) enum LoadError {
+    TooLarge(u64),
+    Git(String),
+}
+
+impl From<osier_git::GitError> for LoadError {
+    fn from(e: osier_git::GitError) -> Self {
+        LoadError::Git(e.to_string())
+    }
+}
+
 /// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
 fn load_patch(
     repo: &Repository,
     selection: &Selection,
     context: u32,
-) -> Result<Vec<DiffFile>, String> {
+    size_limit: u64,
+) -> Result<Vec<DiffFile>, LoadError> {
+    if let Selection::File { path, .. } = selection
+        && let Ok(meta) = std::fs::metadata(repo.workdir().join(path))
+        && meta.len() > size_limit
+    {
+        return Err(LoadError::TooLarge(meta.len()));
+    }
     let patch = match selection {
         Selection::None => return Ok(Vec::new()),
         Selection::File { path, area } => match area {
-            Area::Untracked => osier_git::diff::untracked_patch_text(repo, path, context)
-                .map_err(|e| e.to_string())?,
+            Area::Untracked => osier_git::diff::untracked_patch_text(repo, path, context)?,
             Area::Staged => {
                 let mut o = DiffOptions::new(DiffTarget::Staged).path(path.clone());
                 o.context_lines = context;
-                osier_git::diff::patch_text(repo, &o).map_err(|e| e.to_string())?
+                osier_git::diff::patch_text(repo, &o)?
             }
             Area::Unstaged | Area::Conflicted => {
                 let mut o = DiffOptions::new(DiffTarget::Unstaged).path(path.clone());
                 o.context_lines = context;
-                osier_git::diff::patch_text(repo, &o).map_err(|e| e.to_string())?
+                osier_git::diff::patch_text(repo, &o)?
             }
         },
         Selection::Commit { hash } => {
             let mut o = DiffOptions::new(DiffTarget::Commit(hash.clone()));
             o.context_lines = context;
-            osier_git::diff::patch_text(repo, &o).map_err(|e| e.to_string())?
+            osier_git::diff::patch_text(repo, &o)?
         }
     };
     if patch.trim().is_empty() {
         return Ok(Vec::new());
     }
-    DiffFile::parse(&patch).map_err(|e| e.to_string())
+    DiffFile::parse(&patch).map_err(|e| LoadError::Git(e.to_string()))
 }
 
 impl Render for Osier {
@@ -634,6 +783,8 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
             .on_action(cx.listener(|this, _: &TabStashes, _, cx| this.set_tab(Tab::Stashes, cx)))
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
+            .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_selection(-1, cx)))
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -653,9 +804,19 @@ impl Render for Osier {
                                 .child(
                                     div().flex_1().min_h_0().child(
                                         h_resizable("panes")
+                                            .on_resize(cx.listener(
+                                                |this, state: &Entity<ResizableState>, _, cx| {
+                                                    let sizes = state.read(cx).sizes().clone();
+                                                    this.on_pane_resize(&sizes);
+                                                },
+                                            ))
                                             .child(
                                                 resizable_panel()
-                                                    .size(px(440.))
+                                                    .size(px(self
+                                                        .state
+                                                        .layout
+                                                        .center_width
+                                                        .unwrap_or(440.)))
                                                     .size_range(px(300.)..px(800.))
                                                     .child(self.render_center(window, cx)),
                                             )

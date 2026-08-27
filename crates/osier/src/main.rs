@@ -99,8 +99,14 @@ fn main() {
             init_themes(&paths, cx);
             app::init(cx);
 
+            let bounds = match state.window {
+                Some(w) if w.width >= 600. && w.height >= 400. => WindowBounds::Windowed(
+                    Bounds::new(point(px(w.x), px(w.y)), size(px(w.width), px(w.height))),
+                ),
+                _ => WindowBounds::centered(size(px(1400.), px(860.)), cx),
+            };
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(1400.), px(860.)), cx)),
+                window_bounds: Some(bounds),
                 window_min_size: Some(size(px(1000.), px(600.))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Osier".into()),
