@@ -122,6 +122,7 @@ impl Osier {
                                                 h_flex()
                                                     .flex_1()
                                                     .min_w_0()
+                                                    .overflow_hidden()
                                                     .gap_2()
                                                     .items_center()
                                                     .children(refs.into_iter().take(3).map(|r| {
@@ -156,6 +157,8 @@ impl Osier {
                                                     .text_xs()
                                                     .text_color(muted)
                                                     .flex_none()
+                                                    .max_w(px(110.))
+                                                    .truncate()
                                                     .child(commit.author_name.clone()),
                                             )
                                             .child(

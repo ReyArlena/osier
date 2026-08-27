@@ -112,6 +112,7 @@ impl Osier {
         v_flex()
             .size_full()
             .min_w_0()
+            .overflow_hidden()
             .child(
                 h_flex()
                     .px_3()
@@ -159,6 +160,15 @@ impl Osier {
                                 this.set_diff_mode(DiffMode::Split, cx)
                             })),
                     )
+                    .child(
+                        Button::new("wrap")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::TextWrap)
+                            .selected(self.settings.diff.soft_wrap)
+                            .tooltip("Wrap long lines")
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_soft_wrap(cx))),
+                    )
                     .child(Separator::vertical().h_4())
                     .child(
                         Button::new("revert")
@@ -169,6 +179,13 @@ impl Osier {
                             .tooltip("Revert file"),
                     ),
             )
-            .child(div().flex_1().min_h_0().min_w_0().child(body))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(body),
+            )
     }
 }

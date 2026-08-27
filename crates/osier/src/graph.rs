@@ -4,7 +4,7 @@ use gpui_kit::*;
 use osier_git::graph::{Edge, GraphRow};
 
 pub const LANE_WIDTH: f32 = 14.0;
-pub const NODE_RADIUS: f32 = 3.5;
+pub const NODE_RADIUS: f32 = 5.0;
 /// Row height of the log list; the canvas needs a definite height to lay out lines.
 pub const ROW_HEIGHT: f32 = 40.0;
 
@@ -61,7 +61,7 @@ pub fn graph_cell(
             }
             // Node.
             let r = px(if is_merge {
-                NODE_RADIUS + 1.
+                NODE_RADIUS + 1.5
             } else {
                 NODE_RADIUS
             });

@@ -664,6 +664,12 @@ impl Osier {
         }
     }
 
+    pub(crate) fn toggle_soft_wrap(&mut self, cx: &mut Context<Self>) {
+        self.settings.diff.soft_wrap = !self.settings.diff.soft_wrap;
+        self.save_settings();
+        cx.notify();
+    }
+
     pub(crate) fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         self.diff.update(cx, |state, cx| state.set_mode(mode, cx));
         self.settings.diff.mode = match mode {
@@ -817,11 +823,13 @@ impl Render for Osier {
                                                         .layout
                                                         .center_width
                                                         .unwrap_or(440.)))
-                                                    .size_range(px(300.)..px(800.))
+                                                    .size_range(px(260.)..px(1400.))
                                                     .child(self.render_center(window, cx)),
                                             )
                                             .child(
-                                                resizable_panel().child(self.render_diff_pane(cx)),
+                                                resizable_panel()
+                                                    .size_range(px(240.)..px(4000.))
+                                                    .child(self.render_diff_pane(cx)),
                                             ),
                                     ),
                                 )

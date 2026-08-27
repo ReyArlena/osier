@@ -90,7 +90,7 @@ impl Default for Diff {
         Self {
             context_lines: 3,
             line_numbers: true,
-            soft_wrap: false,
+            soft_wrap: true,
             mode: DiffMode::Unified,
             large_file_bytes: 2 * 1024 * 1024,
         }
