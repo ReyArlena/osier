@@ -195,7 +195,12 @@ impl GitRunner {
         let output = self.execute(repo, args, None, &[0])?;
         match output.record.status {
             Some(0) => Ok(output),
-            Some(status) => Err(classify(status, output.record)),
+            Some(status) => {
+                let stdout_head =
+                    String::from_utf8_lossy(&output.stdout[..output.stdout.len().min(STDERR_CAP)])
+                        .into_owned();
+                Err(classify(status, output.record, &stdout_head))
+            }
             None => Err(GitError::timeout(self.timeout.as_secs(), output.record)),
         }
     }
@@ -339,10 +344,11 @@ impl GitRunner {
     }
 }
 
-/// Map a non-zero exit into the most specific error we can recognise from stderr.
-fn classify(status: i32, record: CommandRecord) -> GitError {
+/// Map a non-zero exit into the most specific error we can recognise from stderr (and stdout,
+/// where git prints `CONFLICT` lines).
+fn classify(status: i32, record: CommandRecord, stdout: &str) -> GitError {
     let err = record.stderr.as_str();
-    let has = |needle: &str| err.contains(needle);
+    let has = |needle: &str| err.contains(needle) || stdout.contains(needle);
     if has("index.lock") || has("Unable to create") && has(".lock") {
         GitError::Locked(Box::new(record))
     } else if has("Authentication failed")
@@ -354,8 +360,16 @@ fn classify(status: i32, record: CommandRecord) -> GitError {
         GitError::AuthRequired(Box::new(record))
     } else if has("non-fast-forward") || has("fetch first") || has("stale info") {
         GitError::NonFastForward(Box::new(record))
-    } else if has("CONFLICT (") || has("Automatic merge failed") || has("could not apply") {
+    } else if has("CONFLICT (")
+        || has("Automatic merge failed")
+        || has("could not apply")
+        || has("could not revert")
+    {
         GitError::Conflict(Box::new(record))
+    } else if has("would be overwritten by") || has("commit your changes or stash them") {
+        GitError::Dirty(Box::new(record))
+    } else if has("is not fully merged") {
+        GitError::BranchNotMerged(Box::new(record))
     } else if has("not a git repository") {
         GitError::NotARepo(record.cwd.clone().unwrap_or_default())
     } else {

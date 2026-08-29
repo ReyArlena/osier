@@ -32,5 +32,4 @@ pub use repo::Repository;
 pub use runner::{CommandRecord, CommandSink, GitRunner, MemorySink, NoopSink};
 pub use version::GitVersion;
 
-/// Git operations that change the repository.
-pub mod ops {}
+pub mod ops;

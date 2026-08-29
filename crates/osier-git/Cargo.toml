@@ -16,6 +16,7 @@ serde.workspace = true
 tracing.workspace = true
 tempfile = "3"
 wait-timeout = "0.2"
+trash = "5"
 
 [lints]
 workspace = true

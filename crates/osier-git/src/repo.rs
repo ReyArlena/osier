@@ -120,6 +120,21 @@ impl Repository {
         self.runner.run(Some(&self.workdir), args)
     }
 
+    /// Current HEAD commit, `None` on an unborn branch.
+    pub fn head_oid(&self) -> Result<Option<String>> {
+        let out = self.runner.run_allowing(
+            Some(&self.workdir),
+            ["rev-parse", "--verify", "--quiet", "HEAD"],
+            &[0, 1],
+        )?;
+        match out.record.status {
+            Some(0) => Ok(Some(out.stdout_str()?.trim().to_string())),
+            Some(1) => Ok(None),
+            Some(s) => Err(GitError::failed(s, out.record)),
+            None => Err(GitError::timeout(0, out.record)),
+        }
+    }
+
     /// Operation git is in the middle of, if any (merge, rebase, ...).
     pub fn in_progress(&self) -> Option<InProgress> {
         let g = &self.git_dir;

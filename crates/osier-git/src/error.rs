@@ -31,6 +31,15 @@ pub enum GitError {
     #[error("merge conflict")]
     Conflict(Box<CommandRecord>),
 
+    #[error("working tree has local changes that would be overwritten")]
+    Dirty(Box<CommandRecord>),
+
+    #[error("branch is not fully merged")]
+    BranchNotMerged(Box<CommandRecord>),
+
+    #[error("invalid reference name: {0}")]
+    InvalidRefName(String),
+
     #[error("git exited with status {status}")]
     Failed {
         status: i32,
@@ -84,7 +93,9 @@ impl GitError {
             Self::Locked(r)
             | Self::AuthRequired(r)
             | Self::NonFastForward(r)
-            | Self::Conflict(r) => Some(r),
+            | Self::Conflict(r)
+            | Self::Dirty(r)
+            | Self::BranchNotMerged(r) => Some(r),
             Self::Failed { record, .. } | Self::Timeout { record, .. } => Some(record),
             _ => None,
         }
