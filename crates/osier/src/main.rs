@@ -1,9 +1,11 @@
 //! Osier: fast native git GUI.
 
 mod app;
+mod changes_ops;
 mod command_log;
 mod format;
 mod graph;
+mod ops;
 mod project;
 mod views;
 

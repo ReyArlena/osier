@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::diff::{DiffFile, DiffMode, DiffState};
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -33,6 +34,7 @@ gpui_kit::actions!(
         TabStashes,
         SelectNext,
         SelectPrev,
+        CommitStaged,
     ]
 );
 
@@ -50,6 +52,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-2", TabLog, None),
         KeyBinding::new("ctrl-3", TabBranches, None),
         KeyBinding::new("ctrl-4", TabStashes, None),
+        KeyBinding::new("ctrl-enter", CommitStaged, None),
         KeyBinding::new("down", SelectNext, Some("OsierList")),
         KeyBinding::new("up", SelectPrev, Some("OsierList")),
         KeyBinding::new("j", SelectNext, Some("OsierList")),
@@ -110,6 +113,9 @@ pub struct Osier {
     diff_force_large: bool,
     /// Focus for keyboard navigation in the center lists.
     pub(crate) list_focus: FocusHandle,
+    pub(crate) commit_message: Entity<TextareaState>,
+    pub(crate) amend: bool,
+    pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
     state_dirty: bool,
     /// Command log opened by the dev env var: do not persist that as a preference.
@@ -140,8 +146,22 @@ impl Osier {
                 .with_mode(mode)
                 .with_context_lines(Some(settings.diff.context_lines as usize))
         });
+        let commit_message = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .rows(4)
+                .placeholder("Commit message (ctrl-enter to commit)")
+        });
+        let message_subscription =
+            cx.subscribe_in(&commit_message, window, |_, _, ev: &InputEvent, _, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
         let mut this = Self {
             focus_handle: cx.focus_handle(),
+            commit_message,
+            amend: false,
+            signoff: false,
             sidebar_visible: state.layout.sidebar_visible,
             command_log_visible: state.layout.command_log_visible
                 || settings.git.show_command_log
@@ -175,7 +195,7 @@ impl Osier {
             list_focus: cx.focus_handle(),
             state_dirty: false,
             diff_task: Task::ready(()),
-            _subscriptions: Vec::new(),
+            _subscriptions: vec![message_subscription],
         };
         this.apply_appearance(cx);
         this._subscriptions
@@ -789,6 +809,7 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
             .on_action(cx.listener(|this, _: &TabStashes, _, cx| this.set_tab(Tab::Stashes, cx)))
+            .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_selection(-1, cx)))
             .size_full()
