@@ -1,6 +1,7 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::diff::{Diff, DiffMode};
+use gpui_kit::component::diff::{Diff, DiffGutterMarker, DiffLinePosition, DiffMode, DiffSide};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
@@ -12,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
 
 impl Osier {
@@ -52,6 +54,13 @@ impl Osier {
                     ),
                 )
             }
+        };
+
+        let area = self.diff_area();
+        let has_selection = self.diff.read(cx).selected_lines().is_some();
+        let line_actions: &[HunkAction] = match &area {
+            Some((_, a)) if has_selection => HunkAction::for_area(*a),
+            _ => &[],
         };
 
         let body: AnyElement = if self.diff_loading {
@@ -103,10 +112,97 @@ impl Osier {
             self.empty_state("No changes", "This selection has no textual changes.", cx)
                 .into_any_element()
         } else {
-            Diff::new(&self.diff)
+            let mut view = Diff::new(&self.diff)
                 .line_number(self.settings.diff.line_numbers)
-                .soft_wrap(self.settings.diff.soft_wrap)
-                .into_any_element()
+                .soft_wrap(self.settings.diff.soft_wrap);
+            if let Some((path, a)) = &area
+                && !HunkAction::for_area(*a).is_empty()
+                && let Some(file) = self.diff_file_model(path)
+            {
+                // One marker per hunk, on its first line, opening a small menu.
+                let markers: Vec<DiffGutterMarker> = file
+                    .hunks
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, h)| {
+                        let position = if h.new_lines > 0 {
+                            DiffLinePosition::new(
+                                path.clone(),
+                                DiffSide::Modified,
+                                h.new_start as usize,
+                            )
+                        } else {
+                            DiffLinePosition::new(
+                                path.clone(),
+                                DiffSide::Original,
+                                h.old_start as usize,
+                            )
+                        };
+                        DiffGutterMarker::new(("hunk", ix), position).with_label(match a {
+                            Area::Staged => "−",
+                            _ => "+",
+                        })
+                    })
+                    .collect();
+                let model = self.diff_model.clone();
+                let weak = cx.entity().downgrade();
+                let actions = HunkAction::for_area(*a);
+                let path = path.clone();
+                view = view
+                    .gutter_markers(markers)
+                    .render_gutter_marker(move |marker, _, _| {
+                        let line = marker.position().line() as u32;
+                        let side = marker.position().side();
+                        let hunk_ix = model
+                            .iter()
+                            .find(|f| f.path == *marker.position().path())
+                            .and_then(|f| {
+                                f.hunks.iter().position(|h| {
+                                    (h.new_lines > 0
+                                        && side == DiffSide::Modified
+                                        && h.new_start == line)
+                                        || (h.new_lines == 0
+                                            && side == DiffSide::Original
+                                            && h.old_start == line)
+                                })
+                            });
+                        let button = Button::new(marker.id().clone())
+                            .ghost()
+                            .xsmall()
+                            .label(marker.label().clone())
+                            .tooltip("Hunk actions");
+                        let Some(hunk_ix) = hunk_ix else {
+                            return button.into_any_element();
+                        };
+                        let weak = weak.clone();
+                        let path = path.clone();
+                        button
+                            .dropdown_menu(move |mut menu, _, _| {
+                                for action in actions {
+                                    let weak = weak.clone();
+                                    let path = path.clone();
+                                    let action = *action;
+                                    menu = menu.item(
+                                        PopupMenuItem::new(format!("{} hunk", action.label()))
+                                            .on_click(move |_, window, cx| {
+                                                let _ = weak.update(cx, |this, cx| {
+                                                    this.hunk_action(
+                                                        path.clone(),
+                                                        hunk_ix,
+                                                        action,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    );
+                                }
+                                menu
+                            })
+                            .into_any_element()
+                    });
+            }
+            view.into_any_element()
         };
 
         v_flex()
@@ -140,6 +236,16 @@ impl Osier {
                         )
                     })
                     .child(div().flex_1())
+                    .children(line_actions.iter().map(|action| {
+                        let action = *action;
+                        Button::new(SharedString::from(format!("lines-{}", action.label())))
+                            .outline()
+                            .xsmall()
+                            .label(format!("{} lines", action.label()))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.lines_action(action, window, cx)
+                            }))
+                    }))
                     .child(
                         Button::new("unified")
                             .ghost()

@@ -101,6 +101,8 @@ pub struct Osier {
     pub(crate) diff: Entity<DiffState>,
     /// Files in the diff pane, for the header counts.
     pub(crate) diff_files: usize,
+    /// Our own parse of the same patch, for building hunk and line patches.
+    pub(crate) diff_model: std::rc::Rc<Vec<osier_git::diff::DiffFile>>,
     pub(crate) diff_loading: bool,
     pub(crate) diff_error: Option<String>,
     pub(crate) diff_revision: u64,
@@ -184,6 +186,7 @@ impl Osier {
             expanded_command: None,
             diff,
             diff_files: 0,
+            diff_model: std::rc::Rc::new(Vec::new()),
             diff_loading: false,
             diff_error: None,
             diff_revision: 0,
@@ -580,12 +583,14 @@ impl Osier {
         let revision = self.diff_revision;
         let context = self.settings.diff.context_lines;
         let Some(project) = self.active_project() else {
+            self.diff_model = std::rc::Rc::new(Vec::new());
             self.set_diff_files(Vec::new(), cx);
             return;
         };
         let repo = project.repo.clone();
         let selection = project.selection.clone();
         if selection == Selection::None {
+            self.diff_model = std::rc::Rc::new(Vec::new());
             self.set_diff_files(Vec::new(), cx);
             return;
         }
@@ -607,13 +612,18 @@ impl Osier {
                 }
                 this.diff_loading = false;
                 match result {
-                    Ok(files) => this.set_diff_files(files, cx),
+                    Ok((files, model)) => {
+                        this.diff_model = std::rc::Rc::new(model);
+                        this.set_diff_files(files, cx);
+                    }
                     Err(LoadError::TooLarge(size)) => {
                         this.diff_too_large = Some(size);
+                        this.diff_model = std::rc::Rc::new(Vec::new());
                         this.set_diff_files(Vec::new(), cx);
                     }
                     Err(LoadError::Git(error)) => {
                         this.diff_error = Some(error);
+                        this.diff_model = std::rc::Rc::new(Vec::new());
                         this.set_diff_files(Vec::new(), cx);
                     }
                 }
@@ -752,7 +762,7 @@ fn load_patch(
     selection: &Selection,
     context: u32,
     size_limit: u64,
-) -> Result<Vec<DiffFile>, LoadError> {
+) -> Result<(Vec<DiffFile>, Vec<osier_git::diff::DiffFile>), LoadError> {
     if let Selection::File { path, .. } = selection
         && let Ok(meta) = std::fs::metadata(repo.workdir().join(path))
         && meta.len() > size_limit
@@ -760,7 +770,7 @@ fn load_patch(
         return Err(LoadError::TooLarge(meta.len()));
     }
     let patch = match selection {
-        Selection::None => return Ok(Vec::new()),
+        Selection::None => return Ok((Vec::new(), Vec::new())),
         Selection::File { path, area } => match area {
             Area::Untracked => osier_git::diff::untracked_patch_text(repo, path, context)?,
             Area::Staged => {
@@ -781,9 +791,15 @@ fn load_patch(
         }
     };
     if patch.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
-    DiffFile::parse(&patch).map_err(|e| LoadError::Git(e.to_string()))
+    let files = DiffFile::parse(&patch).map_err(|e| LoadError::Git(e.to_string()))?;
+    // Our parser is stricter; a failure here only disables hunk actions.
+    let model = osier_git::diff::parse(&patch).unwrap_or_else(|e| {
+        tracing::debug!(error = %e, "hunk model unavailable for this patch");
+        Vec::new()
+    });
+    Ok((files, model))
 }
 
 impl Render for Osier {

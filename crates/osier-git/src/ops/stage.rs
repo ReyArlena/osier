@@ -14,6 +14,16 @@ pub fn stage(repo: &Repository, paths: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Record an untracked file in the index without content (`add -N`), so a patch can stage
+/// part of it.
+pub fn intent_to_add(repo: &Repository, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    repo.git(with_paths(vec!["add", "--intent-to-add"], paths))?;
+    Ok(())
+}
+
 /// Stage everything in the working tree.
 pub fn stage_all(repo: &Repository) -> Result<()> {
     repo.git(["add", "-A"])?;

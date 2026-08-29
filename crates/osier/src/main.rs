@@ -5,6 +5,7 @@ mod changes_ops;
 mod command_log;
 mod format;
 mod graph;
+mod hunk_ops;
 mod ops;
 mod project;
 mod views;
