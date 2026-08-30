@@ -97,7 +97,7 @@ pub fn parse_branches(text: &str) -> Result<Vec<Branch>> {
                 subject: f[7].to_string(),
             })
         })
-        .filter(|b| !matches!(b, Ok(b) if b.is_remote && b.name.ends_with("/HEAD")))
+        .filter(|b| !matches!(b, Ok(b) if b.is_remote && b.full_ref.ends_with("/HEAD")))
         .collect()
 }
 

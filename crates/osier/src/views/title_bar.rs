@@ -96,8 +96,9 @@ impl Osier {
                         .ghost()
                         .small()
                         .icon(Lucide::Archive)
-                        .disabled(true)
-                        .tooltip(later),
+                        .tooltip("Stash changes")
+                        .disabled(!has_project)
+                        .on_click(cx.listener(|this, _, window, cx| this.prompt_stash(window, cx))),
                 )
                 .child(
                     Button::new("patch")
