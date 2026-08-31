@@ -1,5 +1,5 @@
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
@@ -23,7 +23,6 @@ impl Osier {
                 .map(|s| s.status.entries.len())
                 .unwrap_or(0);
             let loading = project.loading;
-            let close_weak = weak.clone();
             let menu_weak = weak.clone();
             let path = project.path.clone();
             let item = SidebarMenuItem::new(project.name.clone())
@@ -31,7 +30,6 @@ impl Osier {
                 .active(self.active == Some(ix))
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
                 .suffix(move |_, _| {
-                    let close_weak = close_weak.clone();
                     h_flex()
                         .gap_1()
                         .items_center()
@@ -41,19 +39,6 @@ impl Osier {
                         .when(changes > 0 && !loading, |this| {
                             this.child(Tag::secondary().xsmall().child(changes.to_string()))
                         })
-                        .child(
-                            // The kit's sidebar item owns its hover state, so the close button
-                            // stays visible but unobtrusive (ghost, muted).
-                            Button::new(("close-project", ix))
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::X)
-                                .tooltip("Close project (ctrl-w)")
-                                .on_click(move |_, window, cx| {
-                                    let _ = close_weak
-                                        .update(cx, |this, cx| this.close_project(ix, window, cx));
-                                }),
-                        )
                         .into_any_element()
                 })
                 .context_menu(move |menu, _, _| {
