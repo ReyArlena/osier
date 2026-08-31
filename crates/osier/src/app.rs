@@ -220,10 +220,25 @@ impl Osier {
                 this.state_dirty = true;
             }));
 
-        // Restore open projects, then the CLI argument on top.
+        // Restore open projects, then the CLI argument on top. Failures go to the status bar:
+        // toasts need the window root, which does not exist yet during construction.
         let restore: Vec<PathBuf> = this.state.open_projects.clone();
+        let mut failures = Vec::new();
         for p in restore {
-            this.open_project(&p, false, cx);
+            if let Err(e) = this.open_project(&p, false, cx) {
+                failures.push(e);
+            }
+        }
+        if !failures.is_empty() {
+            this.global_error = Some(format!(
+                "Could not reopen {}: {}",
+                if failures.len() == 1 {
+                    "a project".to_string()
+                } else {
+                    format!("{} projects", failures.len())
+                },
+                failures.join("; ")
+            ));
         }
         if let Some(active) = this.state.active_project.clone()
             && let Some(ix) = this.projects.iter().position(|p| p.path == active)
@@ -232,9 +247,9 @@ impl Osier {
         }
         if let Some(p) = open_arg {
             let p = std::fs::canonicalize(&p).unwrap_or(p);
-            this.open_project(&p, true, cx);
-            if let Some(ix) = this.projects.iter().position(|p2| p2.path == p) {
-                this.activate(ix, window, cx);
+            match this.open_project(&p, true, cx) {
+                Ok(ix) => this.activate(ix, window, cx),
+                Err(e) => this.global_error = Some(e),
             }
         }
         if this.active.is_none() && !this.projects.is_empty() {
@@ -309,20 +324,21 @@ impl Osier {
         }
     }
 
-    /// Open (or re-activate) a repository at `path`. Returns its index.
+    /// Open (or re-activate) a repository at `path`. Returns its index. On failure the path
+    /// is dropped from recents and the error is returned for the caller to show.
     pub(crate) fn open_project(
         &mut self,
         path: &Path,
         make_active: bool,
         cx: &mut Context<Self>,
-    ) -> Option<usize> {
+    ) -> Result<usize, String> {
         if let Some(ix) = self.projects.iter().position(|p| p.path == path) {
             if make_active {
                 self.active = Some(ix);
                 self.state.open(&self.projects[ix].path);
                 self.save_state();
             }
-            return Some(ix);
+            return Ok(ix);
         }
         match Project::open(self.runner.clone(), path, self.settings.git.log_page_size) {
             Ok(project) => {
@@ -330,26 +346,58 @@ impl Osier {
                 self.projects.push(project);
                 let ix = self.projects.len() - 1;
                 self.state.open(&workdir);
-                if !make_active && self.state.active_project.as_deref() != Some(&workdir) {
-                    // `open` made it active; keep whatever was active before.
-                }
                 self.save_state();
                 self.refresh_project(ix, cx);
                 if make_active {
                     self.active = Some(ix);
                 }
-                Some(ix)
+                Ok(ix)
             }
             Err(error) => {
                 tracing::warn!(%error, path = %path.display(), "cannot open repository");
-                self.global_error = Some(format!("{}: {error}", path.display()));
                 self.state.forget_recent(path);
                 self.state.close(path);
                 self.save_state();
                 cx.notify();
-                None
+                Err(format!("{}: {error}", crate::format::tilde(path)))
             }
         }
+    }
+
+    /// Open from a user action: failures become a warning toast.
+    pub(crate) fn open_project_notify(
+        &mut self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui_kit::component::WindowExt as _;
+        use gpui_kit::component::notification::Notification;
+        match self.open_project(path, true, cx) {
+            Ok(ix) => self.activate(ix, window, cx),
+            Err(error) => window.push_notification(
+                Notification::warning("Could not open repository")
+                    .message(format!("{error}. It was removed from the recent list.")),
+                cx,
+            ),
+        }
+    }
+
+    /// Forget a recent entry. Scan-directory entries cannot be removed here.
+    pub(crate) fn forget_recent(
+        &mut self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui_kit::component::WindowExt as _;
+        self.state.forget_recent(path);
+        self.save_state();
+        window.push_notification(
+            format!("Removed {} from recents", crate::format::tilde(path)),
+            cx,
+        );
+        cx.notify();
     }
 
     pub(crate) fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -400,26 +448,22 @@ impl Osier {
         window.set_window_title(&title);
     }
 
-    pub(crate) fn prompt_open_repository(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn prompt_open_repository(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
             prompt: Some("Open repository".into()),
         });
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else {
                 return;
             };
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let _ = this.update(cx, |this, cx| {
-                if let Some(ix) = this.open_project(&path, true, cx) {
-                    this.active = Some(ix);
-                    this.reload_selection(cx);
-                    cx.notify();
-                }
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.open_project_notify(&path, window, cx);
             });
         })
         .detach();
@@ -810,9 +854,9 @@ impl Render for Osier {
             .key_context("Osier")
             .on_action(|_: &Quit, _, cx| cx.quit())
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh_active(cx)))
-            .on_action(
-                cx.listener(|this, _: &OpenRepository, _, cx| this.prompt_open_repository(cx)),
-            )
+            .on_action(cx.listener(|this, _: &OpenRepository, window, cx| {
+                this.prompt_open_repository(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &CloseProject, window, cx| {
                 if let Some(ix) = this.active {
                     this.close_project(ix, window, cx);
@@ -1089,6 +1133,48 @@ mod tests {
                 .map(|l| l.text.as_str())
                 .collect();
             assert_eq!(added, ["TEN"], "only the second hunk is staged");
+        });
+    }
+
+    #[gpui::test]
+    fn closing_projects_and_recents(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let other = TempRepo::new();
+        other.commit_file("b.txt", "two\n", "first");
+        let h = Harness::open(cx, &repo);
+
+        // Open a second project, close the first: the second stays active, the first is recent.
+        let other_path = other.path().to_path_buf();
+        h.act(cx, |osier, window, cx| {
+            osier.open_project_notify(&other_path, window, cx)
+        });
+        h.read(cx, |osier, _| assert_eq!(osier.projects.len(), 2));
+        h.act(cx, |osier, window, cx| osier.close_project(0, window, cx));
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.projects.len(), 1);
+            assert_eq!(osier.active_project().unwrap().path, other.path());
+            assert_eq!(osier.state.recent_not_open().count(), 1);
+        });
+
+        // Forget the recent entry.
+        let gone = repo.path().to_path_buf();
+        h.act(cx, |osier, window, cx| {
+            osier.forget_recent(&gone, window, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.state.recent_not_open().count(), 0)
+        });
+
+        // A path that is not a repository fails cleanly and is not kept anywhere.
+        let not_repo = tempfile::tempdir().unwrap();
+        let p = not_repo.path().to_path_buf();
+        h.act(cx, |osier, _, cx| {
+            assert!(osier.open_project(&p, true, cx).is_err());
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.projects.len(), 1);
+            assert!(!osier.state.recent.contains(&p));
         });
     }
 }

@@ -1,5 +1,6 @@
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
 };
@@ -13,6 +14,7 @@ use crate::format::tilde;
 
 impl Osier {
     pub(crate) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let weak = cx.entity().downgrade();
         let mut open = SidebarMenu::new();
         for (ix, project) in self.projects.iter().enumerate() {
             let changes = project
@@ -21,22 +23,54 @@ impl Osier {
                 .map(|s| s.status.entries.len())
                 .unwrap_or(0);
             let loading = project.loading;
-            let mut item = SidebarMenuItem::new(project.name.clone())
+            let close_weak = weak.clone();
+            let menu_weak = weak.clone();
+            let path = project.path.clone();
+            let item = SidebarMenuItem::new(project.name.clone())
                 .icon(Lucide::FolderGit2)
                 .active(self.active == Some(ix))
-                .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)));
-            if changes > 0 || loading {
-                item = item.suffix(move |_, _| {
-                    if loading {
-                        Tag::secondary().xsmall().child("…").into_any_element()
-                    } else {
-                        Tag::secondary()
-                            .xsmall()
-                            .child(changes.to_string())
-                            .into_any_element()
-                    }
+                .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
+                .suffix(move |_, _| {
+                    let close_weak = close_weak.clone();
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .when(loading, |this| {
+                            this.child(Tag::secondary().xsmall().child("…"))
+                        })
+                        .when(changes > 0 && !loading, |this| {
+                            this.child(Tag::secondary().xsmall().child(changes.to_string()))
+                        })
+                        .child(
+                            // The kit's sidebar item owns its hover state, so the close button
+                            // stays visible but unobtrusive (ghost, muted).
+                            Button::new(("close-project", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::X)
+                                .tooltip("Close project (ctrl-w)")
+                                .on_click(move |_, window, cx| {
+                                    let _ = close_weak
+                                        .update(cx, |this, cx| this.close_project(ix, window, cx));
+                                }),
+                        )
+                        .into_any_element()
+                })
+                .context_menu(move |menu, _, _| {
+                    let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
+                    let p = path.clone();
+                    menu.item(
+                        PopupMenuItem::new("Close project").on_click(move |_, window, cx| {
+                            let _ = w1.update(cx, |this, cx| this.close_project(ix, window, cx));
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                            let p = p.to_string_lossy().into_owned();
+                            let _ = w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                        }),
+                    )
                 });
-            }
             open = open.child(item);
         }
 
@@ -47,14 +81,38 @@ impl Osier {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let p = path.clone();
-            recent = recent.child(SidebarMenuItem::new(name).icon(Lucide::Folder).on_click(
-                cx.listener(move |this, _, window, cx| {
-                    if let Some(ix) = this.open_project(&p, true, cx) {
-                        this.activate(ix, window, cx);
-                    }
-                }),
-            ));
+            let missing = !path.is_dir();
+            let open_path = path.clone();
+            let menu_weak = weak.clone();
+            let menu_path = path.clone();
+            recent = recent.child(
+                SidebarMenuItem::new(name)
+                    .icon(if missing {
+                        Lucide::FolderX
+                    } else {
+                        Lucide::Folder
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_project_notify(&open_path, window, cx);
+                    }))
+                    .context_menu(move |menu, _, _| {
+                        let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
+                        let (p1, p2) = (menu_path.clone(), menu_path.clone());
+                        menu.item(PopupMenuItem::new("Remove from recents").on_click(
+                            move |_, window, cx| {
+                                let _ =
+                                    w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
+                            },
+                        ))
+                        .item(
+                            PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                                let p = p2.to_string_lossy().into_owned();
+                                let _ =
+                                    w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                            }),
+                        )
+                    }),
+            );
         }
         let has_recent = self.state.recent_not_open().next().is_some();
 
@@ -123,7 +181,9 @@ impl Osier {
                                 .icon(Lucide::FolderPlus)
                                 .label("Open repository")
                                 .tooltip("Open a repository (ctrl-o)")
-                                .on_click(cx.listener(|this, _, _, cx| this.prompt_open_repository(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.prompt_open_repository(window, cx)
+                                })),
                         ),
                 ),
             )
