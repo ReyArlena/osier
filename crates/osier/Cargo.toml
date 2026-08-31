@@ -43,5 +43,11 @@ osier-config.workspace = true
 osier-theme.workspace = true
 osier-auth.workspace = true
 
+[dev-dependencies]
+# gpui's own test harness, on the exact snapshot gpui-kit pins. Not gpui-kit's `test-support`
+# feature: that one drags in gpui-fast with conflicting pins.
+gpui-pre = { version = "=0.3.11", features = ["test-support"] }
+tempfile = "3"
+
 [lints]
 workspace = true

@@ -879,3 +879,216 @@ impl Render for Osier {
             .child(self.render_status_bar(has_project, cx))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    // `gpui-pre` publishes its library as `gpui`, the same crate gpui-kit re-exports, so the
+    // `#[gpui::test]` macro's `gpui::` paths resolve. No glob imports here: `gpui_kit::*`
+    // also exports a `gpui` module, which would make the name ambiguous.
+    use gpui::TestAppContext;
+    use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, WindowOptions};
+    use osier_config::{Paths, Settings, State};
+    use osier_git::GitRunner;
+    use osier_git::testing::TempRepo;
+
+    use super::{Osier, init};
+    use crate::command_log::UiCommandSink;
+    use crate::project::{Area, Selection};
+
+    fn isolated(sink: Arc<UiCommandSink>) -> GitRunner {
+        GitRunner::new(sink)
+            .with_env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .with_env("GIT_CONFIG_NOSYSTEM", "1")
+            .with_env("HOME", std::env::temp_dir())
+    }
+
+    struct Harness {
+        _dirs: tempfile::TempDir,
+        window: AnyWindowHandle,
+        view: Entity<Osier>,
+    }
+
+    impl Harness {
+        fn open(cx: &mut TestAppContext, repo: &TempRepo) -> Self {
+            cx.update(gpui_kit::init);
+            cx.update(init);
+            let dirs = tempfile::tempdir().expect("tempdir");
+            let paths = Paths::under(dirs.path());
+            let sink = Arc::new(UiCommandSink::default());
+            let runner = isolated(sink.clone());
+            let open = Some(repo.path().to_path_buf());
+            let (handle, view) = cx.update(|cx| {
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| {
+                        Osier::new(
+                            paths,
+                            Settings::default(),
+                            State::default(),
+                            runner,
+                            sink,
+                            open,
+                            None,
+                            window,
+                            cx,
+                        )
+                    })
+                })
+                .expect("window")
+            });
+            cx.run_until_parked();
+            Self {
+                _dirs: dirs,
+                window: handle,
+                view,
+            }
+        }
+
+        /// Run `f` with the window, like a click handler would.
+        fn act(
+            &self,
+            cx: &mut TestAppContext,
+            f: impl FnOnce(&mut Osier, &mut gpui::Window, &mut gpui::Context<Osier>),
+        ) {
+            let view = self.view.clone();
+            cx.update_window(self.window, |_, window, cx| {
+                view.update(cx, |osier, cx| f(osier, window, cx));
+            })
+            .expect("window alive");
+            cx.run_until_parked();
+        }
+
+        fn read<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Osier, &gpui::App) -> R) -> R {
+            cx.update(|cx| f(self.view.read(cx), cx))
+        }
+    }
+
+    #[gpui::test]
+    fn opens_a_repository_and_selects_the_first_change(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.write("a.txt", "two\n");
+        repo.write("new.txt", "new\n");
+        let h = Harness::open(cx, &repo);
+
+        h.read(cx, |osier, _| {
+            let project = osier.active_project().expect("active project");
+            let snapshot = project.snapshot.as_ref().expect("snapshot loaded");
+            assert_eq!(snapshot.status.unstaged().count(), 1);
+            assert_eq!(snapshot.status.untracked().count(), 1);
+            assert_eq!(snapshot.commits.len(), 1);
+            assert_eq!(
+                project.selection,
+                Selection::File {
+                    path: "a.txt".into(),
+                    area: Area::Unstaged
+                }
+            );
+            assert_eq!(osier.diff_files, 1, "diff pane shows the selected file");
+            assert_eq!(osier.diff_model.len(), 1, "hunk model parsed");
+            assert!(osier.state.open_projects.contains(&project.path));
+        });
+
+        // Keyboard navigation moves to the next change and reloads the diff.
+        h.act(cx, |osier, _, cx| osier.move_selection(1, cx));
+        h.read(cx, |osier, _| {
+            assert_eq!(
+                osier.active_project().expect("project").selection,
+                Selection::File {
+                    path: "new.txt".into(),
+                    area: Area::Untracked
+                }
+            );
+            assert_eq!(osier.diff_files, 1);
+        });
+    }
+
+    #[gpui::test]
+    fn staging_and_committing_through_the_app(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.write("a.txt", "two\n");
+        let h = Harness::open(cx, &repo);
+
+        h.act(cx, |osier, window, cx| {
+            osier.stage_paths(vec!["a.txt".into()], window, cx)
+        });
+        h.read(cx, |osier, _| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status.staged().count(),
+                1,
+                "file staged via the app"
+            );
+            assert_eq!(snapshot.status.unstaged().count(), 0);
+        });
+
+        h.act(cx, |osier, window, cx| {
+            osier.set_message("From the headless test", window, cx);
+            assert!(osier.can_commit(cx));
+            osier.commit(window, cx);
+        });
+        h.read(cx, |osier, cx| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.commits.len(), 2);
+            assert_eq!(snapshot.commits[0].subject, "From the headless test");
+            assert!(snapshot.status.is_clean());
+            assert!(
+                osier.commit_message_text(cx).is_empty(),
+                "message cleared after commit"
+            );
+        });
+        assert_eq!(repo.git(["log", "--oneline"]).lines().count(), 2);
+    }
+
+    #[gpui::test]
+    fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        let base = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n";
+        repo.commit_file("f.txt", base, "base");
+        repo.write(
+            "f.txt",
+            "ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nTEN\n",
+        );
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.diff_model[0].hunks.len(), 2)
+        });
+
+        h.act(cx, |osier, window, cx| {
+            osier.hunk_action(
+                "f.txt".into(),
+                1,
+                crate::hunk_ops::HunkAction::Stage,
+                window,
+                cx,
+            )
+        });
+        h.read(cx, |osier, _| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            let f = snapshot
+                .status
+                .entries
+                .iter()
+                .find(|e| e.path == "f.txt")
+                .unwrap();
+            assert!(f.is_staged() && f.is_unstaged(), "partially staged");
+        });
+        // Staged side shows exactly the second hunk.
+        h.act(cx, |osier, _, cx| {
+            osier.select_file("f.txt".into(), Area::Staged, cx)
+        });
+        h.read(cx, |osier, _| {
+            let hunks = &osier.diff_model[0].hunks;
+            assert_eq!(hunks.len(), 1);
+            let added: Vec<&str> = hunks[0]
+                .lines
+                .iter()
+                .filter(|l| l.kind == osier_git::diff::LineKind::Added)
+                .map(|l| l.text.as_str())
+                .collect();
+            assert_eq!(added, ["TEN"], "only the second hunk is staged");
+        });
+    }
+}

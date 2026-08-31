@@ -1,5 +1,7 @@
 //! Osier: fast native git GUI.
 
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod actions;
 mod app;
 mod changes_ops;
