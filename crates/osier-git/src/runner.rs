@@ -358,8 +358,21 @@ fn classify(status: i32, record: CommandRecord, stdout: &str) -> GitError {
         || has("terminal prompts disabled")
     {
         GitError::AuthRequired(Box::new(record))
-    } else if has("non-fast-forward") || has("fetch first") || has("stale info") {
+    } else if has("non-fast-forward")
+        || has("fetch first")
+        || has("stale info")
+        || has("Not possible to fast-forward")
+        || has("cannot fast-forward")
+    {
         GitError::NonFastForward(Box::new(record))
+    } else if has("Could not resolve host")
+        || has("Connection refused")
+        || has("Connection timed out")
+        || has("unable to access")
+        || has("Could not read from remote repository")
+        || has("Network is unreachable")
+    {
+        GitError::Network(Box::new(record))
     } else if has("CONFLICT (")
         || has("Automatic merge failed")
         || has("could not apply")
@@ -429,5 +442,304 @@ mod tests {
             Err(GitError::NotARepo(_)) => {}
             other => panic!("unexpected: {other:?}"),
         }
+    }
+}
+
+// ----- streaming execution with progress and cancellation -----
+
+/// Shared flag a long operation polls; set it to kill the git process.
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// One line of progress from git's stderr (`--progress`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    /// `Receiving objects`, `Compressing objects`, `remote: Counting objects`, ...
+    pub phase: String,
+    pub percent: Option<u8>,
+    pub line: String,
+}
+
+impl Progress {
+    /// Parse a stderr line. Returns `None` for lines that are not progress.
+    pub fn parse(line: &str) -> Option<Self> {
+        let line = line.trim();
+        let (phase, rest) = line.rsplit_once(':')?;
+        let rest = rest.trim_start();
+        let percent = rest
+            .split('%')
+            .next()
+            .and_then(|p| p.trim().parse::<u8>().ok());
+        if percent.is_none() && !rest.contains("done") {
+            return None;
+        }
+        Some(Self {
+            phase: phase.trim().to_string(),
+            percent,
+            line: line.to_string(),
+        })
+    }
+}
+
+impl GitRunner {
+    /// Run git, forwarding stderr lines to `on_line` as they arrive (progress lives there),
+    /// and killing the process when `cancel` fires. Succeeds only on exit 0.
+    pub fn run_streaming<I, S>(
+        &self,
+        repo: Option<&Path>,
+        args: I,
+        cancel: Option<CancelToken>,
+        mut on_line: impl FnMut(&str) + Send + 'static,
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut argv: Vec<String> = vec![self.git.to_string_lossy().into_owned()];
+        let mut cmd = Command::new(&self.git);
+        if let Some(repo) = repo {
+            cmd.arg("-C").arg(repo);
+            argv.push("-C".into());
+            argv.push(repo.to_string_lossy().into_owned());
+        }
+        cmd.arg("--no-pager");
+        argv.push("--no-pager".into());
+        for pair in ["color.ui=never", "core.quotePath=false"] {
+            cmd.arg("-c").arg(pair);
+            argv.push("-c".into());
+            argv.push(pair.into());
+        }
+        for a in args {
+            let a = a.as_ref();
+            argv.push(a.to_string_lossy().into_owned());
+            cmd.arg(a);
+        }
+        for key in &self.env_remove {
+            cmd.env_remove(key);
+        }
+        cmd.envs(&self.env);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let started = SystemTime::now();
+        let clock = Instant::now();
+        tracing::debug!(id, argv = %redact(&argv).join(" "), "git (streaming)");
+
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                GitError::GitNotFound(self.git.to_string_lossy().into_owned())
+            } else {
+                GitError::Io(e)
+            }
+        })?;
+
+        // Reader threads write into shared buffers and are never joined after a kill: an
+        // orphaned child (ssh, a remote helper) can keep the pipe open for a while.
+        let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let stderr_buf: Arc<Mutex<String>> = Arc::default();
+        let mut stdout_pipe = child.stdout.take();
+        let stdout_thread = {
+            let buf = stdout_buf.clone();
+            std::thread::spawn(move || {
+                let mut local = Vec::new();
+                if let Some(p) = stdout_pipe.as_mut() {
+                    let _ = p.read_to_end(&mut local);
+                }
+                if let Ok(mut b) = buf.lock() {
+                    *b = local;
+                }
+            })
+        };
+        let stderr_pipe = child.stderr.take();
+        let stderr_thread = {
+            let buf = stderr_buf.clone();
+            std::thread::spawn(move || {
+                // Progress updates are separated by `\r`, final lines by `\n`.
+                let Some(mut pipe) = stderr_pipe else {
+                    return;
+                };
+                let mut current = Vec::new();
+                let mut byte = [0u8; 1];
+                let mut flush = |current: &mut Vec<u8>| {
+                    if current.is_empty() {
+                        return;
+                    }
+                    let line = String::from_utf8_lossy(current).into_owned();
+                    on_line(&line);
+                    if let Ok(mut all) = buf.lock()
+                        && all.len() < STDERR_CAP
+                    {
+                        all.push_str(&line);
+                        all.push('\n');
+                    }
+                    current.clear();
+                };
+                loop {
+                    match pipe.read(&mut byte) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => match byte[0] {
+                            b'\r' | b'\n' => flush(&mut current),
+                            b => current.push(b),
+                        },
+                    }
+                }
+                flush(&mut current);
+            })
+        };
+
+        let deadline = Instant::now() + self.timeout;
+        let mut cancelled = false;
+        let status = loop {
+            if let Some(s) = child.try_wait()? {
+                break s.code();
+            }
+            if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+                cancelled = true;
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        };
+        if status.is_some() {
+            let _ = stdout_thread.join();
+            let _ = stderr_thread.join();
+        }
+        let stdout = stdout_buf.lock().map(|b| b.clone()).unwrap_or_default();
+        let stderr = stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+
+        let record = CommandRecord {
+            id,
+            argv: redact(&argv),
+            cwd: repo.map(Path::to_path_buf),
+            started,
+            duration: clock.elapsed(),
+            status,
+            expected: status == Some(0),
+            stdout_len: stdout.len(),
+            stderr,
+        };
+        self.sink.record(&record);
+        match status {
+            Some(0) => Ok(Output { record, stdout }),
+            Some(s) => Err(classify_with_stdout(s, record, &stdout)),
+            None if cancelled => Err(GitError::Cancelled(Box::new(record))),
+            None => Err(GitError::timeout(self.timeout.as_secs(), record)),
+        }
+    }
+}
+
+fn classify_with_stdout(status: i32, record: CommandRecord, stdout: &[u8]) -> GitError {
+    let head = String::from_utf8_lossy(&stdout[..stdout.len().min(STDERR_CAP)]).into_owned();
+    classify(status, record, &head)
+}
+
+/// Hide credential material that may appear in argv (`credential.helper=... --token ...`).
+fn redact(argv: &[String]) -> Vec<String> {
+    argv.iter()
+        .map(|a| {
+            if let Some((k, _)) = a.split_once('=')
+                && (k.ends_with("password") || k.ends_with("token") || k.contains("askpass"))
+            {
+                format!("{k}=<redacted>")
+            } else {
+                a.clone()
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn parses_progress_lines() {
+        let p = Progress::parse("Receiving objects:  45% (10/22), 1.2 MiB | 3 MiB/s").unwrap();
+        assert_eq!(p.phase, "Receiving objects");
+        assert_eq!(p.percent, Some(45));
+        let p = Progress::parse("remote: Counting objects: 100% (4/4), done.").unwrap();
+        assert_eq!(p.phase, "remote: Counting objects");
+        assert_eq!(p.percent, Some(100));
+        assert!(Progress::parse("From /tmp/bare.git").is_none());
+        assert!(Progress::parse(" * [new branch]      main -> origin/main").is_none());
+        assert_eq!(
+            Progress::parse("remote: Enumerating objects: 4, done.").map(|p| p.percent),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn streaming_delivers_stderr_lines_and_succeeds() {
+        let sink = MemorySink::new();
+        let runner = GitRunner::new(sink.clone());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s2 = seen.clone();
+        // `git --version` prints nothing on stderr; a bad option prints usage there.
+        let out = runner.run_streaming(None, ["--version"], None, move |l| {
+            s2.lock().unwrap().push(l.to_string());
+        });
+        assert!(out.is_ok());
+        assert!(seen.lock().unwrap().is_empty());
+        let err = runner.run_streaming(None, ["--definitely-not-an-option"], None, move |l| {
+            seen.lock().unwrap().push(l.to_string());
+        });
+        assert!(matches!(err, Err(GitError::Failed { .. })));
+    }
+
+    #[test]
+    fn cancel_kills_the_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("git");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 10\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = GitRunner::default().with_git(&fake);
+        let cancel = CancelToken::new();
+        let c2 = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            c2.cancel();
+        });
+        let started = Instant::now();
+        let r = runner.run_streaming(None, ["fetch"], Some(cancel), |_| {});
+        assert!(matches!(r, Err(GitError::Cancelled(_))), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn argv_redaction_hides_secrets() {
+        let argv = vec![
+            "git".to_string(),
+            "-c".into(),
+            "http.extraHeader=x".into(),
+            "-c".into(),
+            "credential.password=abc".into(),
+        ];
+        let r = redact(&argv);
+        assert_eq!(r[4], "credential.password=<redacted>");
+        assert_eq!(r[2], "http.extraHeader=x");
     }
 }

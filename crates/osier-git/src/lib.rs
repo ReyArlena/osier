@@ -29,7 +29,9 @@ pub mod version;
 
 pub use error::{GitError, Result};
 pub use repo::Repository;
-pub use runner::{CommandRecord, CommandSink, GitRunner, MemorySink, NoopSink};
+pub use runner::{
+    CancelToken, CommandRecord, CommandSink, GitRunner, MemorySink, NoopSink, Progress,
+};
 pub use version::GitVersion;
 
 pub mod ops;

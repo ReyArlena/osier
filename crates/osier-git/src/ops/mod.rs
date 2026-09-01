@@ -9,6 +9,7 @@ pub mod branch;
 pub mod commit;
 pub mod discard;
 pub mod patch;
+pub mod remote;
 pub mod reset;
 pub mod stage;
 pub mod stash;

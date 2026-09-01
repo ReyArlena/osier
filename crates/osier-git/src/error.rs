@@ -40,6 +40,12 @@ pub enum GitError {
     #[error("invalid reference name: {0}")]
     InvalidRefName(String),
 
+    #[error("remote unreachable")]
+    Network(Box<CommandRecord>),
+
+    #[error("cancelled")]
+    Cancelled(Box<CommandRecord>),
+
     #[error("git exited with status {status}")]
     Failed {
         status: i32,
@@ -95,7 +101,9 @@ impl GitError {
             | Self::NonFastForward(r)
             | Self::Conflict(r)
             | Self::Dirty(r)
-            | Self::BranchNotMerged(r) => Some(r),
+            | Self::BranchNotMerged(r)
+            | Self::Network(r)
+            | Self::Cancelled(r) => Some(r),
             Self::Failed { record, .. } | Self::Timeout { record, .. } => Some(record),
             _ => None,
         }
