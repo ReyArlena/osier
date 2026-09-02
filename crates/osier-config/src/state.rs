@@ -20,6 +20,10 @@ pub struct State {
     pub window: Option<WindowGeometry>,
     /// Recent commit messages per repository path, newest first.
     pub commit_messages: std::collections::BTreeMap<String, Vec<String>>,
+    /// GitHub (gh) account chosen per repository path ("always use for this project").
+    pub accounts: std::collections::BTreeMap<String, String>,
+    /// Pull strategy remembered per repository path: `merge` or `rebase`.
+    pub pull_strategies: std::collections::BTreeMap<String, String>,
     #[serde(flatten)]
     pub extra: toml::Table,
 }

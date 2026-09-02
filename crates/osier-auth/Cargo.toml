@@ -6,13 +6,14 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Osier auth layer"
+description = "Osier account discovery (gh, ssh) and credential plumbing"
 publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [lints]

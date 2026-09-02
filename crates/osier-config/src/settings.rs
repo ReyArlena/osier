@@ -14,6 +14,7 @@ pub struct Settings {
     pub projects: Projects,
     pub diff: Diff,
     pub git: Git,
+    pub auth: Auth,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -119,6 +120,24 @@ impl Default for Git {
         Self {
             log_page_size: 500,
             show_command_log: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Auth {
+    /// Default gh account per host, used when a project has no choice recorded.
+    pub default_accounts: std::collections::BTreeMap<String, String>,
+    /// Route ssh and git prompts to Osier's own askpass window.
+    pub askpass: bool,
+}
+
+impl Default for Auth {
+    fn default() -> Self {
+        Self {
+            default_accounts: Default::default(),
+            askpass: true,
         }
     }
 }

@@ -4,7 +4,9 @@
 
 mod actions;
 mod app;
+mod askpass;
 mod changes_ops;
+mod cli;
 mod command_log;
 mod format;
 mod graph;
@@ -64,10 +66,36 @@ pub(crate) fn apply_theme(name: &str, cx: &mut App) -> bool {
 }
 
 fn main() {
+    let mode = cli::parse(std::env::args().skip(1));
+    let open_arg: Option<PathBuf> = match mode {
+        cli::Mode::Gui(path) => path,
+        cli::Mode::CredentialHelper {
+            account,
+            host,
+            operation,
+        } => {
+            std::process::exit(cli::run_credential_helper(&account, &host, &operation));
+        }
+        cli::Mode::Askpass(prompt) => {
+            init_logging();
+            let code = askpass::run(prompt);
+            std::process::exit(if code == std::process::ExitCode::SUCCESS {
+                0
+            } else {
+                1
+            });
+        }
+        cli::Mode::Version => {
+            println!("osier {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        cli::Mode::Help => {
+            println!("{}", cli::HELP);
+            return;
+        }
+    };
     init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting osier");
-
-    let open_arg: Option<PathBuf> = std::env::args_os().nth(1).map(PathBuf::from);
 
     let paths = match osier_config::Paths::discover() {
         Ok(p) => p,
