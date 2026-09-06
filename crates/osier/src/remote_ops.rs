@@ -506,7 +506,7 @@ impl Osier {
 
     fn prompt_set_upstream_and_push(
         &mut self,
-        mut options: PushOptions,
+        options: PushOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
