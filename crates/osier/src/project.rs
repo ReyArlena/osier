@@ -10,7 +10,7 @@ use notify::{RecursiveMode, Watcher};
 use osier_git::config::Identity;
 use osier_git::graph::GraphRow;
 use osier_git::log::{Commit, LogOptions};
-use osier_git::refs::Branch;
+use osier_git::refs::{Branch, Remote};
 use osier_git::repo::InProgress;
 use osier_git::stash::StashEntry;
 use osier_git::status::{RepoStatus, StatusOptions};
@@ -24,6 +24,7 @@ pub struct Snapshot {
     pub commits: Vec<Commit>,
     pub graph: Vec<GraphRow>,
     pub stashes: Vec<StashEntry>,
+    pub remotes: Vec<Remote>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -229,6 +230,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
     .map_err(|e| format!("log: {e}"))?;
     let graph = osier_git::graph::layout(&commits);
     let stashes = osier_git::stash::list(repo).map_err(|e| format!("stash: {e}"))?;
+    let remotes = osier_git::refs::remotes(repo).map_err(|e| format!("remotes: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     Ok(Snapshot {
         status,
@@ -236,6 +238,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
         commits,
         graph,
         stashes,
+        remotes,
         identity,
         in_progress: repo.in_progress(),
     })

@@ -15,7 +15,7 @@ pub mod ssh;
 use std::path::Path;
 
 pub use gh::GhAccount;
-pub use remote::RemoteKind;
+pub use remote::{RemoteKind, classify_url};
 pub use ssh::SshStatus;
 
 #[derive(Debug, thiserror::Error)]

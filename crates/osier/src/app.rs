@@ -35,6 +35,9 @@ gpui_kit::actions!(
         SelectNext,
         SelectPrev,
         CommitStaged,
+        Fetch,
+        Pull,
+        Push,
     ]
 );
 
@@ -53,6 +56,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-3", TabBranches, None),
         KeyBinding::new("ctrl-4", TabStashes, None),
         KeyBinding::new("ctrl-enter", CommitStaged, None),
+        KeyBinding::new("ctrl-shift-f", Fetch, None),
+        KeyBinding::new("ctrl-shift-l", Pull, None),
+        KeyBinding::new("ctrl-shift-p", Push, None),
         KeyBinding::new("down", SelectNext, Some("OsierList")),
         KeyBinding::new("up", SelectPrev, Some("OsierList")),
         KeyBinding::new("j", SelectNext, Some("OsierList")),
@@ -120,6 +126,12 @@ pub struct Osier {
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
     state_dirty: bool,
+    /// Running fetch/pull/push, if any.
+    pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
+    /// gh accounts discovered at startup (no tokens).
+    pub(crate) gh_accounts: Vec<osier_auth::GhAccount>,
+    /// Projects whose account choice was "this time only" (not written to state on save).
+    pub(crate) session_only_accounts: std::collections::BTreeSet<String>,
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
@@ -197,6 +209,9 @@ impl Osier {
             diff_force_large: false,
             list_focus: cx.focus_handle(),
             state_dirty: false,
+            remote_job: None,
+            gh_accounts: Vec::new(),
+            session_only_accounts: Default::default(),
             diff_task: Task::ready(()),
             _subscriptions: vec![message_subscription],
         };
@@ -257,6 +272,7 @@ impl Osier {
         }
         this.update_title(window);
         this.start_watcher_loop(cx);
+        this.load_gh_accounts(cx);
         this
     }
 
@@ -302,11 +318,18 @@ impl Osier {
     }
 
     pub(crate) fn save_state(&mut self) {
+        // Session-only account choices stay in memory.
+        let mut snapshot = self.state.clone();
+        for key in &self.session_only_accounts {
+            snapshot.accounts.remove(key);
+        }
         self.state.layout.sidebar_visible = self.sidebar_visible;
+        snapshot.layout.sidebar_visible = self.sidebar_visible;
         if !self.command_log_from_env {
             self.state.layout.command_log_visible = self.command_log_visible;
+            snapshot.layout.command_log_visible = self.command_log_visible;
         }
-        if let Err(error) = self.state.save(&self.paths) {
+        if let Err(error) = snapshot.save(&self.paths) {
             tracing::warn!(%error, "could not save state");
         }
     }
@@ -576,6 +599,9 @@ impl Osier {
                     if this.state_dirty {
                         this.state_dirty = false;
                         this.save_state();
+                    }
+                    if this.poll_remote_job() {
+                        cx.notify();
                     }
                     // The command log panel shows new records as they land.
                     let version = this.sink.version();
@@ -870,6 +896,15 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
             .on_action(cx.listener(|this, _: &TabStashes, _, cx| this.set_tab(Tab::Stashes, cx)))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
+            .on_action(cx.listener(|this, _: &Fetch, window, cx| {
+                this.start_remote(crate::remote_ops::RemoteOp::fetch_all(), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &Pull, window, cx| {
+                this.start_remote(crate::remote_ops::RemoteOp::pull_default(), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &Push, window, cx| {
+                this.start_remote(crate::remote_ops::RemoteOp::push_default(), window, cx)
+            }))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_selection(-1, cx)))
             .size_full()
@@ -1175,6 +1210,78 @@ mod tests {
         h.read(cx, |osier, _| {
             assert_eq!(osier.projects.len(), 1);
             assert!(!osier.state.recent.contains(&p));
+        });
+    }
+
+    #[gpui::test]
+    fn push_fetch_and_pull_through_the_app(cx: &mut TestAppContext) {
+        use crate::remote_ops::RemoteOp;
+        use osier_git::ops::remote::PushOptions;
+
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let bare = repo.add_bare_origin();
+        let h = Harness::open(cx, &repo);
+
+        // Push and set upstream.
+        h.act(cx, |osier, window, cx| {
+            osier.start_remote(
+                RemoteOp::Push(PushOptions {
+                    remote: Some("origin".into()),
+                    set_upstream: true,
+                    ..Default::default()
+                }),
+                window,
+                cx,
+            )
+        });
+        h.read(cx, |osier, _| {
+            assert!(osier.remote_job.is_none(), "job finished");
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status.branch.upstream.as_deref(),
+                Some("origin/main")
+            );
+            assert_eq!(snapshot.remotes.len(), 1);
+        });
+
+        // Someone else pushes; fetch shows us behind; pull fast-forwards.
+        let other = TempRepo::new();
+        other.git(["remote", "add", "origin", bare.to_string_lossy().as_ref()]);
+        other.git(["fetch", "-q", "origin"]);
+        other.git(["checkout", "-q", "-b", "main", "origin/main"]);
+        other.commit_file("b.txt", "two\n", "second");
+        other.git(["push", "-q", "origin", "main"]);
+
+        h.act(cx, |osier, window, cx| {
+            osier.start_remote(RemoteOp::fetch_all(), window, cx)
+        });
+        h.read(cx, |osier, _| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.status.branch.behind, 1);
+        });
+        h.act(cx, |osier, window, cx| {
+            osier.start_remote(RemoteOp::pull_default(), window, cx)
+        });
+        h.read(cx, |osier, _| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.status.branch.behind, 0);
+            assert_eq!(snapshot.commits.len(), 2);
+        });
+        assert!(repo.path().join("b.txt").exists());
+
+        // Session-only account choices never reach state.toml.
+        h.act(cx, |osier, _, _| {
+            osier.set_project_account("/tmp/x", "alice", false);
+            osier.save_state();
+        });
+        h.read(cx, |osier, _| {
+            let saved = osier_config::State::load(&osier.paths).unwrap();
+            assert!(!saved.accounts.contains_key("/tmp/x"));
+            assert_eq!(
+                osier.state.accounts.get("/tmp/x").map(String::as_str),
+                Some("alice")
+            );
         });
     }
 }

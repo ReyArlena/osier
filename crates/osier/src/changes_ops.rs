@@ -80,6 +80,37 @@ impl Osier {
         );
     }
 
+    /// Commit, then push the current branch.
+    pub(crate) fn commit_and_push(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.can_commit(cx) {
+            return;
+        }
+        let message = self.commit_message_text(cx);
+        let options = CommitOptions {
+            message: message.clone(),
+            amend: self.amend,
+            signoff: self.signoff,
+            ..Default::default()
+        };
+        let subject = message.lines().next().unwrap_or("").to_string();
+        if let Some(p) = self.active_project() {
+            let path = p.path.clone();
+            self.state.push_commit_message(&path, &message);
+            self.save_state();
+        }
+        self.set_message("", window, cx);
+        self.amend = false;
+        self.run_op_then(
+            format!("Committed: {subject}"),
+            move |repo| commit_ops::commit(repo, &options).map(|_| ()),
+            |this, window, cx| {
+                this.start_remote(crate::remote_ops::RemoteOp::push_default(), window, cx)
+            },
+            window,
+            cx,
+        );
+    }
+
     pub(crate) fn stage_paths(
         &mut self,
         paths: Vec<String>,

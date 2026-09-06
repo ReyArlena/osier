@@ -13,6 +13,7 @@ mod graph;
 mod hunk_ops;
 mod ops;
 mod project;
+mod remote_ops;
 mod views;
 
 use std::path::PathBuf;

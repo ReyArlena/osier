@@ -42,6 +42,20 @@ impl Osier {
     ) where
         F: FnOnce(&Repository) -> osier_git::Result<()> + Send + 'static,
     {
+        self.run_op_then(summary, op, |_, _, _| {}, window, cx);
+    }
+
+    /// Like [`run_op`](Self::run_op); `then` runs after a successful operation.
+    pub(crate) fn run_op_then<F>(
+        &mut self,
+        summary: impl Into<String>,
+        op: F,
+        then: impl FnOnce(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        F: FnOnce(&Repository) -> osier_git::Result<()> + Send + 'static,
+    {
         let Some(project) = self.active_project() else {
             return;
         };
@@ -77,6 +91,9 @@ impl Osier {
                 }
                 if let Some(ix) = this.projects.iter().position(|p| p.path == path) {
                     this.refresh_project(ix, cx);
+                }
+                if result.is_ok() {
+                    then(this, window, cx);
                 }
                 cx.notify();
             });

@@ -333,8 +333,11 @@ impl Osier {
                                     .outline()
                                     .small()
                                     .label("Commit and Push")
-                                    .disabled(true)
-                                    .tooltip("Push is not available yet"),
+                                    .disabled(!can_commit || self.remote_job.is_some())
+                                    .tooltip("Commit, then push the current branch")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.commit_and_push(window, cx)
+                                    })),
                             )
                             .child(
                                 Button::new("commit")

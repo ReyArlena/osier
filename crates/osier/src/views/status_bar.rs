@@ -1,4 +1,5 @@
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::status_bar::StatusBar;
@@ -67,7 +68,31 @@ impl Osier {
                     .when_some(in_progress, |this, op| {
                         this.child(Tag::warning().xsmall().child(op))
                     })
-                    .when(loading, |this| {
+                    .when_some(self.remote_job.as_ref(), |this, job| {
+                        let text = match job.percent {
+                            Some(p) => format!("{}: {} {p}%", job.label, job.phase),
+                            None => format!("{}: {}", job.label, job.phase),
+                        };
+                        this.child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(Spinner::new().xsmall())
+                                .child(div().truncate().max_w(px(360.)).child(text))
+                                .child(
+                                    Button::new("cancel-remote")
+                                        .ghost()
+                                        .xsmall()
+                                        .label("Cancel")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.cancel_remote_job(cx)
+                                            }),
+                                        ),
+                                ),
+                        )
+                    })
+                    .when(loading && self.remote_job.is_none(), |this| {
                         this.child(
                             h_flex()
                                 .gap_1()
