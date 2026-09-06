@@ -49,6 +49,12 @@ pub fn checkout_detached(repo: &Repository, rev: &str) -> Result<()> {
     Ok(())
 }
 
+/// Point `branch` at `upstream` (e.g. `origin/main`) without pushing.
+pub fn set_upstream(repo: &Repository, branch: &str, upstream: &str) -> Result<()> {
+    repo.git(["branch", "--set-upstream-to", upstream, branch])?;
+    Ok(())
+}
+
 pub fn rename(repo: &Repository, old: &str, new: &str) -> Result<()> {
     validate_ref_name(repo, new)?;
     repo.git(["branch", "-m", old, new])?;
@@ -105,6 +111,28 @@ mod tests {
         delete(&repo, "feature", true).unwrap();
         delete(&repo, "renamed", true).unwrap();
         assert_eq!(branches(&repo).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn set_upstream_links_a_branch() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        t.add_bare_origin();
+        t.git(["push", "-q", "origin", "main"]);
+        let repo = t.repo();
+        assert!(
+            branches(&repo)
+                .unwrap()
+                .iter()
+                .any(|b| b.name == "main" && b.upstream.is_none())
+        );
+        set_upstream(&repo, "main", "origin/main").unwrap();
+        assert!(
+            branches(&repo)
+                .unwrap()
+                .iter()
+                .any(|b| b.name == "main" && b.upstream.as_deref() == Some("origin/main"))
+        );
     }
 
     #[test]

@@ -398,6 +398,23 @@ mod tests {
     }
 
     #[test]
+    fn missing_upstream_is_typed() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        t.add_bare_origin();
+        let repo = t.repo();
+        let ctx = RemoteContext::default();
+        assert!(matches!(
+            push(&repo, &PushOptions::default(), &ctx, no_progress),
+            Err(GitError::NoUpstream(_))
+        ));
+        assert!(matches!(
+            pull(&repo, &PullOptions::default(), &ctx, no_progress),
+            Err(GitError::NoUpstream(_))
+        ));
+    }
+
+    #[test]
     fn remote_management() {
         let t = TempRepo::new();
         let repo = t.repo();

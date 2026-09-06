@@ -43,6 +43,9 @@ pub enum GitError {
     #[error("remote unreachable")]
     Network(Box<CommandRecord>),
 
+    #[error("the current branch has no upstream")]
+    NoUpstream(Box<CommandRecord>),
+
     #[error("cancelled")]
     Cancelled(Box<CommandRecord>),
 
@@ -103,6 +106,7 @@ impl GitError {
             | Self::Dirty(r)
             | Self::BranchNotMerged(r)
             | Self::Network(r)
+            | Self::NoUpstream(r)
             | Self::Cancelled(r) => Some(r),
             Self::Failed { record, .. } | Self::Timeout { record, .. } => Some(record),
             _ => None,

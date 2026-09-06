@@ -315,11 +315,22 @@ impl Osier {
             (RemoteOp::Push(o), GitError::NonFastForward(_)) if !o.force_with_lease => {
                 self.prompt_push_rejected(o.clone(), window, cx);
             }
+            (RemoteOp::Push(o), GitError::NoUpstream(_)) => {
+                self.prompt_set_upstream_and_push(o.clone(), window, cx);
+            }
+            (RemoteOp::Pull(o), GitError::NoUpstream(_)) => {
+                self.prompt_set_upstream_and_pull(o.clone(), window, cx);
+            }
             (_, GitError::AuthRequired(_)) => {
                 let text = describe(&error);
+                let hint = if self.gh_accounts.is_empty() {
+                    "For GitHub over https, log in once with `gh auth login` and retry. For ssh, add your key to the agent (`ssh-add`)."
+                } else {
+                    "Choose a GitHub account from the Push menu, or add your ssh key to the agent (`ssh-add`)."
+                };
                 window.push_notification(
                     Notification::error(format!("{label} failed: authentication"))
-                        .message(format!("{text}. Choose a GitHub account from the Push menu, or add your ssh key to the agent.")),
+                        .message(format!("{text}. {hint}")),
                     cx,
                 );
             }
@@ -477,6 +488,87 @@ impl Osier {
                     true
                 })
         });
+    }
+
+    /// Branch name and the remote to pair it with (first remote, preferring `origin`).
+    fn current_branch_and_remote(&self) -> Option<(String, String)> {
+        let snapshot = self.active_project()?.snapshot.as_ref()?;
+        let branch = snapshot.status.branch.head.clone()?;
+        let remote = snapshot
+            .remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| snapshot.remotes.first())?
+            .name
+            .clone();
+        Some((branch, remote))
+    }
+
+    fn prompt_set_upstream_and_push(
+        &mut self,
+        mut options: PushOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((branch, remote)) = self.current_branch_and_remote() else {
+            window.push_notification(
+                Notification::warning("No upstream and no remote")
+                    .message("Add a remote first (Branches tab)."),
+                cx,
+            );
+            return;
+        };
+        self.confirm(
+            "No upstream yet",
+            format!("{branch} is not linked to a remote branch. Push it to {remote}/{branch} and remember that as its upstream?"),
+            "Push and set upstream",
+            false,
+            move |this, window, cx| {
+                let mut options = options.clone();
+                options.remote = Some(remote.clone());
+                options.branch = Some(branch.clone());
+                options.set_upstream = true;
+                this.start_remote(RemoteOp::Push(options), window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn prompt_set_upstream_and_pull(
+        &mut self,
+        options: PullOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((branch, remote)) = self.current_branch_and_remote() else {
+            window.push_notification(
+                Notification::warning("No upstream and no remote")
+                    .message("Add a remote first (Branches tab)."),
+                cx,
+            );
+            return;
+        };
+        let upstream = format!("{remote}/{branch}");
+        self.confirm(
+            "No upstream yet",
+            format!("{branch} is not linked to a remote branch. Use {upstream} as its upstream and pull from it? (The remote branch must exist.)"),
+            "Set upstream and pull",
+            false,
+            move |this, window, cx| {
+                let (b, u) = (branch.clone(), upstream.clone());
+                let options = options.clone();
+                this.run_op_then(
+                    format!("Set upstream of {b} to {u}"),
+                    move |repo| osier_git::ops::branch::set_upstream(repo, &b, &u),
+                    move |this, window, cx| this.start_remote(RemoteOp::Pull(options.clone()), window, cx),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_force_push(
