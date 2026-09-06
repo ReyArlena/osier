@@ -3,8 +3,9 @@
 //!
 //! Run: `OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`
 
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
 use std::path::Path;
-use std::sync::Arc;
 
 use osier_git::{GitError, GitRunner, MemorySink};
 
@@ -52,7 +53,8 @@ fn other_account_is_refused_so_account_choice_matters() {
     }
     match ls_remote_as("other-account") {
         Err(GitError::AuthRequired(_)) => {}
-        Err(GitError::Failed { record, .. }) if record.stderr.contains("not found") || record.stderr.contains("403") => {}
+        Err(GitError::Failed { record, .. })
+            if record.stderr.contains("not found") || record.stderr.contains("403") => {}
         other => panic!("expected an access failure for the non-owner account, got {other:?}"),
     }
 }

@@ -215,6 +215,90 @@ impl Osier {
             }
         }
 
+        // Remotes with their URLs and a menu.
+        if !snapshot.remotes.is_empty() {
+            list = list.child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(muted)
+                    .child("Remotes")
+                    .child(snapshot.remotes.len().to_string()),
+            );
+            for (ix, r) in snapshot.remotes.iter().enumerate() {
+                let name = r.name.clone();
+                let url = r.fetch_url.clone();
+                let weak = weak.clone();
+                list = list.child(
+                    h_flex()
+                        .id(("remote", ix))
+                        .px_3()
+                        .py_1p5()
+                        .gap_2()
+                        .items_center()
+                        .hover(|this| this.bg(cx.theme().list_hover))
+                        .child(Icon::new(Lucide::Globe).xsmall())
+                        .child(div().text_sm().flex_none().child(r.name.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(r.fetch_url.clone()),
+                        )
+                        .child(
+                            Button::new(("remote-menu", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::Ellipsis)
+                                .dropdown_menu(move |menu, _, _| {
+                                    let (n1, n2, n3, u1) =
+                                        (name.clone(), name.clone(), name.clone(), url.clone());
+                                    let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+                                    menu.item(PopupMenuItem::new("Edit URL…").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w1.update(cx, |this, cx| {
+                                                this.prompt_remote_url(
+                                                    n1.clone(),
+                                                    u1.clone(),
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Rename…").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w2.update(cx, |this, cx| {
+                                                this.prompt_rename_remote(n2.clone(), window, cx)
+                                            });
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Remove").on_click(
+                                            move |_, window, cx| {
+                                                let _ = w3.update(cx, |this, cx| {
+                                                    this.confirm_remove_remote(
+                                                        n3.clone(),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            },
+                                        ),
+                                    )
+                                }),
+                        ),
+                );
+            }
+        }
+
         v_flex()
             .size_full()
             .child(
@@ -232,6 +316,16 @@ impl Osier {
                         remote.len()
                     )))
                     .child(div().flex_1())
+                    .child(
+                        Button::new("add-remote")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::Globe)
+                            .label("Add remote")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.prompt_add_remote(window, cx)
+                            })),
+                    )
                     .child(
                         Button::new("new-branch")
                             .outline()

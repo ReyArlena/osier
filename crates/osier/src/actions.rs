@@ -12,7 +12,7 @@ use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
 use osier_git::ops::reset::ResetMode;
 use osier_git::ops::stash::StashOptions;
-use osier_git::ops::{branch, reset, stash, tag};
+use osier_git::ops::{branch, remote, reset, stash, tag};
 
 use crate::app::{Osier, Tab};
 
@@ -468,6 +468,130 @@ impl Osier {
             false,
             |this, window, cx| {
                 this.run_op("Undid last commit", reset::undo_last_commit, window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    // ----- remotes -----
+
+    pub(crate) fn prompt_add_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prompt_text(
+            "Add remote: name",
+            "origin",
+            "",
+            "Next",
+            vec![],
+            move |this, name, window, cx| {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return;
+                }
+                this.prompt_text(
+                    format!("Add remote {name}: URL"),
+                    "https://github.com/user/repo.git",
+                    "",
+                    "Add remote",
+                    vec![],
+                    move |this, url, window, cx| {
+                        let url = url.trim().to_string();
+                        if url.is_empty() {
+                            return;
+                        }
+                        let (n, u) = (name.clone(), url.clone());
+                        this.run_op(
+                            format!("Added remote {n}"),
+                            move |repo| remote::add(repo, &n, &u),
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn prompt_remote_url(
+        &mut self,
+        name: String,
+        current: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_text(
+            format!("URL for {name}"),
+            "https://github.com/user/repo.git",
+            current,
+            "Save",
+            vec![],
+            move |this, url, window, cx| {
+                let url = url.trim().to_string();
+                if url.is_empty() {
+                    return;
+                }
+                let (n, u) = (name.clone(), url.clone());
+                this.run_op(
+                    format!("Updated URL of {n}"),
+                    move |repo| remote::set_url(repo, &n, &u, false),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn prompt_rename_remote(
+        &mut self,
+        old: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let default = old.clone();
+        self.prompt_text(
+            format!("Rename remote {old}"),
+            "name",
+            default,
+            "Rename",
+            vec![],
+            move |this, new, window, cx| {
+                let new = new.trim().to_string();
+                if new.is_empty() || new == old {
+                    return;
+                }
+                let (o, n) = (old.clone(), new.clone());
+                this.run_op(
+                    format!("Renamed remote {o} to {n}"),
+                    move |repo| remote::rename(repo, &o, &n),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_remove_remote(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm(
+            "Remove remote?",
+            format!("{name} and its remote-tracking branches are removed from this repository. The remote repository itself is untouched."),
+            "Remove",
+            true,
+            move |this, window, cx| {
+                let n = name.clone();
+                this.run_op(format!("Removed remote {n}"), move |repo| remote::remove(repo, &n), window, cx);
             },
             window,
             cx,
