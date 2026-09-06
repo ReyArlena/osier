@@ -309,13 +309,16 @@ impl Osier {
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(div().text_sm().font_medium().child("Branches"))
-                    .child(div().text_xs().text_color(muted).child(format!(
-                        "{} local, {} remote",
-                        local.len(),
-                        remote.len()
-                    )))
-                    .child(div().flex_1())
+                    .child(div().text_sm().font_medium().flex_none().child("Branches"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(format!("{} local, {} remote", local.len(), remote.len())),
+                    )
                     .child(
                         Button::new("add-remote")
                             .ghost()
