@@ -86,8 +86,10 @@ pub enum DiffTarget {
     WorktreeToHead,
     /// Changes introduced by one commit (against its first parent, or empty tree for a root).
     Commit(String),
-    /// Arbitrary `from..to`.
+    /// Arbitrary `from..to` (two-dot: everything that differs between the two trees).
     Range { from: String, to: String },
+    /// `from...to`: what `to` changed since it branched off `from` (merge-base compare).
+    SinceMergeBase { from: String, to: String },
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +141,7 @@ fn args_for(options: &DiffOptions) -> Vec<String> {
                 DiffTarget::Staged => args.push("--cached".into()),
                 DiffTarget::WorktreeToHead => args.push("HEAD".into()),
                 DiffTarget::Range { from, to } => args.push(format!("{from}..{to}")),
+                DiffTarget::SinceMergeBase { from, to } => args.push(format!("{from}...{to}")),
                 DiffTarget::Commit(_) => {}
             }
         }

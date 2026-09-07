@@ -17,6 +17,7 @@ pub mod diff;
 pub mod error;
 pub mod graph;
 pub mod log;
+pub mod reflog;
 pub mod refs;
 pub mod repo;
 pub mod runner;

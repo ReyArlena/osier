@@ -46,6 +46,22 @@ pub fn commit_details(repo: &Repository, rev: &str) -> Result<CommitDetails> {
     Ok(CommitDetails { commit, files })
 }
 
+/// Files that differ between two revisions. `since_merge_base` uses `from...to`.
+pub fn changed_files_between(
+    repo: &Repository,
+    from: &str,
+    to: &str,
+    since_merge_base: bool,
+) -> Result<Vec<ChangedFile>> {
+    let spec = if since_merge_base {
+        format!("{from}...{to}")
+    } else {
+        format!("{from}..{to}")
+    };
+    let out = repo.git(["diff", "--name-status", "-z", "-M", &spec])?;
+    parse_name_status(&out.stdout)
+}
+
 /// Parse `--name-status -z`: `STATUS\0path\0` or `R100\0old\0new\0`.
 pub fn parse_name_status(bytes: &[u8]) -> Result<Vec<ChangedFile>> {
     let mut fields = bytes.split(|b| *b == 0).filter(|f| !f.is_empty());
@@ -105,6 +121,24 @@ mod tests {
         assert_eq!(f[0].path, "new name.txt");
         assert_eq!(f[0].score, Some(100));
         assert_eq!(f[3].status, FileStatus::Modified);
+    }
+
+    #[test]
+    fn files_between_branches() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        t.checkout_new("side");
+        t.commit_file("s.txt", "s\n", "side");
+        t.checkout("main");
+        t.commit_file("m.txt", "m\n", "main");
+        let repo = t.repo();
+        let three = changed_files_between(&repo, "main", "side", true).unwrap();
+        assert_eq!(
+            three.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            ["s.txt"]
+        );
+        let two = changed_files_between(&repo, "main", "side", false).unwrap();
+        assert_eq!(two.len(), 2, "two-dot shows both sides' differences");
     }
 
     #[test]
