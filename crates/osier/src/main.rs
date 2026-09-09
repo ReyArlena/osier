@@ -8,6 +8,7 @@ mod askpass;
 mod changes_ops;
 mod cli;
 mod command_log;
+mod edit_pane;
 mod format;
 mod graph;
 mod hunk_ops;

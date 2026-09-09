@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::component::diff::{DiffFile, DiffMode, DiffState};
+use gpui_kit::component::diff::{DiffEvent, DiffFile, DiffMode, DiffState};
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
@@ -124,6 +124,8 @@ pub struct Osier {
     /// Focus for keyboard navigation in the center lists.
     pub(crate) list_focus: FocusHandle,
     pub(crate) commit_message: Entity<TextareaState>,
+    /// Editor shown in the diff pane for "edit result" / "edit file"; `None` when viewing.
+    pub(crate) editor: Option<crate::edit_pane::FileEditor>,
     pub(crate) amend: bool,
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
@@ -176,6 +178,7 @@ impl Osier {
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             commit_message,
+            editor: None,
             amend: false,
             signoff: false,
             sidebar_visible: state.layout.sidebar_visible,
@@ -219,6 +222,16 @@ impl Osier {
             _subscriptions: vec![message_subscription],
         };
         this.apply_appearance(cx);
+        let diff_entity = this.diff.clone();
+        this._subscriptions
+            .push(cx.subscribe(&diff_entity, |_, _, ev: &DiffEvent, cx| {
+                if matches!(
+                    ev,
+                    DiffEvent::ConflictResolved(..) | DiffEvent::SelectionChanged(_)
+                ) {
+                    cx.notify();
+                }
+            }));
         this._subscriptions
             .push(cx.observe_window_appearance(window, |this, _, cx| {
                 if this.settings.appearance.mode == ThemeMode::System {
@@ -626,6 +639,7 @@ impl Osier {
 
     pub(crate) fn select_file(&mut self, path: String, area: Area, cx: &mut Context<Self>) {
         self.diff_force_large = false;
+        self.editor = None;
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::File { path, area };
             p.selected_commit = None;
@@ -642,6 +656,7 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         self.diff_force_large = false;
+        self.editor = None;
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::Compare {
                 from,
@@ -656,6 +671,7 @@ impl Osier {
 
     pub(crate) fn select_commit(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.diff_force_large = false;
+        self.editor = None;
         let Some(p) = self.active_project_mut() else {
             return;
         };

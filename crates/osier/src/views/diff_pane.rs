@@ -1,6 +1,7 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::diff::{Diff, DiffGutterMarker, DiffLinePosition, DiffMode, DiffSide};
+use gpui_kit::component::input::Editor;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::spinner::Spinner;
@@ -76,7 +77,10 @@ impl Osier {
             _ => &[],
         };
 
-        let body: AnyElement = if self.diff_loading {
+        let editing = self.editor.is_some();
+        let body: AnyElement = if let Some(editor) = &self.editor {
+            Editor::new(&editor.state).size_full().into_any_element()
+        } else if self.diff_loading {
             v_flex()
                 .size_full()
                 .items_center()
@@ -249,6 +253,56 @@ impl Osier {
                         )
                     })
                     .child(div().flex_1())
+                    .when(editing, |this| {
+                        this.child(
+                            Button::new("editor-save")
+                                .primary()
+                                .xsmall()
+                                .label("Save")
+                                .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
+                        )
+                        .child(
+                            Button::new("editor-cancel")
+                                .ghost()
+                                .xsmall()
+                                .label("Cancel")
+                                .on_click(cx.listener(|this, _, _, cx| this.close_editor(cx))),
+                        )
+                    })
+                    .when(!editing && matches!(&area, Some((_, Area::Conflicted))), |this| {
+                        let ready = self.can_apply_resolution(cx);
+                        this.child(
+                            Button::new("apply-resolution")
+                                .primary()
+                                .xsmall()
+                                .label("Apply resolution")
+                                .disabled(!ready)
+                                .tooltip(if ready {
+                                    "Write the chosen sides to the file and mark it resolved"
+                                } else {
+                                    "Pick Accept Current / Incoming / Both on every conflict first"
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| this.apply_conflict_resolution(window, cx))),
+                        )
+                        .child(
+                            Button::new("edit-result")
+                                .outline()
+                                .xsmall()
+                                .label("Edit result")
+                                .tooltip("Edit the merged file by hand")
+                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                        )
+                    })
+                    .when(!editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted), |this| {
+                        this.child(
+                            Button::new("edit-file")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::Pencil)
+                                .tooltip("Edit this file in place")
+                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                        )
+                    })
                     .children(line_actions.iter().map(|action| {
                         let action = *action;
                         Button::new(SharedString::from(format!("lines-{}", action.label())))

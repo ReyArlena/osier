@@ -77,11 +77,11 @@ impl Osier {
         };
         let text = if conflicts > 0 {
             format!(
-                "{name} in progress: {conflicts} conflicted {}. Resolve them in Changes, then continue.",
+                "{name} in progress: {conflicts} conflicted {}.",
                 if conflicts == 1 { "file" } else { "files" }
             )
         } else {
-            format!("{name} in progress. Everything is resolved; continue when ready.")
+            format!("{name} in progress, nothing left to resolve.")
         };
         h_flex()
             .px_3()
