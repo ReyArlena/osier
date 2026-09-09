@@ -101,6 +101,8 @@ pub struct Osier {
     pub(crate) projects: Vec<Project>,
     pub(crate) active: Option<usize>,
     pub(crate) tab: Tab,
+    /// Log tab shows the reflog instead of the commit list.
+    pub(crate) show_reflog: bool,
     pub(crate) sidebar_visible: bool,
     pub(crate) command_log_visible: bool,
     pub(crate) expanded_command: Option<u64>,
@@ -188,6 +190,7 @@ impl Osier {
             sink,
             projects: Vec::new(),
             active: None,
+            show_reflog: false,
             // Dev aid for screenshots: OSIER_START_TAB=log|branches|stashes.
             tab: match std::env::var("OSIER_START_TAB").as_deref() {
                 Ok("log") => Tab::Log,
@@ -551,6 +554,7 @@ impl Osier {
                     Selection::None => false,
                     Selection::File { .. } => status_changed,
                     Selection::Commit { .. } => false,
+                    Selection::Compare { .. } => status_changed,
                 };
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
@@ -624,6 +628,26 @@ impl Osier {
         self.diff_force_large = false;
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::File { path, area };
+            p.selected_commit = None;
+        }
+        self.reload_selection(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn select_compare(
+        &mut self,
+        from: String,
+        to: String,
+        since_merge_base: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.diff_force_large = false;
+        if let Some(p) = self.active_project_mut() {
+            p.selection = Selection::Compare {
+                from,
+                to,
+                since_merge_base,
+            };
             p.selected_commit = None;
         }
         self.reload_selection(cx);
@@ -839,6 +863,19 @@ fn load_patch(
     {
         return Err(LoadError::TooLarge(meta.len()));
     }
+    if let Selection::File {
+        path,
+        area: Area::Conflicted,
+    } = selection
+    {
+        // The working file with its markers: the Diff component renders each conflict with
+        // Current / Incoming / Both controls.
+        let text = std::fs::read_to_string(repo.workdir().join(path))
+            .map_err(|e| LoadError::Git(format!("{path}: {e}")))?;
+        let file = DiffFile::parse_conflicts(path.clone(), &text)
+            .map_err(|e| LoadError::Git(e.to_string()))?;
+        return Ok((vec![file], Vec::new()));
+    }
     let patch = match selection {
         Selection::None => return Ok((Vec::new(), Vec::new())),
         Selection::File { path, area } => match area {
@@ -856,6 +893,26 @@ fn load_patch(
         },
         Selection::Commit { hash } => {
             let mut o = DiffOptions::new(DiffTarget::Commit(hash.clone()));
+            o.context_lines = context;
+            osier_git::diff::patch_text(repo, &o)?
+        }
+        Selection::Compare {
+            from,
+            to,
+            since_merge_base,
+        } => {
+            let target = if *since_merge_base {
+                DiffTarget::SinceMergeBase {
+                    from: from.clone(),
+                    to: to.clone(),
+                }
+            } else {
+                DiffTarget::Range {
+                    from: from.clone(),
+                    to: to.clone(),
+                }
+            };
+            let mut o = DiffOptions::new(target);
             o.context_lines = context;
             osier_git::diff::patch_text(repo, &o)?
         }
@@ -1282,6 +1339,78 @@ mod tests {
                 osier.state.accounts.get("/tmp/x").map(String::as_str),
                 Some("alice")
             );
+        });
+    }
+
+    #[gpui::test]
+    fn merge_conflict_resolve_and_continue(cx: &mut TestAppContext) {
+        use osier_git::ops::integrate::{ConflictSide, MergeMode};
+        use osier_git::repo::InProgress;
+
+        let repo = TempRepo::new();
+        repo.commit_file("c.txt", "base\n", "base");
+        repo.checkout_new("feature");
+        repo.commit_file("c.txt", "theirs\n", "theirs");
+        repo.checkout("main");
+        repo.commit_file("c.txt", "ours\n", "ours");
+        let h = Harness::open(cx, &repo);
+
+        h.act(cx, |osier, window, cx| {
+            osier.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.in_progress(), Some(InProgress::Merge));
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.status.conflicted().count(), 1);
+            assert_eq!(
+                osier.active_project().unwrap().selection,
+                Selection::File {
+                    path: "c.txt".into(),
+                    area: Area::Conflicted
+                }
+            );
+            assert_eq!(
+                osier.diff_files, 1,
+                "conflict view loaded from the working file"
+            );
+        });
+
+        h.act(cx, |osier, window, cx| {
+            osier.resolve_conflict_with("c.txt".into(), ConflictSide::Theirs, window, cx)
+        });
+        h.read(cx, |osier, _| {
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.status.conflicted().count(), 0);
+            assert_eq!(osier.in_progress(), Some(InProgress::Merge));
+        });
+        h.act(cx, |osier, window, cx| {
+            osier.continue_in_progress(window, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.in_progress(), None);
+            let snapshot = osier.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert!(snapshot.status.is_clean());
+            assert!(snapshot.commits[0].is_merge());
+        });
+        assert_eq!(repo.read("c.txt"), "theirs\n");
+
+        // Compare the merged branch with its parent: one file.
+        h.act(cx, |osier, _, cx| {
+            osier.select_compare("main~1".into(), "main".into(), false, cx)
+        });
+        h.read(cx, |osier, _| assert_eq!(osier.diff_files, 1));
+        h.read(cx, |osier, _| {
+            assert!(
+                osier
+                    .active_project()
+                    .unwrap()
+                    .snapshot
+                    .as_ref()
+                    .unwrap()
+                    .reflog
+                    .len()
+                    >= 3
+            )
         });
     }
 }

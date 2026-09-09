@@ -14,6 +14,7 @@ use osier_git::status::StatusEntry;
 
 use crate::app::Osier;
 use crate::project::{Area, Selection};
+use osier_git::ops::integrate::ConflictSide;
 
 fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
     let code = match area {
@@ -153,31 +154,87 @@ impl Osier {
                         )
                         .child(status_tag(entry, area))
                         .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
-                        .child(
-                            div()
-                                .invisible()
-                                .group_hover("row", |this| this.visible())
-                                .child(
-                                    Button::new(SharedString::from(format!(
-                                        "discard-{title}-{ix}"
-                                    )))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(if area == Area::Untracked {
-                                        Lucide::Trash
-                                    } else {
-                                        Lucide::Undo2
-                                    })
-                                    .tooltip(if area == Area::Untracked {
-                                        "Move to trash"
-                                    } else {
-                                        "Discard changes"
-                                    })
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.discard_file(discard_path.clone(), area, window, cx)
-                                    })),
-                                ),
-                        ),
+                        .when(area == Area::Conflicted, |this| {
+                            let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
+                            this.child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(
+                                        Button::new(SharedString::from(format!("ours-{ix}")))
+                                            .ghost()
+                                            .xsmall()
+                                            .label("Ours")
+                                            .tooltip("Take the current branch's version")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.resolve_conflict_with(
+                                                    p1.clone(),
+                                                    ConflictSide::Ours,
+                                                    window,
+                                                    cx,
+                                                )
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!("theirs-{ix}")))
+                                            .ghost()
+                                            .xsmall()
+                                            .label("Theirs")
+                                            .tooltip("Take the incoming version")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.resolve_conflict_with(
+                                                    p2.clone(),
+                                                    ConflictSide::Theirs,
+                                                    window,
+                                                    cx,
+                                                )
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!("resolved-{ix}")))
+                                            .outline()
+                                            .xsmall()
+                                            .label("Resolved")
+                                            .tooltip("Mark as resolved after editing the file")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.mark_resolved(p3.clone(), window, cx)
+                                            })),
+                                    ),
+                            )
+                        })
+                        .when(area != Area::Conflicted, |this| {
+                            this.child(
+                                div()
+                                    .invisible()
+                                    .group_hover("row", |this| this.visible())
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "discard-{title}-{ix}"
+                                        )))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(if area == Area::Untracked {
+                                            Lucide::Trash
+                                        } else {
+                                            Lucide::Undo2
+                                        })
+                                        .tooltip(if area == Area::Untracked {
+                                            "Move to trash"
+                                        } else {
+                                            "Discard changes"
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, window, cx| {
+                                                this.discard_file(
+                                                    discard_path.clone(),
+                                                    area,
+                                                    window,
+                                                    cx,
+                                                )
+                                            }),
+                                        ),
+                                    ),
+                            )
+                        }),
                 );
             }
         }

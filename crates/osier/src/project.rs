@@ -10,6 +10,7 @@ use notify::{RecursiveMode, Watcher};
 use osier_git::config::Identity;
 use osier_git::graph::GraphRow;
 use osier_git::log::{Commit, LogOptions};
+use osier_git::reflog::ReflogEntry;
 use osier_git::refs::{Branch, Remote};
 use osier_git::repo::InProgress;
 use osier_git::stash::StashEntry;
@@ -25,6 +26,7 @@ pub struct Snapshot {
     pub graph: Vec<GraphRow>,
     pub stashes: Vec<StashEntry>,
     pub remotes: Vec<Remote>,
+    pub reflog: Vec<ReflogEntry>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -41,8 +43,19 @@ pub enum Area {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     None,
-    File { path: String, area: Area },
-    Commit { hash: String },
+    File {
+        path: String,
+        area: Area,
+    },
+    Commit {
+        hash: String,
+    },
+    /// Everything `to` changed relative to `from` (merge-base compare when `since_merge_base`).
+    Compare {
+        from: String,
+        to: String,
+        since_merge_base: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -231,6 +244,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
     let graph = osier_git::graph::layout(&commits);
     let stashes = osier_git::stash::list(repo).map_err(|e| format!("stash: {e}"))?;
     let remotes = osier_git::refs::remotes(repo).map_err(|e| format!("remotes: {e}"))?;
+    let reflog = osier_git::reflog::list(repo, 200).map_err(|e| format!("reflog: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     Ok(Snapshot {
         status,
@@ -239,6 +253,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
         graph,
         stashes,
         remotes,
+        reflog,
         identity,
         in_progress: repo.in_progress(),
     })

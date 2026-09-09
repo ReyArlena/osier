@@ -13,6 +13,7 @@ mod graph;
 mod hunk_ops;
 mod ops;
 mod project;
+mod rebase_dialog;
 mod remote_ops;
 mod views;
 

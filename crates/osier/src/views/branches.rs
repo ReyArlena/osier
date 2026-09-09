@@ -10,6 +10,7 @@ use osier_git::refs::Branch;
 
 use crate::app::Osier;
 use crate::format::relative_time;
+use osier_git::ops::integrate::MergeMode;
 
 impl Osier {
     pub(crate) fn render_branches(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -136,6 +137,33 @@ impl Osier {
                                             })),
                                         )
                                     })
+                                    .when(is_remote, |this| {
+                                    let (wm, wc) = (weak.clone(), weak.clone());
+                                    let (m1, c1) = (menu_name.clone(), menu_name.clone());
+                                    this.child(
+                                        Button::new(SharedString::from(format!("remote-branch-menu-{title}-{ix}")))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(Lucide::Ellipsis)
+                                            .dropdown_menu(move |menu, _, _| {
+                                                let (wm, wc) = (wm.clone(), wc.clone());
+                                                let (m1, c1) = (m1.clone(), c1.clone());
+                                                menu.item(PopupMenuItem::new("Merge into current branch").on_click(move |_, window, cx| {
+                                                    let _ = wm.update(cx, |this, cx| this.merge_branch(m1.clone(), MergeMode::Default, window, cx));
+                                                }))
+                                                .item(PopupMenuItem::new("Compare with current branch").on_click(move |_, _, cx| {
+                                                    let _ = wc.update(cx, |this, cx| {
+                                                        let current = this
+                                                            .active_project()
+                                                            .and_then(|p| p.snapshot.as_ref())
+                                                            .and_then(|s| s.status.branch.head.clone())
+                                                            .unwrap_or_else(|| "HEAD".into());
+                                                        this.select_compare(current, c1.clone(), true, cx);
+                                                    });
+                                                }))
+                                            }),
+                                    )
+                                })
                                     .when(!is_remote, |this| {
                                         this.child(
                                             Button::new(SharedString::from(format!(
@@ -155,6 +183,32 @@ impl Osier {
                                                     weak.clone(),
                                                     weak.clone(),
                                                 );
+                                                let (wm1, wm2, wm3, wr, wc) = (weak.clone(), weak.clone(), weak.clone(), weak.clone(), weak.clone());
+                                                let (m1, m2, m3, r1, c1) = (menu_name.clone(), menu_name.clone(), menu_name.clone(), menu_name.clone(), menu_name.clone());
+                                                let menu = menu
+                                                    .item(PopupMenuItem::new("Merge into current branch").disabled(is_head).on_click(move |_, window, cx| {
+                                                        let _ = wm1.update(cx, |this, cx| this.merge_branch(m1.clone(), MergeMode::Default, window, cx));
+                                                    }))
+                                                    .item(PopupMenuItem::new("Merge into current (always a merge commit)").disabled(is_head).on_click(move |_, window, cx| {
+                                                        let _ = wm2.update(cx, |this, cx| this.merge_branch(m2.clone(), MergeMode::NoFastForward, window, cx));
+                                                    }))
+                                                    .item(PopupMenuItem::new("Squash merge into current (no commit)").disabled(is_head).on_click(move |_, window, cx| {
+                                                        let _ = wm3.update(cx, |this, cx| this.merge_branch(m3.clone(), MergeMode::Squash, window, cx));
+                                                    }))
+                                                    .item(PopupMenuItem::new("Rebase current branch onto this…").disabled(is_head).on_click(move |_, window, cx| {
+                                                        let _ = wr.update(cx, |this, cx| this.confirm_rebase_onto(r1.clone(), window, cx));
+                                                    }))
+                                                    .item(PopupMenuItem::new("Compare with current branch").disabled(is_head).on_click(move |_, _, cx| {
+                                                        let _ = wc.update(cx, |this, cx| {
+                                                            let current = this
+                                                                .active_project()
+                                                                .and_then(|p| p.snapshot.as_ref())
+                                                                .and_then(|s| s.status.branch.head.clone())
+                                                                .unwrap_or_else(|| "HEAD".into());
+                                                            this.select_compare(current, c1.clone(), true, cx);
+                                                        });
+                                                    }))
+                                                    .separator();
                                                 menu.item(
                                                     PopupMenuItem::new("New branch from here…")
                                                         .on_click(move |_, window, cx| {

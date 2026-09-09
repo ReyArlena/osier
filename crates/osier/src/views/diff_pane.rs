@@ -38,6 +38,19 @@ impl Osier {
                     Area::Conflicted => Tag::danger().xsmall().child("conflict"),
                 }),
             ),
+            Selection::Compare {
+                from,
+                to,
+                since_merge_base,
+            } => (
+                Lucide::GitCompare,
+                if *since_merge_base {
+                    format!("{to} since it left {from}")
+                } else {
+                    format!("{from} → {to}")
+                },
+                Some(Tag::info().xsmall().child("compare")),
+            ),
             Selection::Commit { hash } => {
                 let commit = project
                     .and_then(|p| p.snapshot.as_ref())

@@ -10,9 +10,11 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
+use osier_git::ops::integrate::{self, ConflictSide, MergeMode};
 use osier_git::ops::reset::ResetMode;
 use osier_git::ops::stash::StashOptions;
 use osier_git::ops::{branch, remote, reset, stash, tag};
+use osier_git::repo::InProgress;
 
 use crate::app::{Osier, Tab};
 
@@ -472,6 +474,165 @@ impl Osier {
             window,
             cx,
         );
+    }
+
+    // ----- merge, rebase, cherry-pick, in-progress -----
+
+    pub(crate) fn merge_branch(
+        &mut self,
+        branch: String,
+        mode: MergeMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let label = match mode {
+            MergeMode::Default => format!("Merged {branch}"),
+            MergeMode::NoFastForward => format!("Merged {branch} (merge commit)"),
+            MergeMode::FastForwardOnly => format!("Fast-forwarded to {branch}"),
+            MergeMode::Squash => format!("Squashed {branch} into the index"),
+        };
+        let b = branch.clone();
+        self.run_op(
+            label,
+            move |repo| integrate::merge(repo, &b, mode),
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_rebase_onto(
+        &mut self,
+        onto: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|s| s.status.branch.head.clone())
+            .unwrap_or_else(|| "the current branch".into());
+        self.confirm(
+            "Rebase?",
+            format!("{current} is replayed on top of {onto}. Its commits get new hashes. If it was already pushed, the next push needs force-with-lease."),
+            "Rebase",
+            false,
+            move |this, window, cx| {
+                let o = onto.clone();
+                this.run_op(format!("Rebased onto {o}"), move |repo| integrate::rebase(repo, &o), window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_cherry_pick(
+        &mut self,
+        hash: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let short = hash[..hash.len().min(7)].to_string();
+        self.confirm(
+            "Cherry-pick?",
+            format!("{short} is applied as a new commit on the current branch."),
+            "Cherry-pick",
+            false,
+            move |this, window, cx| {
+                let h = hash.clone();
+                this.run_op(
+                    format!("Cherry-picked {short}"),
+                    move |repo| integrate::cherry_pick(repo, std::slice::from_ref(&h)),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn in_progress(&self) -> Option<InProgress> {
+        self.active_project()?.snapshot.as_ref()?.in_progress
+    }
+
+    pub(crate) fn continue_in_progress(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run_op("Continued", integrate::continue_in_progress, window, cx);
+    }
+
+    pub(crate) fn skip_in_progress(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run_op(
+            "Skipped the current commit",
+            integrate::skip_in_progress,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_abort_in_progress(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let what = match self.in_progress() {
+            Some(InProgress::Merge) => "merge",
+            Some(InProgress::Rebase) => "rebase",
+            Some(InProgress::CherryPick) => "cherry-pick",
+            Some(InProgress::Revert) => "revert",
+            Some(InProgress::Bisect) => "bisect",
+            None => return,
+        };
+        self.confirm(
+            format!("Abort the {what}?"),
+            format!("The repository returns to the state before the {what} started. Resolutions made so far are lost."),
+            "Abort",
+            true,
+            |this, window, cx| this.run_op("Aborted", integrate::abort, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn resolve_conflict_with(
+        &mut self,
+        path: String,
+        side: ConflictSide,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let label = match side {
+            ConflictSide::Ours => format!("Took ours for {path}"),
+            ConflictSide::Theirs => format!("Took theirs for {path}"),
+        };
+        self.run_op(
+            label,
+            move |repo| integrate::resolve_with(repo, std::slice::from_ref(&path), side),
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn mark_resolved(
+        &mut self,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_op(
+            format!("Marked {path} resolved"),
+            move |repo| integrate::mark_resolved(repo, std::slice::from_ref(&path)),
+            window,
+            cx,
+        );
+    }
+
+    /// Interactive rebase dialog (rebase_dialog module).
+    pub(crate) fn open_interactive_rebase(
+        &mut self,
+        base: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_rebase_dialog(base, window, cx);
     }
 
     // ----- remotes -----

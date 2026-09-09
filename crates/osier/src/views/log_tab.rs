@@ -5,7 +5,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use gpui_kit::*;
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
@@ -46,6 +48,9 @@ impl Osier {
                 )
                 .into_any_element();
         }
+        if self.show_reflog {
+            return self.render_reflog(cx).into_any_element();
+        }
         let commits = Arc::new(snapshot.commits.clone());
         let graph = Arc::new(snapshot.graph.clone());
         let selected = project.selected_commit;
@@ -74,6 +79,18 @@ impl Osier {
                         format!("{count} commits, all branches")
                     }))
                     .child(div().flex_1())
+                    .child(
+                        Button::new("toggle-reflog")
+                            .ghost()
+                            .xsmall()
+                            .label("Reflog")
+                            .selected(self.show_reflog)
+                            .tooltip("Show where HEAD has been (recovery)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_reflog = !this.show_reflog;
+                                cx.notify();
+                            })),
+                    )
                     .child(
                         Button::new("refresh-log")
                             .ghost()
@@ -272,6 +289,32 @@ impl Osier {
                                                                 std::rc::Rc::new(|t, h, w, cx| {
                                                                     t.confirm_revert(h, w, cx)
                                                                 }),
+                                                            ))
+                                                            .item(item(
+                                                                "Cherry-pick onto current branch…",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    t.confirm_cherry_pick(h, w, cx)
+                                                                }),
+                                                            ))
+                                                            .separator()
+                                                            .item(item(
+                                                                "Compare with working tree",
+                                                                std::rc::Rc::new(|t, h, _, cx| {
+                                                                    t.select_compare(
+                                                                        h,
+                                                                        "HEAD".into(),
+                                                                        false,
+                                                                        cx,
+                                                                    )
+                                                                }),
+                                                            ))
+                                                            .item(item(
+                                                                "Interactive rebase from here…",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    t.open_interactive_rebase(
+                                                                        h, w, cx,
+                                                                    )
+                                                                }),
                                                             ));
                                                         if is_head {
                                                             menu = menu.item(item(
@@ -298,6 +341,144 @@ impl Osier {
                     .size_full(),
                 ),
             )
+            .into_any_element()
+    }
+
+    fn render_reflog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use gpui_kit::component::scroll::ScrollableElement as _;
+        let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
+            return div().into_any_element();
+        };
+        let muted = cx.theme().muted_foreground;
+        let mono = cx.theme().mono_font_family.clone();
+        let owner = cx.entity().downgrade();
+        let mut list = v_flex()
+            .flex_1()
+            .min_h_0()
+            .id("reflog-list")
+            .overflow_y_scrollbar();
+        for (ix, e) in snapshot.reflog.iter().enumerate() {
+            let hash = e.hash.clone();
+            let o = owner.clone();
+            list = list.child(
+                h_flex()
+                    .id(("reflog", ix))
+                    .px_3()
+                    .py_1p5()
+                    .gap_3()
+                    .items_center()
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .w(px(80.))
+                            .flex_none()
+                            .child(e.selector.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(e.message.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_none()
+                            .child(relative_time(e.at)),
+                    )
+                    .child(
+                        div()
+                            .font_family(mono.clone())
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_none()
+                            .child(e.hash[..7].to_string()),
+                    )
+                    .child(
+                        Button::new(("reflog-menu", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::Ellipsis)
+                            .dropdown_menu(move |menu, _, _| {
+                                let (h1, h2, h3, h4) =
+                                    (hash.clone(), hash.clone(), hash.clone(), hash.clone());
+                                let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
+                                menu.item(PopupMenuItem::new("Check out (detached)").on_click(
+                                    move |_, window, cx| {
+                                        let _ = o1.update(cx, |this, cx| {
+                                            this.checkout_commit(h1.clone(), window, cx)
+                                        });
+                                    },
+                                ))
+                                .item(PopupMenuItem::new("New branch here…").on_click(
+                                    move |_, window, cx| {
+                                        let _ = o2.update(cx, |this, cx| {
+                                            this.prompt_new_branch(Some(h2.clone()), window, cx)
+                                        });
+                                    },
+                                ))
+                                .item(
+                                    PopupMenuItem::new("Reset current branch here (hard)…")
+                                        .on_click(move |_, window, cx| {
+                                            let _ = o3.update(cx, |this, cx| {
+                                                this.confirm_reset(
+                                                    h3.clone(),
+                                                    ResetMode::Hard,
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                )
+                                .separator()
+                                .item(
+                                    PopupMenuItem::new("Copy hash").on_click(
+                                        move |_, window, cx| {
+                                            let _ = o4.update(cx, |this, cx| {
+                                                this.copy_to_clipboard(h4.clone(), window, cx)
+                                            });
+                                        },
+                                    ),
+                                )
+                            }),
+                    ),
+            );
+        }
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_2()
+                    .gap_2()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(div().text_sm().font_medium().child("Reflog"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child("where HEAD has been; use it to recover"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("close-reflog")
+                            .ghost()
+                            .xsmall()
+                            .label("Back to log")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_reflog = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(list)
             .into_any_element()
     }
 }
