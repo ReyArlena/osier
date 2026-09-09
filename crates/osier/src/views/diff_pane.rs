@@ -231,6 +231,8 @@ impl Osier {
                     .px_3()
                     .py_2()
                     .gap_2()
+                    .gap_y_1()
+                    .flex_wrap()
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().border)
