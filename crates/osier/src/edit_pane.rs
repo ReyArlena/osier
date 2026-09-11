@@ -33,7 +33,7 @@ impl std::fmt::Debug for FileEditor {
     }
 }
 
-fn language_for(path: &str) -> &'static str {
+pub(crate) fn language_for(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "rs" => "rust",
         "toml" => "toml",

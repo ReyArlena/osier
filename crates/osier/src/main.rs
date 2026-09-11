@@ -17,6 +17,7 @@ mod ops;
 mod project;
 mod rebase_dialog;
 mod remote_ops;
+mod viewer;
 mod views;
 
 use std::path::PathBuf;

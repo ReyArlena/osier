@@ -15,6 +15,7 @@ pub mod blame;
 pub mod config;
 pub mod diff;
 pub mod error;
+pub mod files;
 pub mod graph;
 pub mod log;
 pub mod reflog;

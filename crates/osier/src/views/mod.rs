@@ -4,6 +4,7 @@ mod branches;
 mod changes;
 mod command_log;
 mod diff_pane;
+mod files_tab;
 mod log_tab;
 mod sidebar;
 mod stashes;
@@ -58,6 +59,7 @@ impl Osier {
                 Tab::Log => self.render_log(window, cx).into_any_element(),
                 Tab::Branches => self.render_branches(cx).into_any_element(),
                 Tab::Stashes => self.render_stashes(cx).into_any_element(),
+                Tab::Files => self.render_files(cx).into_any_element(),
             }))
     }
 

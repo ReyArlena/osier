@@ -76,10 +76,17 @@ pub enum Tab {
     Log,
     Branches,
     Stashes,
+    Files,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Changes, Tab::Log, Tab::Branches, Tab::Stashes];
+    pub const ALL: [Tab; 5] = [
+        Tab::Changes,
+        Tab::Log,
+        Tab::Branches,
+        Tab::Stashes,
+        Tab::Files,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -87,6 +94,7 @@ impl Tab {
             Tab::Log => "Log",
             Tab::Branches => "Branches",
             Tab::Stashes => "Stashes",
+            Tab::Files => "Files",
         }
     }
 }
@@ -126,6 +134,14 @@ pub struct Osier {
     pub(crate) commit_message: Entity<TextareaState>,
     /// Editor shown in the diff pane for "edit result" / "edit file"; `None` when viewing.
     pub(crate) editor: Option<crate::edit_pane::FileEditor>,
+    /// File viewer for the Files tab (code, markdown, image, binary).
+    pub(crate) viewer: Option<crate::viewer::Viewer>,
+    /// Markdown files show rendered by default; this toggles to source.
+    pub(crate) markdown_as_code: bool,
+    pub(crate) files_tree: Entity<gpui_kit::component::tree::TreeState>,
+    pub(crate) show_ignored: bool,
+    /// Hash of the path set the tree was built from, so expansion survives refreshes.
+    pub(crate) files_tree_key: u64,
     pub(crate) amend: bool,
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
@@ -195,6 +211,11 @@ impl Osier {
             focus_handle: cx.focus_handle(),
             commit_message,
             editor: None,
+            viewer: None,
+            markdown_as_code: false,
+            files_tree: cx.new(|cx| gpui_kit::component::tree::TreeState::new(cx)),
+            show_ignored: false,
+            files_tree_key: 0,
             amend: false,
             signoff: false,
             sidebar_visible: state.layout.sidebar_visible,
@@ -215,6 +236,7 @@ impl Osier {
                 Ok("log") => Tab::Log,
                 Ok("branches") => Tab::Branches,
                 Ok("stashes") => Tab::Stashes,
+                Ok("files") => Tab::Files,
                 _ => Tab::Changes,
             },
             expanded_command: None,
@@ -693,10 +715,10 @@ impl Osier {
                     .as_ref()
                     .is_none_or(|old| old.status != snapshot.status);
                 reload = match &project.selection {
-                    Selection::None => false,
-                    Selection::File { .. } => status_changed,
-                    Selection::Commit { .. } => false,
-                    Selection::Compare { .. } => status_changed,
+                    Selection::None | Selection::Commit { .. } => false,
+                    Selection::File { .. } | Selection::Compare { .. } => status_changed,
+                    Selection::WorkFile { rev: None, .. } => status_changed,
+                    Selection::WorkFile { .. } => false,
                 };
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
@@ -777,6 +799,22 @@ impl Osier {
         cx.notify();
     }
 
+    pub(crate) fn select_work_file(
+        &mut self,
+        path: String,
+        rev: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.diff_force_large = false;
+        self.editor = None;
+        if let Some(p) = self.active_project_mut() {
+            p.selection = Selection::WorkFile { path, rev };
+            p.selected_commit = None;
+        }
+        self.reload_selection(cx);
+        cx.notify();
+    }
+
     pub(crate) fn select_compare(
         &mut self,
         from: String,
@@ -833,6 +871,13 @@ impl Osier {
             self.set_diff_files(Vec::new(), cx);
             return;
         }
+        if let Selection::WorkFile { path, rev } = &selection {
+            self.diff_model = std::rc::Rc::new(Vec::new());
+            self.set_diff_files(Vec::new(), cx);
+            self.load_viewer(path.clone(), rev.clone(), cx);
+            return;
+        }
+        self.viewer = None;
         self.diff_loading = true;
         self.diff_error = None;
         self.diff_too_large = None;
@@ -922,7 +967,7 @@ impl Osier {
                 };
                 self.select_commit(next, cx);
             }
-            Tab::Branches | Tab::Stashes => {}
+            Tab::Branches | Tab::Stashes | Tab::Files => {}
         }
     }
 
@@ -1041,6 +1086,7 @@ fn load_patch(
             o.context_lines = context;
             osier_git::diff::patch_text(repo, &o)?
         }
+        Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new())),
         Selection::Compare {
             from,
             to,
@@ -1147,7 +1193,7 @@ impl Render for Osier {
                                             .child(
                                                 resizable_panel()
                                                     .size_range(px(240.)..px(4000.))
-                                                    .child(self.render_diff_pane(cx)),
+                                                    .child(self.render_diff_pane(window, cx)),
                                             ),
                                     ),
                                 )
@@ -1645,6 +1691,63 @@ mod tests {
                 second.path(),
                 "active follows the moved project"
             );
+        });
+    }
+
+    #[gpui::test]
+    fn files_tab_viewer_picks_markdown_code_and_binary(cx: &mut TestAppContext) {
+        use crate::viewer::Viewer;
+        let repo = TempRepo::new();
+        repo.commit_file("README.md", "# Title\n\nhello\n", "docs");
+        repo.commit_file("src/main.rs", "fn main() {}\n", "code");
+        repo.write("blob.bin", "ab\0cd");
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |osier, _| {
+            let files = &osier
+                .active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .files;
+            assert_eq!(files, &["README.md", "blob.bin", "src/main.rs"]);
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("README.md".into(), None, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(matches!(osier.viewer, Some(Viewer::Markdown { .. })))
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("src/main.rs".into(), None, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(matches!(
+                &osier.viewer,
+                Some(Viewer::Code {
+                    language: "rust",
+                    ..
+                })
+            ));
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("blob.bin".into(), None, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(matches!(osier.viewer, Some(Viewer::Binary { .. })))
+        });
+        // At a revision: the committed README is served from the object store.
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("README.md".into(), Some("HEAD".into()), cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(matches!(osier.viewer, Some(Viewer::Markdown { .. })))
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("nope.txt".into(), Some("HEAD".into()), cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(matches!(osier.viewer, Some(Viewer::Missing)))
         });
     }
 }

@@ -27,6 +27,8 @@ pub struct Snapshot {
     pub stashes: Vec<StashEntry>,
     pub remotes: Vec<Remote>,
     pub reflog: Vec<ReflogEntry>,
+    /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
+    pub files: Vec<String>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -55,6 +57,12 @@ pub enum Selection {
         from: String,
         to: String,
         since_merge_base: bool,
+    },
+    /// A file from the Files tab, as it is in the working tree (`rev` = `None`) or at a
+    /// revision.
+    WorkFile {
+        path: String,
+        rev: Option<String>,
     },
 }
 
@@ -245,6 +253,10 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
     let stashes = osier_git::stash::list(repo).map_err(|e| format!("stash: {e}"))?;
     let remotes = osier_git::refs::remotes(repo).map_err(|e| format!("remotes: {e}"))?;
     let reflog = osier_git::reflog::list(repo, 200).map_err(|e| format!("reflog: {e}"))?;
+    let mut files = osier_git::files::tracked(repo).map_err(|e| format!("ls-files: {e}"))?;
+    files.extend(osier_git::files::untracked(repo).map_err(|e| format!("ls-files: {e}"))?);
+    files.sort();
+    files.dedup();
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     Ok(Snapshot {
         status,
@@ -254,6 +266,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
         stashes,
         remotes,
         reflog,
+        files,
         identity,
         in_progress: repo.in_progress(),
     })
