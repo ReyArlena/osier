@@ -11,6 +11,7 @@
 
 pub mod history;
 pub mod paths;
+pub mod scan;
 pub mod settings;
 pub mod state;
 

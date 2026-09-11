@@ -2,6 +2,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tag::Tag;
@@ -138,6 +139,45 @@ impl Osier {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.select_file(click_path.clone(), area, cx)
                         }))
+                        .context_menu({
+                            let weak = cx.entity().downgrade();
+                            let p = path.clone();
+                            move |menu, _, _| {
+                                let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+                                let (p1, p2, p3) = (p.clone(), p.clone(), p.clone());
+                                menu.item(PopupMenuItem::new("Open in editor").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w1.update(cx, |this, cx| {
+                                            this.open_in_editor(
+                                                Some((p1.clone(), None)),
+                                                window,
+                                                cx,
+                                            )
+                                        });
+                                    },
+                                ))
+                                .item(PopupMenuItem::new("Reveal in file manager").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w2.update(cx, |this, cx| {
+                                            this.reveal_in_file_manager(
+                                                Some(p2.clone()),
+                                                window,
+                                                cx,
+                                            )
+                                        });
+                                    },
+                                ))
+                                .item(
+                                    PopupMenuItem::new("Copy path").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w3.update(cx, |this, cx| {
+                                                this.copy_to_clipboard(p3.clone(), window, cx)
+                                            });
+                                        },
+                                    ),
+                                )
+                            }
+                        })
                         .child(
                             Checkbox::new(SharedString::from(format!("stage-{title}-{ix}")))
                                 .small()

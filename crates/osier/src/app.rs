@@ -134,6 +134,10 @@ pub struct Osier {
     pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
     pub(crate) gh_accounts: Vec<osier_auth::GhAccount>,
+    /// Repositories found under the configured scan directories.
+    pub(crate) scanned: Vec<PathBuf>,
+    /// Sidebar filter box.
+    pub(crate) sidebar_filter: Entity<gpui_kit::component::input::InputState>,
     /// Projects whose account choice was "this time only" (not written to state on save).
     pub(crate) session_only_accounts: std::collections::BTreeSet<String>,
     /// Command log opened by the dev env var: do not persist that as a preference.
@@ -169,6 +173,18 @@ impl Osier {
                 .rows(4)
                 .placeholder("Commit message (ctrl-enter to commit)")
         });
+        let sidebar_filter = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx).placeholder("Filter projects")
+        });
+        let filter_subscription = cx.subscribe_in(
+            &sidebar_filter,
+            window,
+            |this, _, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter { .. } => this.open_first_filtered(window, cx),
+                _ => {}
+            },
+        );
         let message_subscription =
             cx.subscribe_in(&commit_message, window, |_, _, ev: &InputEvent, _, cx| {
                 if matches!(ev, InputEvent::Change) {
@@ -217,9 +233,11 @@ impl Osier {
             state_dirty: false,
             remote_job: None,
             gh_accounts: Vec::new(),
+            scanned: Vec::new(),
+            sidebar_filter,
             session_only_accounts: Default::default(),
             diff_task: Task::ready(()),
-            _subscriptions: vec![message_subscription],
+            _subscriptions: vec![message_subscription, filter_subscription],
         };
         this.apply_appearance(cx);
         let diff_entity = this.diff.clone();
@@ -289,7 +307,102 @@ impl Osier {
         this.update_title(window);
         this.start_watcher_loop(cx);
         this.load_gh_accounts(cx);
+        this.rescan_projects(cx);
         this
+    }
+
+    /// Scan the configured directories for repositories, off the UI thread.
+    pub(crate) fn rescan_projects(&mut self, cx: &mut Context<Self>) {
+        let dirs = self.settings.projects.scan_dirs.clone();
+        if dirs.is_empty() {
+            self.scanned.clear();
+            return;
+        }
+        let depth = self.settings.projects.scan_depth.unwrap_or(1);
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async move { osier_config::scan::scan(&dirs, depth) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.scanned = found;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Lower-case filter text from the sidebar box.
+    pub(crate) fn sidebar_filter_text(&self, cx: &App) -> String {
+        self.sidebar_filter.read(cx).value().trim().to_lowercase()
+    }
+
+    /// Does `path` match the sidebar filter (name or any path segment)?
+    pub(crate) fn matches_filter(path: &Path, filter: &str) -> bool {
+        filter.is_empty() || path.to_string_lossy().to_lowercase().contains(filter)
+    }
+
+    /// Recents and scanned repositories that are not open, filtered, with their origin.
+    pub(crate) fn recent_entries(&self, cx: &App) -> Vec<(PathBuf, Option<PathBuf>)> {
+        let filter = self.sidebar_filter_text(cx);
+        let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
+        for p in self.state.recent_not_open() {
+            if Self::matches_filter(p, &filter) {
+                let provider =
+                    osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
+                out.push((p.clone(), provider));
+            }
+        }
+        for p in &self.scanned {
+            if !self.state.open_projects.contains(p)
+                && !out.iter().any(|(q, _)| q == p)
+                && Self::matches_filter(p, &filter)
+            {
+                let provider =
+                    osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
+                out.push((p.clone(), provider));
+            }
+        }
+        out
+    }
+
+    /// Enter in the filter box: activate the first open match, else open the first recent.
+    pub(crate) fn open_first_filtered(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let filter = self.sidebar_filter_text(cx);
+        if filter.is_empty() {
+            return;
+        }
+        if let Some(ix) = self
+            .projects
+            .iter()
+            .position(|p| Self::matches_filter(&p.path, &filter))
+        {
+            self.activate(ix, window, cx);
+            return;
+        }
+        if let Some((path, _)) = self.recent_entries(cx).into_iter().next() {
+            self.open_project_notify(&path, window, cx);
+        }
+    }
+
+    /// Move an open project up or down in the sidebar.
+    pub(crate) fn move_project(&mut self, ix: usize, delta: isize, cx: &mut Context<Self>) {
+        let len = self.projects.len();
+        let Some(new_ix) = ix.checked_add_signed(delta).filter(|n| *n < len) else {
+            return;
+        };
+        self.projects.swap(ix, new_ix);
+        if let Some(a) = self.active {
+            self.active = Some(if a == ix {
+                new_ix
+            } else if a == new_ix {
+                ix
+            } else {
+                a
+            });
+        }
+        self.state.open_projects = self.projects.iter().map(|p| p.path.clone()).collect();
+        self.save_state();
+        cx.notify();
     }
 
     // ----- appearance -----
@@ -422,7 +535,7 @@ impl Osier {
         }
     }
 
-    /// Forget a recent entry. Scan-directory entries cannot be removed here.
+    /// Forget a recent entry. Entries provided by a scan directory cannot be removed here.
     pub(crate) fn forget_recent(
         &mut self,
         path: &Path,
@@ -430,6 +543,22 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         use gpui_kit::component::WindowExt as _;
+        if let Some(dir) = osier_config::scan::provider(&self.settings.projects.scan_dirs, path) {
+            let dir = crate::format::tilde(dir);
+            let name = crate::format::tilde(path);
+            self.confirm(
+                "Provided by a scan directory",
+                format!(
+                    "{name} appears because {dir} is listed under projects.scan_dirs in config.toml. It cannot be removed on its own. To stop listing it, remove {dir} from the scan directories (Settings > Projects, or edit config.toml)."
+                ),
+                "OK",
+                false,
+                |_, _, _| {},
+                window,
+                cx,
+            );
+            return;
+        }
         self.state.forget_recent(path);
         self.save_state();
         window.push_notification(
@@ -1427,6 +1556,95 @@ mod tests {
                     .len()
                     >= 3
             )
+        });
+    }
+
+    #[gpui::test]
+    fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let second = TempRepo::new();
+        second.commit_file("b.txt", "b\n", "first");
+        // A scan directory holding two repositories and one plain folder.
+        let scan_root = tempfile::tempdir().unwrap();
+        for name in ["alpha", "beta"] {
+            let r = scan_root.path().join(name);
+            std::fs::create_dir_all(&r).unwrap();
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&r)
+                .status()
+                .unwrap();
+        }
+        std::fs::create_dir_all(scan_root.path().join("plain")).unwrap();
+
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, cx| {
+            osier.settings.projects.scan_dirs = vec![scan_root.path().to_path_buf()];
+            osier.rescan_projects(cx);
+        });
+        h.read(cx, |osier, cx| {
+            assert_eq!(
+                osier.scanned.len(),
+                2,
+                "alpha and beta found, plain skipped"
+            );
+            let recents = osier.recent_entries(cx);
+            assert_eq!(recents.len(), 2);
+            assert!(recents.iter().all(|(_, provider)| provider.is_some()));
+        });
+
+        // Filtering narrows recents; Enter opens the first match.
+        h.act(cx, |osier, window, cx| {
+            osier
+                .sidebar_filter
+                .update(cx, |s, cx| s.set_value("beta", window, cx))
+        });
+        h.read(cx, |osier, cx| {
+            assert_eq!(osier.recent_entries(cx).len(), 1)
+        });
+        h.act(cx, |osier, window, cx| {
+            osier.open_first_filtered(window, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.projects.len(), 2);
+            assert!(osier.active_project().unwrap().path.ends_with("beta"));
+        });
+
+        // A scanned entry cannot be forgotten: recents are unchanged after the attempt.
+        h.act(cx, |osier, window, cx| {
+            osier
+                .sidebar_filter
+                .update(cx, |s, cx| s.set_value("", window, cx))
+        });
+        let alpha = scan_root.path().join("alpha");
+        h.act(cx, |osier, window, cx| {
+            osier.forget_recent(&alpha, window, cx)
+        });
+        h.read(cx, |osier, cx| {
+            assert!(
+                osier
+                    .recent_entries(cx)
+                    .iter()
+                    .any(|(p, _)| p.ends_with("alpha"))
+            )
+        });
+
+        // Reorder open projects.
+        let second_path = second.path().to_path_buf();
+        h.act(cx, |osier, window, cx| {
+            osier.open_project_notify(&second_path, window, cx)
+        });
+        h.read(cx, |osier, _| assert_eq!(osier.projects.len(), 3));
+        h.act(cx, |osier, _, cx| osier.move_project(2, -2, cx));
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.projects[0].path, second.path());
+            assert_eq!(osier.state.open_projects[0], second.path());
+            assert_eq!(
+                osier.active_project().unwrap().path,
+                second.path(),
+                "active follows the moved project"
+            );
         });
     }
 }
