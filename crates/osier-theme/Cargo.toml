@@ -6,13 +6,14 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Osier theme layer"
+description = "Osier themes: Catppuccin defaults, Dux Shell colour sync, theme JSON generation"
 publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
 tracing.workspace = true
 
 [lints]

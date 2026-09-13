@@ -4817,6 +4817,7 @@ dependencies = [
  "osier-config",
  "osier-git",
  "osier-theme",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -4866,6 +4867,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tracing",
 ]
