@@ -131,49 +131,64 @@ fn main() {
         })
         .err();
 
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
-        .run(move |cx| {
-            gpui_kit::init(cx);
-            init_themes(&paths, cx);
-            app::init(cx);
+    // Remote images in markdown and later the GitHub API need a real http client; gpui
+    // starts with one that fails every request.
+    let http = match reqwest_client::ReqwestClient::user_agent(&format!(
+        "osier/{}",
+        env!("CARGO_PKG_VERSION")
+    )) {
+        Ok(client) => Some(Arc::new(client)),
+        Err(error) => {
+            tracing::warn!(%error, "http client unavailable, remote images disabled");
+            None
+        }
+    };
+    let mut application = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+    if let Some(http) = http {
+        application = application.with_http_client(http);
+    }
+    application.run(move |cx| {
+        gpui_kit::init(cx);
+        init_themes(&paths, cx);
+        app::init(cx);
 
-            let bounds = match state.window {
-                Some(w) if w.width >= 600. && w.height >= 400. => WindowBounds::Windowed(
-                    Bounds::new(point(px(w.x), px(w.y)), size(px(w.width), px(w.height))),
-                ),
-                _ => WindowBounds::centered(size(px(1400.), px(860.)), cx),
-            };
-            let options = WindowOptions {
-                window_bounds: Some(bounds),
-                window_min_size: Some(size(px(1000.), px(600.))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Osier".into()),
-                    ..Default::default()
-                }),
-                app_id: Some(APP_ID.into()),
-                ..TitleBar::window_options()
-            };
-            let opened = gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| {
-                    app::Osier::new(
-                        paths,
-                        settings,
-                        state,
-                        runner,
-                        sink,
-                        open_arg,
-                        startup_error,
-                        window,
-                        cx,
-                    )
-                })
-            });
-            if let Err(error) = opened {
-                tracing::error!(%error, "failed to open main window");
-                cx.quit();
-                return;
-            }
-            cx.activate(true);
+        let bounds = match state.window {
+            Some(w) if w.width >= 600. && w.height >= 400. => WindowBounds::Windowed(Bounds::new(
+                point(px(w.x), px(w.y)),
+                size(px(w.width), px(w.height)),
+            )),
+            _ => WindowBounds::centered(size(px(1400.), px(860.)), cx),
+        };
+        let options = WindowOptions {
+            window_bounds: Some(bounds),
+            window_min_size: Some(size(px(1000.), px(600.))),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Osier".into()),
+                ..Default::default()
+            }),
+            app_id: Some(APP_ID.into()),
+            ..TitleBar::window_options()
+        };
+        let opened = gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| {
+                app::Osier::new(
+                    paths,
+                    settings,
+                    state,
+                    runner,
+                    sink,
+                    open_arg,
+                    startup_error,
+                    window,
+                    cx,
+                )
+            })
         });
+        if let Err(error) = opened {
+            tracing::error!(%error, "failed to open main window");
+            cx.quit();
+            return;
+        }
+        cx.activate(true);
+    });
 }

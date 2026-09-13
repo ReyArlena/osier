@@ -486,6 +486,7 @@ impl Osier {
                     }
                 } else {
                     let root = repo_root.clone();
+                    let remote_ok = self.settings.viewer.remote_images;
                     div()
                         .id("markdown-view")
                         .size_full()
@@ -496,10 +497,17 @@ impl Osier {
                                 .selectable(true)
                                 .image_source(move |uri| {
                                     let s = uri.to_string();
-                                    if s.starts_with("http://")
-                                        || s.starts_with("https://")
-                                        || s.starts_with("data:")
-                                    {
+                                    if s.starts_with("http://") || s.starts_with("https://") {
+                                        if remote_ok {
+                                            ImageSource::from(uri.clone())
+                                        } else {
+                                            // Setting off: a path that does not exist renders as a
+                                            // missing image instead of fetching anything.
+                                            ImageSource::from(std::path::PathBuf::from(
+                                                "/nonexistent/osier-remote-images-off",
+                                            ))
+                                        }
+                                    } else if s.starts_with("data:") {
                                         ImageSource::from(uri.clone())
                                     } else {
                                         let p = root

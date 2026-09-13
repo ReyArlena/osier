@@ -15,6 +15,7 @@ pub struct Settings {
     pub diff: Diff,
     pub git: Git,
     pub auth: Auth,
+    pub viewer: Viewer,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -120,6 +121,22 @@ impl Default for Git {
         Self {
             log_page_size: 500,
             show_command_log: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Viewer {
+    /// Fetch images referenced by http(s) URLs in markdown (README badges and the like).
+    /// Off means only files inside the repository are shown.
+    pub remote_images: bool,
+}
+
+impl Default for Viewer {
+    fn default() -> Self {
+        Self {
+            remote_images: true,
         }
     }
 }
