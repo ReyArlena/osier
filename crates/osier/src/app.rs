@@ -326,6 +326,13 @@ impl Osier {
         if this.active.is_none() && !this.projects.is_empty() {
             this.activate(0, window, cx);
         }
+        // Dev aid for screenshots: OSIER_START_FILE=<path> opens that file in the viewer.
+        if let Ok(file) = std::env::var("OSIER_START_FILE")
+            && this.active.is_some()
+        {
+            this.tab = Tab::Files;
+            this.select_work_file(file, None, cx);
+        }
         this.update_title(window);
         this.start_watcher_loop(cx);
         this.load_gh_accounts(cx);

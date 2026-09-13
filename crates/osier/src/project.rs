@@ -29,6 +29,7 @@ pub struct Snapshot {
     pub reflog: Vec<ReflogEntry>,
     /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
     pub files: Vec<String>,
+    pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -257,6 +258,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
     files.extend(osier_git::files::untracked(repo).map_err(|e| format!("ls-files: {e}"))?);
     files.sort();
     files.dedup();
+    let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     Ok(Snapshot {
         status,
@@ -267,6 +269,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
         remotes,
         reflog,
         files,
+        worktrees,
         identity,
         in_progress: repo.in_progress(),
     })

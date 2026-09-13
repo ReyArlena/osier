@@ -371,44 +371,49 @@ impl Osier {
                                 this.lines_action(action, window, cx)
                             }))
                     }))
-                    .child(
-                        Button::new("unified")
-                            .ghost()
-                            .xsmall()
-                            .label("Unified")
-                            .selected(mode == DiffMode::Unified)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_diff_mode(DiffMode::Unified, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("split")
-                            .ghost()
-                            .xsmall()
-                            .label("Split")
-                            .selected(mode == DiffMode::Split)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_diff_mode(DiffMode::Split, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("wrap")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::TextWrap)
-                            .selected(self.settings.diff.soft_wrap)
-                            .tooltip("Wrap long lines")
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_soft_wrap(cx))),
-                    )
-                    .child(Separator::vertical().h_4())
-                    .child(
-                        Button::new("revert")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::Undo2)
-                            .disabled(true)
-                            .tooltip("Revert file"),
-                    ),
+                    .when(!viewing && !editing, |this| {
+
+                        this
+                        .child(
+                            Button::new("unified")
+                                .ghost()
+                                .xsmall()
+                                .label("Unified")
+                                .selected(mode == DiffMode::Unified)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_diff_mode(DiffMode::Unified, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("split")
+                                .ghost()
+                                .xsmall()
+                                .label("Split")
+                                .selected(mode == DiffMode::Split)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_diff_mode(DiffMode::Split, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("wrap")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::TextWrap)
+                                .selected(self.settings.diff.soft_wrap)
+                                .tooltip("Wrap long lines")
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_soft_wrap(cx))),
+                        )
+                        .child(Separator::vertical().h_4())
+                        .child(
+                            Button::new("revert")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::Undo2)
+                                .disabled(true)
+                                .tooltip("Revert file"),
+                        )
+
+                    }),
             )
             .child(
                 div()

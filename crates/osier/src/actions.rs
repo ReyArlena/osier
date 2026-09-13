@@ -635,6 +635,103 @@ impl Osier {
         self.open_rebase_dialog(base, window, cx);
     }
 
+    // ----- worktrees -----
+
+    /// New worktree on a new branch, in a sibling directory `<repo>-<branch>` by default.
+    pub(crate) fn prompt_add_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.active_project() else {
+            return;
+        };
+        let root = project.path.clone();
+        let existing = PromptFlag::new(
+            "Check out an existing branch instead of creating one",
+            false,
+        );
+        let existing_value = existing.value.clone();
+        self.prompt_text(
+            "New worktree: branch name",
+            "feature-x",
+            "",
+            "Next",
+            vec![existing],
+            move |this, branch, window, cx| {
+                let branch = branch.trim().to_string();
+                if branch.is_empty() {
+                    return;
+                }
+                let default_dir = root
+                    .parent()
+                    .map(|p| {
+                        p.join(format!(
+                            "{}-{}",
+                            root.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                            branch.replace('/', "-")
+                        ))
+                    })
+                    .unwrap_or_else(|| root.join(&branch));
+                let new_branch = !existing_value.get();
+                this.prompt_text(
+                    "New worktree: directory",
+                    "path",
+                    default_dir.to_string_lossy().into_owned(),
+                    "Create worktree",
+                    vec![],
+                    move |this, dir, window, cx| {
+                        let dir = osier_config::scan::expand_home(std::path::Path::new(dir.trim()));
+                        if dir.as_os_str().is_empty() {
+                            return;
+                        }
+                        let (b, d) = (branch.clone(), dir.clone());
+                        this.run_op(
+                            format!("Added worktree {} on {b}", crate::format::tilde(&d)),
+                            move |repo| {
+                                osier_git::ops::worktree::add(repo, &d, &b, new_branch, None)
+                            },
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_remove_worktree(
+        &mut self,
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = crate::format::tilde(&path);
+        let force = PromptFlag::new("Force (discard uncommitted changes in it)", false);
+        let force_value = force.value.clone();
+        self.prompt_text(
+            "Remove worktree?",
+            "",
+            name.clone(),
+            "Remove",
+            vec![force],
+            move |this, _, window, cx| {
+                let p = path.clone();
+                let force = force_value.get();
+                this.run_op(
+                    format!("Removed worktree {name}"),
+                    move |repo| osier_git::ops::worktree::remove(repo, &p, force),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
     // ----- remotes -----
 
     pub(crate) fn prompt_add_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {

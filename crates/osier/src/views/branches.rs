@@ -269,6 +269,97 @@ impl Osier {
             }
         }
 
+        // Worktrees: the main checkout plus linked ones.
+        if snapshot.worktrees.len() > 1 {
+            list = list.child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(muted)
+                    .child("Worktrees")
+                    .child(snapshot.worktrees.len().to_string()),
+            );
+            for (ix, w) in snapshot.worktrees.iter().enumerate() {
+                let path = w.path.clone();
+                let is_this =
+                    Some(path.as_path()) == self.active_project().map(|p| p.path.as_path());
+                let weak = weak.clone();
+                list = list.child(
+                    h_flex()
+                        .id(("worktree", ix))
+                        .px_3()
+                        .py_1p5()
+                        .gap_2()
+                        .items_center()
+                        .hover(|this| this.bg(cx.theme().list_hover))
+                        .child(Icon::new(Lucide::FolderTree).xsmall())
+                        .child(
+                            div()
+                                .text_sm()
+                                .flex_none()
+                                .child(w.branch.clone().unwrap_or_else(|| "detached".into())),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(crate::format::tilde(&w.path)),
+                        )
+                        .when(is_this, |this| {
+                            this.child(Tag::primary().xsmall().child("this"))
+                        })
+                        .when(w.is_main && !is_this, |this| {
+                            this.child(Tag::secondary().xsmall().child("main"))
+                        })
+                        .when(w.locked, |this| {
+                            this.child(Tag::warning().xsmall().child("locked"))
+                        })
+                        .when(w.prunable, |this| {
+                            this.child(Tag::danger().xsmall().child("missing"))
+                        })
+                        .child(
+                            Button::new(("worktree-menu", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::Ellipsis)
+                                .dropdown_menu(move |menu, _, _| {
+                                    let (p1, p2) = (path.clone(), path.clone());
+                                    let (w1, w2) = (weak.clone(), weak.clone());
+                                    menu.item(
+                                        PopupMenuItem::new("Open as project")
+                                            .disabled(is_this)
+                                            .on_click(move |_, window, cx| {
+                                                let _ = w1.update(cx, |this, cx| {
+                                                    this.open_project_notify(&p1, window, cx)
+                                                });
+                                            }),
+                                    )
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Remove worktree…")
+                                            .disabled(is_this)
+                                            .on_click(move |_, window, cx| {
+                                                let _ = w2.update(cx, |this, cx| {
+                                                    this.confirm_remove_worktree(
+                                                        p2.clone(),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    )
+                                }),
+                        ),
+                );
+            }
+        }
+
         // Remotes with their URLs and a menu.
         if !snapshot.remotes.is_empty() {
             list = list.child(
@@ -372,6 +463,17 @@ impl Osier {
                             .min_w_0()
                             .truncate()
                             .child(format!("{} local, {} remote", local.len(), remote.len())),
+                    )
+                    .child(
+                        Button::new("add-worktree")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::FolderTree)
+                            .label("Worktree")
+                            .tooltip("Add a worktree")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.prompt_add_worktree(window, cx)
+                            })),
                     )
                     .child(
                         Button::new("add-remote")

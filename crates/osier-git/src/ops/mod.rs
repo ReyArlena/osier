@@ -16,6 +16,7 @@ pub mod reset;
 pub mod stage;
 pub mod stash;
 pub mod tag;
+pub mod worktree;
 
 use crate::error::{GitError, Result};
 
