@@ -14,7 +14,90 @@ use gpui_kit::*;
 use crate::app::Osier;
 use crate::format::tilde;
 
+type MenuHandler = Box<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;
+
 impl Osier {
+    /// The theme button: a menu with mode, dark theme, light theme and Dux Shell sync.
+    /// The keyboard shortcut (ctrl-shift-t) still toggles dark/light directly.
+    fn render_theme_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::themes::ThemeStore;
+        use osier_config::settings::ThemeMode;
+
+        let w = cx.weak_entity();
+        let a = self.settings.appearance.clone();
+        let store = ThemeStore::global(cx);
+        let dark_names = store.names(true);
+        let light_names = store.names(false);
+        let dux_available = store.dux_available();
+        let dux_on = a.dux_shell_sync && dux_available;
+        let active = cx.theme().theme_name().clone();
+        Button::new("theme")
+            .ghost()
+            .small()
+            .icon(if cx.theme().mode.is_dark() {
+                Lucide::Sun
+            } else {
+                Lucide::Moon
+            })
+            .tooltip(format!("Theme: {active} (ctrl-shift-t toggles dark/light)"))
+            .dropdown_menu(move |mut menu, _, _| {
+                let act = |f: MenuHandler| {
+                    let w = w.clone();
+                    move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        let _ = w.update(cx, |this, cx| f(this, window, cx));
+                    }
+                };
+                menu = menu.label("Mode");
+                for (label, mode) in [
+                    ("Dark", ThemeMode::Dark),
+                    ("Light", ThemeMode::Light),
+                    ("System", ThemeMode::System),
+                ] {
+                    menu = menu.item(PopupMenuItem::new(label).checked(a.mode == mode).on_click(
+                        act(Box::new(move |this, _, cx| this.set_theme_mode(mode, cx))),
+                    ));
+                }
+                menu = menu.separator().label("Dark theme");
+                for name in &dark_names {
+                    let n = name.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(!dux_on && a.dark_theme == name.as_ref())
+                            .on_click(act(Box::new(move |this, _, cx| this.set_theme(&n, cx)))),
+                    );
+                }
+                menu = menu.separator().label("Light theme");
+                for name in &light_names {
+                    let n = name.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(!dux_on && a.light_theme == name.as_ref())
+                            .on_click(act(Box::new(move |this, _, cx| this.set_theme(&n, cx)))),
+                    );
+                }
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(if dux_available {
+                            "Follow Dux Shell colours"
+                        } else {
+                            "Follow Dux Shell colours (not detected)"
+                        })
+                        .disabled(!dux_available)
+                        .checked(dux_on)
+                        .on_click(act(Box::new(move |this, _, cx| {
+                            this.set_dux_sync(!dux_on, cx)
+                        }))),
+                    )
+                    .item(
+                        PopupMenuItem::new("Open themes folder")
+                            .icon(Lucide::FolderOpen)
+                            .on_click(act(Box::new(|this, window, cx| {
+                                this.open_themes_dir(window, cx)
+                            }))),
+                    )
+            })
+    }
+
     pub(crate) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let project = self.active_project();
         let branch = project
@@ -111,18 +194,7 @@ impl Osier {
                         .tooltip("Git command log (ctrl-`)")
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_command_log(cx))),
                 )
-                .child(
-                    Button::new("theme")
-                        .ghost()
-                        .small()
-                        .icon(if cx.theme().mode.is_dark() {
-                            Lucide::Sun
-                        } else {
-                            Lucide::Moon
-                        })
-                        .tooltip("Toggle light/dark (ctrl-shift-t)")
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
-                )
+                .child(self.render_theme_menu(cx))
                 .child(
                     Button::new("settings")
                         .ghost()

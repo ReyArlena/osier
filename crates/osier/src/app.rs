@@ -66,10 +66,6 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-pub(crate) fn apply_theme_by_name(name: &str, cx: &mut App) {
-    crate::apply_theme(name, cx);
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Changes,
@@ -175,6 +171,7 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        crate::themes::ThemeStore::ensure(paths.themes_dir(), true, cx);
         let mode = match settings.diff.mode {
             osier_config::settings::DiffMode::Unified => DiffMode::Unified,
             osier_config::settings::DiffMode::Split => DiffMode::Split,
@@ -437,24 +434,95 @@ impl Osier {
     // ----- appearance -----
 
     pub(crate) fn apply_appearance(&mut self, cx: &mut App) {
+        use crate::themes::{DUX_DARK, DUX_LIGHT, ThemeStore};
         let a = &self.settings.appearance;
+        let store = ThemeStore::global(cx);
+        let dux = a.dux_shell_sync && store.dux_available();
         let dark = match a.mode {
             ThemeMode::Dark => true,
             ThemeMode::Light => false,
-            ThemeMode::System => matches!(
-                cx.window_appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            ),
+            ThemeMode::System => match store.dux_mode() {
+                Some(mode) if dux => mode == osier_theme::Mode::Dark,
+                _ => matches!(
+                    cx.window_appearance(),
+                    WindowAppearance::Dark | WindowAppearance::VibrantDark
+                ),
+            },
         };
-        let name = if dark { &a.dark_theme } else { &a.light_theme };
-        if !crate::apply_theme(name, cx) {
+        let name = match (dux, dark) {
+            (true, true) => DUX_DARK,
+            (true, false) => DUX_LIGHT,
+            (false, true) => a.dark_theme.as_str(),
+            (false, false) => a.light_theme.as_str(),
+        };
+        if !crate::themes::apply(name, a, cx) {
+            tracing::warn!(name, "theme not found, using the bundled default");
             let fallback = if dark {
                 "Catppuccin Mocha"
             } else {
                 "Catppuccin Latte"
             };
-            crate::apply_theme(fallback, cx);
+            crate::themes::apply(fallback, a, cx);
         }
+    }
+
+    pub(crate) fn set_theme_mode(&mut self, mode: ThemeMode, cx: &mut Context<Self>) {
+        self.settings.appearance.mode = mode;
+        self.apply_appearance(cx);
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// Pick a theme for its own mode (dark themes replace the dark choice, light the light).
+    /// Picking an explicit theme turns Dux Shell sync off.
+    pub(crate) fn set_theme(&mut self, name: &str, cx: &mut Context<Self>) {
+        let Some(config) = crate::themes::ThemeStore::global(cx).get(name) else {
+            return;
+        };
+        // Picking a theme of the other mode switches to that mode explicitly (System mode
+        // would otherwise keep showing the old one).
+        let showing_dark = cx.theme().mode.is_dark();
+        let a = &mut self.settings.appearance;
+        if config.mode.is_dark() {
+            a.dark_theme = name.to_string();
+            if !showing_dark {
+                a.mode = ThemeMode::Dark;
+            }
+        } else {
+            a.light_theme = name.to_string();
+            if showing_dark {
+                a.mode = ThemeMode::Light;
+            }
+        }
+        a.dux_shell_sync = false;
+        self.apply_appearance(cx);
+        self.save_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_dux_sync(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.appearance.dux_shell_sync = on;
+        self.apply_appearance(cx);
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// Reload themes when a theme file changed on disk. Returns true when something changed.
+    fn poll_themes(&mut self, cx: &mut Context<Self>) -> bool {
+        if !crate::themes::ThemeStore::global(cx).take_dirty() {
+            return false;
+        }
+        crate::themes::ThemeStore::global_mut(cx).reload();
+        self.apply_appearance(cx);
+        true
+    }
+
+    pub(crate) fn open_themes_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dir = self.paths.themes_dir();
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(%error, "could not create the themes directory");
+        }
+        self.open_externally(&dir, window, cx);
     }
 
     pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {
@@ -775,7 +843,7 @@ impl Osier {
                         this.state_dirty = false;
                         this.save_state();
                     }
-                    if this.poll_remote_job() {
+                    if this.poll_remote_job() || this.poll_themes(cx) {
                         cx.notify();
                     }
                     // The command log panel shows new records as they land.
@@ -1296,6 +1364,91 @@ mod tests {
         fn read<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Osier, &gpui::App) -> R) -> R {
             cx.update(|cx| f(self.view.read(cx), cx))
         }
+    }
+
+    #[gpui::test]
+    fn theme_menu_switches_mode_and_theme(cx: &mut TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        use osier_config::settings::ThemeMode;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+
+        h.read(cx, |_, cx| {
+            assert!(cx.theme().mode.is_dark());
+            assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Mocha");
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.set_theme_mode(ThemeMode::Light, cx)
+        });
+        h.read(cx, |osier, cx| {
+            assert!(!cx.theme().mode.is_dark());
+            assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Latte");
+            assert_eq!(osier.settings.appearance.mode, ThemeMode::Light);
+        });
+        // Picking a dark theme while in light mode switches to dark and remembers it.
+        h.act(cx, |osier, _, cx| osier.set_theme("Catppuccin Frappe", cx));
+        h.read(cx, |osier, cx| {
+            assert!(cx.theme().mode.is_dark());
+            assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Frappe");
+            assert_eq!(osier.settings.appearance.dark_theme, "Catppuccin Frappe");
+            assert_eq!(osier.settings.appearance.light_theme, "Catppuccin Latte");
+        });
+        // Unknown names are ignored.
+        h.act(cx, |osier, _, cx| osier.set_theme("Nope", cx));
+        h.read(cx, |_, cx| {
+            assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Frappe")
+        });
+    }
+
+    #[gpui::test]
+    fn dux_shell_sync_applies_the_generated_theme(cx: &mut TestAppContext) {
+        use crate::themes::{DuxSource, ThemeStore};
+        use gpui_kit::component::ActiveTheme as _;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        let dms = tempfile::tempdir().expect("tempdir");
+        let colors = dms.path().join("dms-colors.json");
+        std::fs::write(
+            &colors,
+            r##"{"mode":"light","colors":{"dark":{"background":"#101418","primary":"#9ecbff"},
+                "light":{"background":"#f7f9fe","primary":"#1f5f98"}},"dank16":{}}"##,
+        )
+        .expect("write dms file");
+
+        h.read(cx, |osier, cx| {
+            assert!(!ThemeStore::global(cx).dux_available());
+            assert!(!osier.settings.appearance.dux_shell_sync);
+        });
+        h.act(cx, |osier, _, cx| {
+            ThemeStore::global_mut(cx).set_dux_source(DuxSource::File(colors.clone()));
+            osier.set_dux_sync(true, cx);
+        });
+        h.read(cx, |osier, cx| {
+            assert!(ThemeStore::global(cx).dux_available());
+            // Mode is still the user's (dark), only the colours come from Dux Shell.
+            assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Dark");
+            let rgb = cx.theme().background.to_rgb();
+            assert_eq!((rgb.r * 255.0).round() as u8, 0x10);
+            assert_eq!((rgb.b * 255.0).round() as u8, 0x18);
+            assert!(osier.settings.appearance.dux_shell_sync);
+            let names = ThemeStore::global(cx).names(true);
+            assert!(!names.iter().any(|n| n.as_ref() == "Dux Shell Dark"));
+        });
+        // System mode follows the Dux Shell mode while sync is on.
+        h.act(cx, |osier, _, cx| {
+            osier.set_theme_mode(osier_config::settings::ThemeMode::System, cx)
+        });
+        h.read(cx, |_, cx| {
+            assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Light")
+        });
+        // Picking an explicit theme turns sync off.
+        h.act(cx, |osier, _, cx| osier.set_theme("Catppuccin Mocha", cx));
+        h.read(cx, |osier, cx| {
+            assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Mocha");
+            assert!(!osier.settings.appearance.dux_shell_sync);
+        });
     }
 
     #[gpui::test]

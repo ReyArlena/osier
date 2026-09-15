@@ -66,13 +66,22 @@ pub fn run(prompt: String) -> ExitCode {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            // Bundled themes are not loaded in this mode; apply the dark one directly.
-            if let Err(error) = gpui_kit::component::ThemeRegistry::global_mut(cx)
-                .load_themes_from_str(crate::BUNDLED_THEMES[0])
-            {
-                tracing::warn!(%error, "bundled theme");
+            // Follow the user's theme choice; no file watching for a short-lived prompt.
+            if let Ok(paths) = osier_config::Paths::discover() {
+                let settings = osier_config::Settings::load(&paths).unwrap_or_default();
+                crate::themes::ThemeStore::ensure(paths.themes_dir(), false, cx);
+                let a = &settings.appearance;
+                let dark = a.mode != osier_config::settings::ThemeMode::Light;
+                let name = if dark { &a.dark_theme } else { &a.light_theme };
+                if !crate::themes::apply(name, a, cx) {
+                    let fallback = if dark {
+                        "Catppuccin Mocha"
+                    } else {
+                        "Catppuccin Latte"
+                    };
+                    crate::themes::apply(fallback, a, cx);
+                }
             }
-            crate::apply_theme("Catppuccin Mocha", cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(460.), px(200.)), cx)),
                 titlebar: Some(TitlebarOptions {

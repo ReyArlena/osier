@@ -17,19 +17,19 @@ mod ops;
 mod project;
 mod rebase_dialog;
 mod remote_ops;
+mod themes;
 mod viewer;
 mod views;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui_kit::component::{ActiveTheme as _, Theme, ThemeRegistry, TitleBar};
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use crate::command_log::UiCommandSink;
 
 const APP_ID: &str = "com.reyarlena.osier";
-const BUNDLED_THEMES: &[&str] = &[include_str!("../../../themes/catppuccin.json")];
 
 fn init_logging() {
     use tracing_subscriber::EnvFilter;
@@ -38,36 +38,6 @@ fn init_logging() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
-}
-
-/// Load bundled and user themes into the registry.
-fn init_themes(paths: &osier_config::Paths, cx: &mut App) {
-    let registry = ThemeRegistry::global_mut(cx);
-    for source in BUNDLED_THEMES {
-        if let Err(error) = registry.load_themes_from_str(source) {
-            tracing::warn!(%error, "failed to load bundled theme");
-        }
-    }
-    let user_dir = paths.themes_dir();
-    if user_dir.is_dir()
-        && let Err(error) = ThemeRegistry::watch_dir(user_dir.clone(), cx, |cx| {
-            // Re-apply the active theme so edits show up live.
-            let name = cx.theme().theme_name().clone();
-            app::apply_theme_by_name(&name, cx);
-        })
-    {
-        tracing::warn!(%error, dir = %user_dir.display(), "failed to watch user themes");
-    }
-}
-
-/// Apply a theme by name, keeping the font resolution gpui-kit did at startup.
-pub(crate) fn apply_theme(name: &str, cx: &mut App) -> bool {
-    let Some(config) = ThemeRegistry::global(cx).themes().get(name).cloned() else {
-        tracing::warn!(name, "theme not found in registry");
-        return false;
-    };
-    Theme::update(cx, |theme| theme.apply_config(&config));
-    true
 }
 
 fn main() {
@@ -149,7 +119,7 @@ fn main() {
     }
     application.run(move |cx| {
         gpui_kit::init(cx);
-        init_themes(&paths, cx);
+        themes::ThemeStore::ensure(paths.themes_dir(), true, cx);
         app::init(cx);
 
         let bounds = match state.window {

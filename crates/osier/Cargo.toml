@@ -43,6 +43,7 @@ reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
 osier-git.workspace = true
 osier-config.workspace = true
 osier-theme.workspace = true
+serde_json.workspace = true
 osier-auth.workspace = true
 
 [dev-dependencies]

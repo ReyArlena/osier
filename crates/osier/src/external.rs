@@ -169,6 +169,23 @@ impl Osier {
         }
     }
 
+    /// Open any path with the desktop default handler.
+    pub(crate) fn open_externally(
+        &mut self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let argv = vec!["xdg-open".to_string(), path.to_string_lossy().into_owned()];
+        let cwd = path.parent().unwrap_or(path);
+        if let Err(e) = spawn(&argv, cwd) {
+            window.push_notification(
+                Notification::error("Could not open").message(e.to_string()),
+                cx,
+            );
+        }
+    }
+
     /// Editors found on PATH, for the settings panel.
     #[allow(dead_code)]
     pub(crate) fn detected_editors() -> Vec<(&'static str, &'static str)> {
