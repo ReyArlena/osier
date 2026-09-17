@@ -65,6 +65,12 @@ pub enum Selection {
         path: String,
         rev: Option<String>,
     },
+    /// A stored patch from the Patches tab, read from its file.
+    Patch {
+        id: String,
+        name: String,
+        file: PathBuf,
+    },
 }
 
 #[derive(Debug)]

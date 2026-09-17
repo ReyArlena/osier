@@ -6,6 +6,7 @@ mod command_log;
 mod diff_pane;
 mod files_tab;
 mod log_tab;
+mod patches_tab;
 mod sidebar;
 mod stashes;
 mod status_bar;
@@ -60,6 +61,7 @@ impl Osier {
                 Tab::Branches => self.render_branches(cx).into_any_element(),
                 Tab::Stashes => self.render_stashes(cx).into_any_element(),
                 Tab::Files => self.render_files(cx).into_any_element(),
+                Tab::Patches => self.render_patches(cx).into_any_element(),
             }))
     }
 

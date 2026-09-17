@@ -32,6 +32,8 @@ gpui_kit::actions!(
         TabLog,
         TabBranches,
         TabStashes,
+        TabFiles,
+        TabPatches,
         SelectNext,
         SelectPrev,
         CommitStaged,
@@ -55,6 +57,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-2", TabLog, None),
         KeyBinding::new("ctrl-3", TabBranches, None),
         KeyBinding::new("ctrl-4", TabStashes, None),
+        KeyBinding::new("ctrl-5", TabFiles, None),
+        KeyBinding::new("ctrl-6", TabPatches, None),
         KeyBinding::new("ctrl-enter", CommitStaged, None),
         KeyBinding::new("ctrl-shift-f", Fetch, None),
         KeyBinding::new("ctrl-shift-l", Pull, None),
@@ -73,15 +77,17 @@ pub enum Tab {
     Branches,
     Stashes,
     Files,
+    Patches,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [
+    pub const ALL: [Tab; 6] = [
         Tab::Changes,
         Tab::Log,
         Tab::Branches,
         Tab::Stashes,
         Tab::Files,
+        Tab::Patches,
     ];
 
     pub fn label(self) -> &'static str {
@@ -91,6 +97,7 @@ impl Tab {
             Tab::Branches => "Branches",
             Tab::Stashes => "Stashes",
             Tab::Files => "Files",
+            Tab::Patches => "Patches",
         }
     }
 }
@@ -124,7 +131,7 @@ pub struct Osier {
     log_version_seen: u64,
     /// Size of a file the diff refused to load, until "load anyway".
     pub(crate) diff_too_large: Option<u64>,
-    diff_force_large: bool,
+    pub(crate) diff_force_large: bool,
     /// Focus for keyboard navigation in the center lists.
     pub(crate) list_focus: FocusHandle,
     pub(crate) commit_message: Entity<TextareaState>,
@@ -152,6 +159,9 @@ pub struct Osier {
     pub(crate) sidebar_filter: Entity<gpui_kit::component::input::InputState>,
     /// Projects whose account choice was "this time only" (not written to state on save).
     pub(crate) session_only_accounts: std::collections::BTreeSet<String>,
+    /// The patch clipboard (`<state>/patches`), newest first.
+    pub(crate) patches: Vec<osier_config::patches::StoredPatch>,
+    pub(crate) patch_selected: Option<String>,
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
@@ -172,6 +182,10 @@ impl Osier {
         cx: &mut Context<Self>,
     ) -> Self {
         crate::themes::ThemeStore::ensure(paths.themes_dir(), true, cx);
+        let patches = osier_config::patches::list(&paths).unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not list patches");
+            Vec::new()
+        });
         let mode = match settings.diff.mode {
             osier_config::settings::DiffMode::Unified => DiffMode::Unified,
             osier_config::settings::DiffMode::Split => DiffMode::Split,
@@ -228,12 +242,13 @@ impl Osier {
             projects: Vec::new(),
             active: None,
             show_reflog: false,
-            // Dev aid for screenshots: OSIER_START_TAB=log|branches|stashes.
+            // Dev aid for screenshots: OSIER_START_TAB=log|branches|stashes|files|patches.
             tab: match std::env::var("OSIER_START_TAB").as_deref() {
                 Ok("log") => Tab::Log,
                 Ok("branches") => Tab::Branches,
                 Ok("stashes") => Tab::Stashes,
                 Ok("files") => Tab::Files,
+                Ok("patches") => Tab::Patches,
                 _ => Tab::Changes,
             },
             expanded_command: None,
@@ -255,6 +270,8 @@ impl Osier {
             scanned: Vec::new(),
             sidebar_filter,
             session_only_accounts: Default::default(),
+            patches,
+            patch_selected: None,
             diff_task: Task::ready(()),
             _subscriptions: vec![message_subscription, filter_subscription],
         };
@@ -793,7 +810,7 @@ impl Osier {
                     Selection::None | Selection::Commit { .. } => false,
                     Selection::File { .. } | Selection::Compare { .. } => status_changed,
                     Selection::WorkFile { rev: None, .. } => status_changed,
-                    Selection::WorkFile { .. } => false,
+                    Selection::WorkFile { .. } | Selection::Patch { .. } => false,
                 };
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
@@ -1042,7 +1059,7 @@ impl Osier {
                 };
                 self.select_commit(next, cx);
             }
-            Tab::Branches | Tab::Stashes | Tab::Files => {}
+            Tab::Branches | Tab::Stashes | Tab::Files | Tab::Patches => {}
         }
     }
 
@@ -1162,6 +1179,8 @@ fn load_patch(
             osier_git::diff::patch_text(repo, &o)?
         }
         Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new())),
+        Selection::Patch { file, .. } => std::fs::read_to_string(file)
+            .map_err(|e| LoadError::Git(format!("{}: {e}", file.display())))?,
         Selection::Compare {
             from,
             to,
@@ -1218,6 +1237,8 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
             .on_action(cx.listener(|this, _: &TabStashes, _, cx| this.set_tab(Tab::Stashes, cx)))
+            .on_action(cx.listener(|this, _: &TabFiles, _, cx| this.set_tab(Tab::Files, cx)))
+            .on_action(cx.listener(|this, _: &TabPatches, _, cx| this.set_tab(Tab::Patches, cx)))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
                 this.start_remote(crate::remote_ops::RemoteOp::fetch_all(), window, cx)
@@ -1364,6 +1385,57 @@ mod tests {
         fn read<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Osier, &gpui::App) -> R) -> R {
             cx.update(|cx| f(self.view.read(cx), cx))
         }
+    }
+
+    #[gpui::test]
+    fn shelve_and_unshelve_through_the_patch_clipboard(cx: &mut TestAppContext) {
+        use osier_git::ops::patches::ApplyOptions;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.write("a.txt", "two\n");
+        repo.write("new.txt", "fresh\n");
+        let h = Harness::open(cx, &repo);
+
+        h.act(cx, |osier, window, cx| {
+            osier.shelve_named("my shelf".into(), Vec::new(), window, cx)
+        });
+        cx.run_until_parked();
+        let (id, text) = h.read(cx, |osier, _| {
+            assert_eq!(osier.patches.len(), 1, "one stored patch");
+            let p = &osier.patches[0];
+            assert_eq!(p.meta.name, "my shelf");
+            assert_eq!(p.meta.files, ["a.txt", "new.txt"]);
+            assert_eq!(osier.tab, super::Tab::Patches);
+            (p.id.clone(), p.text().expect("patch text"))
+        });
+        assert_eq!(repo.read("a.txt"), "one\n", "tracked change discarded");
+        assert!(!repo.path().join("new.txt").exists(), "untracked file gone");
+
+        // Unshelve: apply the stored text and delete the entry afterwards.
+        h.act(cx, |osier, window, cx| {
+            let id = id.clone();
+            osier.run_apply(
+                text.clone(),
+                ApplyOptions::default(),
+                "\"my shelf\"".into(),
+                Some(std::rc::Rc::new(
+                    move |this: &mut Osier,
+                          window: &mut gpui::Window,
+                          cx: &mut gpui::Context<Osier>| {
+                        this.delete_stored(id.clone(), window, cx)
+                    },
+                )),
+                window,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(repo.read("a.txt"), "two\n");
+        assert_eq!(repo.read("new.txt"), "fresh\n");
+        h.read(cx, |osier, _| {
+            assert!(osier.patches.is_empty(), "unshelved patch deleted");
+            assert_eq!(osier.tab, super::Tab::Changes);
+        });
     }
 
     #[gpui::test]

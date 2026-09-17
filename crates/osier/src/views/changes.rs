@@ -145,6 +145,8 @@ impl Osier {
                             move |menu, _, _| {
                                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                                 let (p1, p2, p3) = (p.clone(), p.clone(), p.clone());
+                                let (w4, w5, w6) = (weak.clone(), weak.clone(), weak.clone());
+                                let (p4, p5, p6) = (p.clone(), p.clone(), p.clone());
                                 menu.item(PopupMenuItem::new("Open in editor").on_click(
                                     move |_, window, cx| {
                                         let _ = w1.update(cx, |this, cx| {
@@ -167,14 +169,36 @@ impl Osier {
                                         });
                                     },
                                 ))
+                                .item(PopupMenuItem::new("Copy path").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w3.update(cx, |this, cx| {
+                                            this.copy_to_clipboard(p3.clone(), window, cx)
+                                        });
+                                    },
+                                ))
+                                .separator()
+                                .item(PopupMenuItem::new("Copy as patch").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w4.update(cx, |this, cx| {
+                                            let s = Osier::file_source(&p4, area);
+                                            this.copy_patch(s, window, cx)
+                                        });
+                                    },
+                                ))
+                                .item(PopupMenuItem::new("Save to Patches…").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w5.update(cx, |this, cx| {
+                                            let s = Osier::file_source(&p5, area);
+                                            this.save_patch_prompt(s, p5.clone(), window, cx)
+                                        });
+                                    },
+                                ))
                                 .item(
-                                    PopupMenuItem::new("Copy path").on_click(
-                                        move |_, window, cx| {
-                                            let _ = w3.update(cx, |this, cx| {
-                                                this.copy_to_clipboard(p3.clone(), window, cx)
-                                            });
-                                        },
-                                    ),
+                                    PopupMenuItem::new("Shelve…").on_click(move |_, window, cx| {
+                                        let _ = w6.update(cx, |this, cx| {
+                                            this.shelve_prompt(vec![(p6.clone(), area)], window, cx)
+                                        });
+                                    }),
                                 )
                             }
                         })

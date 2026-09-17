@@ -12,6 +12,8 @@ use gpui_kit::*;
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
 
+use osier_git::ops::patches::PatchSource;
+
 use crate::app::Osier;
 
 /// Menu handler receiving the commit hash.
@@ -248,6 +250,53 @@ impl Osier {
                                                                 "Tag here…",
                                                                 std::rc::Rc::new(|t, h, w, cx| {
                                                                     t.prompt_tag(h, w, cx)
+                                                                }),
+                                                            ))
+                                                            .item(item(
+                                                                "Copy as patch",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    t.copy_patch(
+                                                                        PatchSource::Commits {
+                                                                            hashes: vec![h],
+                                                                        },
+                                                                        w,
+                                                                        cx,
+                                                                    )
+                                                                }),
+                                                            ))
+                                                            .item(item(
+                                                                "Save to Patches…",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    let name = t
+                                                                        .commit_subject(&h)
+                                                                        .unwrap_or_else(|| {
+                                                                            h.clone()
+                                                                        });
+                                                                    t.save_patch_prompt(
+                                                                        PatchSource::Commits {
+                                                                            hashes: vec![h],
+                                                                        },
+                                                                        name,
+                                                                        w,
+                                                                        cx,
+                                                                    )
+                                                                }),
+                                                            ))
+                                                            .item(item(
+                                                                "Export patch file…",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    let name = format!(
+                                                                        "{}.patch",
+                                                                        &h[..h.len().min(7)]
+                                                                    );
+                                                                    t.export_patch(
+                                                                        PatchSource::Commits {
+                                                                            hashes: vec![h],
+                                                                        },
+                                                                        name,
+                                                                        w,
+                                                                        cx,
+                                                                    )
                                                                 }),
                                                             ))
                                                             .separator()

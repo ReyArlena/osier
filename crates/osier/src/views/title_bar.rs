@@ -98,6 +98,75 @@ impl Osier {
             })
     }
 
+    /// Patch actions for the whole working tree, plus applying from clipboard or file.
+    fn render_patch_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::app::Tab;
+        let w = cx.weak_entity();
+        let all = self.all_changes_source();
+        let has_project = self.active_project().is_some();
+        Button::new("patch")
+            .ghost()
+            .small()
+            .icon(Lucide::ClipboardCopy)
+            .disabled(!has_project)
+            .tooltip("Patches")
+            .dropdown_menu(move |menu, _, _| {
+                let act = |f: MenuHandler| {
+                    let w = w.clone();
+                    move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        let _ = w.update(cx, |this, cx| f(this, window, cx));
+                    }
+                };
+                let (a1, a2, a3) = (all.clone(), all.clone(), all.clone());
+                menu.item(
+                    PopupMenuItem::new("Apply patch from clipboard…")
+                        .icon(Lucide::ClipboardPaste)
+                        .on_click(act(Box::new(|this, window, cx| {
+                            this.apply_patch_from_clipboard(window, cx)
+                        }))),
+                )
+                .item(
+                    PopupMenuItem::new("Apply patch from file…")
+                        .icon(Lucide::FileInput)
+                        .on_click(act(Box::new(|this, window, cx| {
+                            this.apply_patch_from_file(window, cx)
+                        }))),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("Copy all changes as patch")
+                        .disabled(a1.is_none())
+                        .on_click(act(Box::new(move |this, window, cx| {
+                            if let Some(s) = a1.clone() {
+                                this.copy_patch(s, window, cx)
+                            }
+                        }))),
+                )
+                .item(
+                    PopupMenuItem::new("Save all changes to Patches…")
+                        .disabled(a2.is_none())
+                        .on_click(act(Box::new(move |this, window, cx| {
+                            if let Some(s) = a2.clone() {
+                                this.save_patch_prompt(s, "Working changes".into(), window, cx)
+                            }
+                        }))),
+                )
+                .item(
+                    PopupMenuItem::new("Shelve all changes…")
+                        .icon(Lucide::Package)
+                        .disabled(a3.is_none())
+                        .on_click(act(Box::new(|this, window, cx| {
+                            this.shelve_prompt(Vec::new(), window, cx)
+                        }))),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("Patches tab")
+                        .on_click(act(Box::new(|this, _, cx| this.set_tab(Tab::Patches, cx)))),
+                )
+            })
+    }
+
     pub(crate) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let project = self.active_project();
         let branch = project
@@ -177,14 +246,7 @@ impl Osier {
                         .disabled(!has_project)
                         .on_click(cx.listener(|this, _, window, cx| this.prompt_stash(window, cx))),
                 )
-                .child(
-                    Button::new("patch")
-                        .ghost()
-                        .small()
-                        .icon(Lucide::ClipboardCopy)
-                        .disabled(true)
-                        .tooltip(later),
-                )
+                .child(self.render_patch_menu(cx))
                 .child(
                     Button::new("command-log")
                         .ghost()

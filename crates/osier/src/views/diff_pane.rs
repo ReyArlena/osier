@@ -69,6 +69,11 @@ impl Osier {
                     None => Tag::secondary().xsmall().child("working tree"),
                 }),
             ),
+            Selection::Patch { name, .. } => (
+                Lucide::Package,
+                name.clone(),
+                Some(Tag::info().xsmall().child("patch")),
+            ),
             Selection::Commit { hash } => {
                 let commit = project
                     .and_then(|p| p.snapshot.as_ref())

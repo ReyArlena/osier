@@ -10,6 +10,7 @@ pub mod commit;
 pub mod discard;
 pub mod integrate;
 pub mod patch;
+pub mod patches;
 pub mod rebase_interactive;
 pub mod remote;
 pub mod reset;

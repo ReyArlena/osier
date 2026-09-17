@@ -14,6 +14,7 @@ mod format;
 mod graph;
 mod hunk_ops;
 mod ops;
+mod patch_ops;
 mod project;
 mod rebase_dialog;
 mod remote_ops;
