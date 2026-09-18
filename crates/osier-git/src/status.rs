@@ -365,3 +365,38 @@ u UU N... 100644 100644 100644 100644 1111 2222 3333 conflict.txt\0\
         assert_eq!(t.repo().in_progress(), Some(crate::repo::InProgress::Merge));
     }
 }
+
+#[cfg(test)]
+mod perf_tests {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::testing::TempRepo;
+
+    /// Rough guard against quadratic parsing: 10k tracked files, 2k of them modified.
+    /// Run with `cargo test -p osier-git -- --ignored status_of_ten_thousand_files`.
+    #[test]
+    #[ignore = "slow: builds a 10k-file repository"]
+    fn status_of_ten_thousand_files_is_quick() {
+        let t = TempRepo::new();
+        for dir in 0..100 {
+            std::fs::create_dir_all(t.path().join(format!("d{dir}"))).unwrap();
+            for f in 0..100 {
+                std::fs::write(t.path().join(format!("d{dir}/f{f}.txt")), "x\n").unwrap();
+            }
+        }
+        t.git(["add", "-A"]);
+        t.commit("many files");
+        for dir in 0..20 {
+            for f in 0..100 {
+                std::fs::write(t.path().join(format!("d{dir}/f{f}.txt")), "y\n").unwrap();
+            }
+        }
+        let started = Instant::now();
+        let s = status(&t.repo(), StatusOptions::default()).unwrap();
+        let took = started.elapsed();
+        assert_eq!(s.unstaged().count(), 2000);
+        eprintln!("status of 10k files: {took:?}");
+        assert!(took.as_secs() < 5, "status took {took:?}");
+    }
+}

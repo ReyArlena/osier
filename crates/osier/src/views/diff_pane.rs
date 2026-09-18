@@ -92,6 +92,26 @@ impl Osier {
             }
         };
 
+        let blame = self.blame.clone();
+        let (icon, title, tag) = match &blame {
+            Some(b) => (
+                Lucide::UserRoundSearch,
+                format!("Blame: {}", b.path),
+                Some(Tag::info().xsmall().child(match &b.rev {
+                    Some(r) => r[..r.len().min(7)].to_string(),
+                    None => "working tree".to_string(),
+                })),
+            ),
+            None => (icon, title, tag),
+        };
+        let lfs = self.diff_model.iter().any(|f| {
+            f.hunks.iter().any(|h| {
+                h.lines.iter().any(|l| {
+                    l.text
+                        .starts_with("version https://git-lfs.github.com/spec/v1")
+                })
+            })
+        });
         let area = self.diff_area();
         let has_selection = self.diff.read(cx).selected_lines().is_some();
         let line_actions: &[HunkAction] = match &area {
@@ -101,7 +121,9 @@ impl Osier {
 
         let editing = self.editor.is_some();
         let viewing = matches!(&selection, Selection::WorkFile { .. });
-        let body: AnyElement = if let Some(editor) = &self.editor {
+        let body: AnyElement = if let Some(view) = &blame {
+            self.render_blame(view, cx)
+        } else if let Some(editor) = &self.editor {
             Editor::new(&editor.state).size_full().into_any_element()
         } else if viewing {
             self.render_viewer(window, cx)
@@ -271,6 +293,7 @@ impl Osier {
                             .child(title),
                     )
                     .when_some(tag, |this, t| this.child(t))
+                    .when(lfs, |this| this.child(Tag::warning().xsmall().child("LFS pointer")))
                     .when(self.diff_files > 1, |this| {
                         this.child(
                             div()
@@ -305,6 +328,26 @@ impl Osier {
                                     }
                                 })),
                         )
+                    })
+                    .when(blame.is_some(), |this| {
+                        this.child(
+                            Button::new("close-blame")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::X)
+                                .tooltip("Close blame")
+                                .on_click(cx.listener(|this, _, _, cx| this.close_blame(cx))),
+                        )
+                    })
+                    .when(blame.is_none() && !editing, |this| {
+                        let target = match &selection {
+                            Selection::File { path, .. } => Some((path.clone(), None)),
+                            Selection::WorkFile { path, rev } => Some((path.clone(), rev.clone())),
+                            _ => None,
+                        };
+                        this.when_some(target, |this, (path, rev)| {
+                            this.child(self.blame_history_buttons(path, rev, cx))
+                        })
                     })
                     .when(viewing && !editing, |this| {
                         this.child(
@@ -443,6 +486,17 @@ impl Osier {
                 .into_any_element(),
             Some(Viewer::Error(e)) => self
                 .empty_state("Cannot show file", e, cx)
+                .into_any_element(),
+            Some(Viewer::Lfs { oid, bytes }) => self
+                .empty_state(
+                    "Stored in Git LFS",
+                    &format!(
+                        "This file is a pointer to {:.1} KB of LFS content (oid {}…). Run git lfs pull to fetch it.",
+                        *bytes as f64 / 1024.0,
+                        &oid[..oid.len().min(12)]
+                    ),
+                    cx,
+                )
                 .into_any_element(),
             Some(Viewer::Binary { bytes }) => self
                 .empty_state(

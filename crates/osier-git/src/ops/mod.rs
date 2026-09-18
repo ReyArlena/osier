@@ -16,6 +16,7 @@ pub mod remote;
 pub mod reset;
 pub mod stage;
 pub mod stash;
+pub mod submodule;
 pub mod tag;
 pub mod worktree;
 

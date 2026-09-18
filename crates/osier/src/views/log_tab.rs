@@ -8,6 +8,7 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
@@ -75,11 +76,31 @@ impl Osier {
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(div().text_sm().font_medium().child("Log"))
-                    .child(div().text_xs().text_color(muted).child(if count >= page {
-                        format!("latest {count} commits, all branches")
-                    } else {
-                        format!("{count} commits, all branches")
-                    }))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(match &project.log_path {
+                                Some(path) => format!("{count} commits touching {path}"),
+                                None if count >= page => {
+                                    format!("latest {count} commits, all branches")
+                                }
+                                None => format!("{count} commits, all branches"),
+                            }),
+                    )
+                    .when(project.log_path.is_some(), |this| {
+                        this.child(
+                            Button::new("clear-history")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::X)
+                                .label("All commits")
+                                .tooltip("Leave the file history")
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.clear_file_history(cx)),
+                                ),
+                        )
+                    })
                     .child(div().flex_1())
                     .child(
                         Button::new("toggle-reflog")

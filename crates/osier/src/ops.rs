@@ -1,8 +1,9 @@
 //! Running mutating git operations from the UI: background execution, notifications,
 //! history and refresh.
 
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
@@ -80,8 +81,24 @@ impl Osier {
                         tracing::warn!(%summary, %text, "operation failed");
                         entry.ok = false;
                         entry.error = Some(text.clone());
+                        let owner = cx.weak_entity();
                         window.push_notification(
-                            Notification::error(format!("{summary} failed")).message(text),
+                            Notification::error(format!("{summary} failed"))
+                                .message(text)
+                                .action(move |_, _, _| {
+                                    let owner = owner.clone();
+                                    Button::new("show-command-log")
+                                        .ghost()
+                                        .xsmall()
+                                        .label("Command log")
+                                        .on_click(move |_, _, cx| {
+                                            let _ = owner.update(cx, |this, cx| {
+                                                if !this.command_log_visible {
+                                                    this.toggle_command_log(cx);
+                                                }
+                                            });
+                                        })
+                                }),
                             cx,
                         );
                     }

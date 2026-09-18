@@ -147,6 +147,8 @@ impl Osier {
                                 let (p1, p2, p3) = (p.clone(), p.clone(), p.clone());
                                 let (w4, w5, w6) = (weak.clone(), weak.clone(), weak.clone());
                                 let (p4, p5, p6) = (p.clone(), p.clone(), p.clone());
+                                let (w7, w8) = (weak.clone(), weak.clone());
+                                let (p7, p8) = (p.clone(), p.clone());
                                 menu.item(PopupMenuItem::new("Open in editor").on_click(
                                     move |_, window, cx| {
                                         let _ = w1.update(cx, |this, cx| {
@@ -176,6 +178,17 @@ impl Osier {
                                         });
                                     },
                                 ))
+                                .separator()
+                                .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
+                                    let _ = w7.update(cx, |this, cx| {
+                                        this.show_blame(p7.clone(), None, cx)
+                                    });
+                                }))
+                                .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
+                                    let _ = w8.update(cx, |this, cx| {
+                                        this.show_file_history(p8.clone(), cx)
+                                    });
+                                }))
                                 .separator()
                                 .item(PopupMenuItem::new("Copy as patch").on_click(
                                     move |_, window, cx| {

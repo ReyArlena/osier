@@ -248,7 +248,22 @@ impl Osier {
                             let is_folder = entry.is_folder();
                             let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                             let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
+                            let (w4, w5) = (weak.clone(), weak.clone());
+                            let (p4, p5) = (path.clone(), path.clone());
                             menu.when(!is_folder, |m| {
+                                m.item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
+                                    let _ = w4.update(cx, |this, cx| {
+                                        this.show_blame(p4.clone(), None, cx)
+                                    });
+                                }))
+                                .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
+                                    let _ = w5.update(cx, |this, cx| {
+                                        this.show_file_history(p5.clone(), cx)
+                                    });
+                                }))
+                                .separator()
+                            })
+                            .when(!is_folder, |m| {
                                 m.item(PopupMenuItem::new("Open in editor").on_click(
                                     move |_, window, cx| {
                                         let _ = w1.update(cx, |this, cx| {

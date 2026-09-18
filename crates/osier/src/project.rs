@@ -30,6 +30,7 @@ pub struct Snapshot {
     /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
     pub files: Vec<String>,
     pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
+    pub submodules: Vec<osier_git::submodule::Submodule>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -85,6 +86,8 @@ pub struct Project {
     pub selection: Selection,
     pub selected_commit: Option<usize>,
     pub log_page_size: usize,
+    /// When set, the Log shows this file's history (`log --follow`).
+    pub log_path: Option<String>,
     pub task: Task<()>,
     watcher: Option<notify::RecommendedWatcher>,
     events: Option<mpsc::Receiver<()>>,
@@ -108,6 +111,7 @@ impl Project {
             selection: Selection::None,
             selected_commit: None,
             log_page_size,
+            log_path: None,
             task: Task::ready(()),
             watcher: None,
             events: None,
@@ -242,7 +246,11 @@ pub fn ordered_changes(status: &RepoStatus) -> Vec<(String, Area)> {
 }
 
 /// Blocking read of everything the UI shows. Runs on the background executor.
-pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot, String> {
+pub fn load_snapshot(
+    repo: &Repository,
+    log_page_size: usize,
+    log_path: Option<&str>,
+) -> Result<Snapshot, String> {
     let status = osier_git::status::status(repo, StatusOptions::default())
         .map_err(|e| format!("status: {e}"))?;
     let branches = osier_git::refs::branches(repo).map_err(|e| format!("branches: {e}"))?;
@@ -252,6 +260,8 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
             all: true,
             topo_order: true,
             limit: Some(log_page_size),
+            path: log_path.map(str::to_string),
+            follow: log_path.is_some(),
             ..Default::default()
         },
     )
@@ -266,6 +276,11 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
     files.dedup();
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
+    // A broken .gitmodules must not take the whole snapshot down.
+    let submodules = osier_git::submodule::list(repo).unwrap_or_else(|e| {
+        tracing::debug!(error = %e, "submodule listing unavailable");
+        Vec::new()
+    });
     Ok(Snapshot {
         status,
         branches,
@@ -276,6 +291,7 @@ pub fn load_snapshot(repo: &Repository, log_page_size: usize) -> Result<Snapshot
         reflog,
         files,
         worktrees,
+        submodules,
         identity,
         in_progress: repo.in_progress(),
     })

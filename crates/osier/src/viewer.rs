@@ -26,6 +26,11 @@ pub enum Viewer {
     Binary {
         bytes: u64,
     },
+    /// A Git LFS pointer: the content is not in the repository.
+    Lfs {
+        oid: String,
+        bytes: u64,
+    },
     Missing,
     Error(String),
 }
@@ -37,6 +42,7 @@ impl std::fmt::Debug for Viewer {
             Viewer::Markdown { .. } => "Markdown",
             Viewer::Image { .. } => "Image",
             Viewer::Binary { .. } => "Binary",
+            Viewer::Lfs { .. } => "Lfs",
             Viewer::Missing => "Missing",
             Viewer::Error(_) => "Error",
         };
@@ -108,6 +114,10 @@ impl Osier {
                 full_path: full,
                 bytes: size,
             }
+        } else if files::is_lfs_pointer(&bytes) {
+            let text = String::from_utf8_lossy(&bytes);
+            let (oid, bytes) = files::lfs_pointer_info(&text).unwrap_or_default();
+            Viewer::Lfs { oid, bytes }
         } else if files::looks_binary(&bytes) {
             Viewer::Binary { bytes: size }
         } else {

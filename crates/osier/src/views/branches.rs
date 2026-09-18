@@ -360,6 +360,70 @@ impl Osier {
             }
         }
 
+        // Submodules: path, where it points, whether it is checked out.
+        if !snapshot.submodules.is_empty() {
+            list = list.child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(muted)
+                    .child("Submodules")
+                    .child(snapshot.submodules.len().to_string())
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("submodules-update-all")
+                            .ghost()
+                            .xsmall()
+                            .label("Update all")
+                            .tooltip("git submodule update --init --recursive")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.update_submodules(Vec::new(), window, cx)
+                            })),
+                    ),
+            );
+            for (ix, s) in snapshot.submodules.iter().enumerate() {
+                let path = s.path.clone();
+                list = list.child(
+                    h_flex()
+                        .id(("submodule", ix))
+                        .px_3()
+                        .py_1p5()
+                        .gap_2()
+                        .items_center()
+                        .hover(|this| this.bg(cx.theme().list_hover))
+                        .child(Icon::new(Lucide::Package).xsmall())
+                        .child(div().text_sm().flex_none().child(s.path.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(s.url.clone()),
+                        )
+                        .child(match &s.head {
+                            Some(h) => Tag::secondary()
+                                .xsmall()
+                                .child(h[..h.len().min(7)].to_string()),
+                            None => Tag::warning().xsmall().child("not initialised"),
+                        })
+                        .child(
+                            Button::new(("submodule-update", ix))
+                                .ghost()
+                                .xsmall()
+                                .label("Update")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.update_submodules(vec![path.clone()], window, cx)
+                                })),
+                        ),
+                );
+            }
+        }
+
         // Remotes with their URLs and a menu.
         if !snapshot.remotes.is_empty() {
             list = list.child(

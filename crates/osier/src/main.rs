@@ -5,6 +5,7 @@
 mod actions;
 mod app;
 mod askpass;
+mod blame_view;
 mod changes_ops;
 mod cli;
 mod command_log;
@@ -15,6 +16,7 @@ mod format;
 mod graph;
 mod hunk_ops;
 mod ops;
+mod palette;
 mod patch_ops;
 mod project;
 mod rebase_dialog;

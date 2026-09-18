@@ -197,7 +197,7 @@ impl Osier {
                                 .ghost()
                                 .small()
                                 .icon(Lucide::GitBranch)
-                                .label(branch)
+                                .when(!self.compact, |b| b.label(branch))
                                 .tooltip("Branches")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_tab(crate::app::Tab::Branches, cx)
@@ -226,7 +226,7 @@ impl Osier {
                         .ghost()
                         .small()
                         .icon(Lucide::RefreshCw)
-                        .label("Refresh")
+                        .when(!self.compact, |b| b.label("Refresh"))
                         .tooltip("Refresh (ctrl-r)")
                         .disabled(!has_project)
                         .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
@@ -289,75 +289,79 @@ impl Osier {
         let weak2 = cx.entity().downgrade();
         let weak3 = cx.entity().downgrade();
         let has_gh = !self.gh_accounts.is_empty();
-        Button::new(id)
+        let mut button = Button::new(id)
             .ghost()
             .small()
             .icon(icon)
-            .label(label)
-            .disabled(disabled)
-            .dropdown_menu(move |menu, _, _| match id {
-                "fetch" => menu
+            .disabled(disabled);
+        if self.compact {
+            button = button.tooltip(label);
+        } else {
+            button = button.label(label);
+        }
+        button.dropdown_menu(move |menu, _, _| match id {
+            "fetch" => menu
+                .item(item(
+                    "Fetch all remotes",
+                    RemoteOp::Fetch(FetchOptions::default()),
+                ))
+                .item(item(
+                    "Fetch all and prune deleted branches",
+                    RemoteOp::Fetch(FetchOptions {
+                        prune: true,
+                        ..Default::default()
+                    }),
+                ))
+                .item(item(
+                    "Fetch origin",
+                    RemoteOp::Fetch(FetchOptions {
+                        remote: Some("origin".into()),
+                        ..Default::default()
+                    }),
+                )),
+            "pull" => menu
+                .item(item(
+                    "Pull (fast-forward only)",
+                    RemoteOp::Pull(PullOptions::default()),
+                ))
+                .item(item(
+                    "Pull with rebase",
+                    RemoteOp::Pull(PullOptions {
+                        strategy: PullStrategy::Rebase,
+                        ..Default::default()
+                    }),
+                ))
+                .item(item(
+                    "Pull with merge",
+                    RemoteOp::Pull(PullOptions {
+                        strategy: PullStrategy::Merge,
+                        ..Default::default()
+                    }),
+                )),
+            _ => {
+                let w_force = weak2.clone();
+                let w_acc = weak3.clone();
+                let w_clear = weak3.clone();
+                let mut m = menu
+                    .item(item("Push", RemoteOp::Push(PushOptions::default())))
                     .item(item(
-                        "Fetch all remotes",
-                        RemoteOp::Fetch(FetchOptions::default()),
-                    ))
-                    .item(item(
-                        "Fetch all and prune deleted branches",
-                        RemoteOp::Fetch(FetchOptions {
-                            prune: true,
-                            ..Default::default()
-                        }),
-                    ))
-                    .item(item(
-                        "Fetch origin",
-                        RemoteOp::Fetch(FetchOptions {
+                        "Push and set upstream (origin)",
+                        RemoteOp::Push(PushOptions {
                             remote: Some("origin".into()),
-                            ..Default::default()
-                        }),
-                    )),
-                "pull" => menu
-                    .item(item(
-                        "Pull (fast-forward only)",
-                        RemoteOp::Pull(PullOptions::default()),
-                    ))
-                    .item(item(
-                        "Pull with rebase",
-                        RemoteOp::Pull(PullOptions {
-                            strategy: PullStrategy::Rebase,
+                            set_upstream: true,
                             ..Default::default()
                         }),
                     ))
-                    .item(item(
-                        "Pull with merge",
-                        RemoteOp::Pull(PullOptions {
-                            strategy: PullStrategy::Merge,
-                            ..Default::default()
-                        }),
-                    )),
-                _ => {
-                    let w_force = weak2.clone();
-                    let w_acc = weak3.clone();
-                    let w_clear = weak3.clone();
-                    let mut m = menu
-                        .item(item("Push", RemoteOp::Push(PushOptions::default())))
-                        .item(item(
-                            "Push and set upstream (origin)",
-                            RemoteOp::Push(PushOptions {
-                                remote: Some("origin".into()),
-                                set_upstream: true,
-                                ..Default::default()
-                            }),
-                        ))
-                        .item(PopupMenuItem::new("Force push with lease…").on_click(
-                            move |_, window, cx| {
-                                let _ = w_force.update(cx, |this, cx| {
-                                    this.confirm_force_push(PushOptions::default(), window, cx)
-                                });
-                            },
-                        ));
-                    if has_gh {
-                        m = m
-                            .separator()
+                    .item(PopupMenuItem::new("Force push with lease…").on_click(
+                        move |_, window, cx| {
+                            let _ = w_force.update(cx, |this, cx| {
+                                this.confirm_force_push(PushOptions::default(), window, cx)
+                            });
+                        },
+                    ));
+                if has_gh {
+                    m =
+                        m.separator()
                             .item(PopupMenuItem::new("Choose GitHub account…").on_click(
                                 move |_, window, cx| {
                                     let _ = w_acc
@@ -372,9 +376,9 @@ impl Osier {
                                         });
                                     }),
                             );
-                    }
-                    m
                 }
-            })
+                m
+            }
+        })
     }
 }

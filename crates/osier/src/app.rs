@@ -29,6 +29,7 @@ gpui_kit::actions!(
         ToggleCommandLog,
         ToggleTheme,
         OpenSettings,
+        OpenCommandPalette,
         TabChanges,
         TabLog,
         TabBranches,
@@ -55,6 +56,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-`", ToggleCommandLog, None),
         KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
         KeyBinding::new("ctrl-,", OpenSettings, None),
+        KeyBinding::new("ctrl-shift-a", OpenCommandPalette, None),
+        KeyBinding::new("f1", OpenCommandPalette, None),
         KeyBinding::new("ctrl-1", TabChanges, None),
         KeyBinding::new("ctrl-2", TabLog, None),
         KeyBinding::new("ctrl-3", TabBranches, None),
@@ -164,10 +167,14 @@ pub struct Osier {
     /// The patch clipboard (`<state>/patches`), newest first.
     pub(crate) patches: Vec<osier_config::patches::StoredPatch>,
     pub(crate) patch_selected: Option<String>,
+    /// Blame shown in the diff pane instead of the diff, until closed.
+    pub(crate) blame: Option<crate::blame_view::BlameView>,
     /// Filled when the settings sheet opens.
     pub(crate) ssh_status: Option<osier_auth::SshStatus>,
     pub(crate) git_version: Option<String>,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
+    /// Narrow window: title-bar buttons drop their labels.
+    pub(crate) compact: bool,
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
@@ -283,9 +290,11 @@ impl Osier {
             session_only_accounts: Default::default(),
             patches,
             patch_selected: None,
+            blame: None,
             ssh_status: None,
             git_version: None,
             config_watch,
+            compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
             _subscriptions: vec![message_subscription, filter_subscription],
         };
@@ -308,8 +317,13 @@ impl Osier {
                 }
             }));
         this._subscriptions
-            .push(cx.observe_window_bounds(window, |this, window, _| {
+            .push(cx.observe_window_bounds(window, |this, window, cx| {
                 let b = window.bounds();
+                let compact = b.size.width < px(1500.);
+                if compact != this.compact {
+                    this.compact = compact;
+                    cx.notify();
+                }
                 this.state.window = Some(osier_config::state::WindowGeometry {
                     x: f32::from(b.origin.x),
                     y: f32::from(b.origin.y),
@@ -794,9 +808,10 @@ impl Osier {
         let repo = project.repo.clone();
         let path = project.path.clone();
         let page = project.log_page_size;
+        let log_path = project.log_path.clone();
         project.task = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { load_snapshot(&repo, page) })
+                .background_spawn(async move { load_snapshot(&repo, page, log_path.as_deref()) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.install_snapshot(&path, revision, result, cx)
@@ -976,6 +991,7 @@ impl Osier {
 
     /// Load the diff for the active project's selection into the diff pane.
     pub(crate) fn reload_selection(&mut self, cx: &mut Context<Self>) {
+        self.blame = None;
         self.diff_revision += 1;
         let revision = self.diff_revision;
         let context = self.settings.diff.context_lines;
@@ -1264,6 +1280,9 @@ impl Render for Osier {
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
             )
+            .on_action(cx.listener(|this, _: &OpenCommandPalette, window, cx| {
+                this.open_command_palette(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &TabChanges, _, cx| this.set_tab(Tab::Changes, cx)))
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
@@ -1524,6 +1543,54 @@ mod tests {
         });
         h.act(cx, |osier, _, cx| osier.clear_all_account_overrides(cx));
         h.read(cx, |osier, _| assert!(osier.state.accounts.is_empty()));
+    }
+
+    #[gpui::test]
+    fn blame_and_file_history(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.commit_file("b.txt", "bee\n", "second");
+        repo.commit_file("a.txt", "one\ntwo\n", "third");
+        let h = Harness::open(cx, &repo);
+
+        h.act(cx, |osier, _, cx| {
+            osier.show_blame("a.txt".into(), None, cx)
+        });
+        cx.run_until_parked();
+        h.read(cx, |osier, _| {
+            let view = osier.blame.as_ref().expect("blame view");
+            let lines = view.lines.as_ref().expect("blame loaded");
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0].summary, "first");
+            assert_eq!(lines[1].summary, "third");
+            assert_ne!(lines[0].hash, lines[1].hash);
+        });
+        // Selecting something else closes the blame.
+        h.act(cx, |osier, _, cx| osier.select_commit(0, cx));
+        h.read(cx, |osier, _| assert!(osier.blame.is_none()));
+
+        h.act(cx, |osier, _, cx| {
+            osier.show_file_history("b.txt".into(), cx)
+        });
+        cx.run_until_parked();
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.tab, super::Tab::Log);
+            let project = osier.active_project().expect("project");
+            assert_eq!(project.log_path.as_deref(), Some("b.txt"));
+            let commits = &project.snapshot.as_ref().expect("snapshot").commits;
+            assert_eq!(commits.len(), 1);
+            assert_eq!(commits[0].subject, "second");
+        });
+        h.act(cx, |osier, _, cx| osier.clear_file_history(cx));
+        cx.run_until_parked();
+        h.read(cx, |osier, _| {
+            let project = osier.active_project().expect("project");
+            assert!(project.log_path.is_none());
+            assert_eq!(
+                project.snapshot.as_ref().expect("snapshot").commits.len(),
+                3
+            );
+        });
     }
 
     #[gpui::test]

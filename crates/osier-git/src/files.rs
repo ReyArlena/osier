@@ -46,6 +46,27 @@ pub fn show_at(repo: &Repository, rev: &str, path: &str) -> Result<Option<Vec<u8
 }
 
 /// Heuristic used by git itself: a NUL byte in the first 8000 bytes means binary.
+/// A Git LFS pointer file: the real content lives in the LFS store, this is a stub.
+pub fn is_lfs_pointer(bytes: &[u8]) -> bool {
+    bytes.len() < 1024
+        && bytes.starts_with(b"version https://git-lfs.github.com/spec/v1")
+        && bytes.windows(11).any(|w| w == b"oid sha256:")
+}
+
+/// `(oid, size)` from a pointer file, when both lines parse.
+pub fn lfs_pointer_info(text: &str) -> Option<(String, u64)> {
+    let mut oid = None;
+    let mut size = None;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("oid sha256:") {
+            oid = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("size ") {
+            size = rest.trim().parse().ok();
+        }
+    }
+    Some((oid?, size?))
+}
+
 pub fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8000).any(|b| *b == 0)
 }
@@ -73,5 +94,25 @@ mod tests {
         assert!(show_at(&repo, "HEAD", "notes.txt").unwrap().is_none());
         assert!(looks_binary(b"ab\0cd"));
         assert!(!looks_binary(b"plain text"));
+    }
+}
+
+#[cfg(test)]
+mod lfs_tests {
+    use super::*;
+
+    #[test]
+    fn lfs_pointer_is_detected() {
+        let p = "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n";
+        assert!(is_lfs_pointer(p.as_bytes()));
+        assert_eq!(
+            lfs_pointer_info(p),
+            Some((
+                "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393".into(),
+                12345
+            ))
+        );
+        assert!(!is_lfs_pointer(b"version 1\nhello\n"));
+        assert!(!is_lfs_pointer(b"fn main() {}\n"));
     }
 }

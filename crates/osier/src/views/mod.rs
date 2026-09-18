@@ -47,6 +47,7 @@ impl Osier {
                 TabBar::new("main-tabs")
                     .w_full()
                     .small()
+                    .menu(true)
                     .selected_index(active_ix)
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         if let Some(tab) = Tab::ALL.get(*ix) {
