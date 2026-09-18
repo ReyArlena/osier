@@ -28,6 +28,7 @@ gpui_kit::actions!(
         ToggleSidebar,
         ToggleCommandLog,
         ToggleTheme,
+        OpenSettings,
         TabChanges,
         TabLog,
         TabBranches,
@@ -53,6 +54,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-b", ToggleSidebar, None),
         KeyBinding::new("ctrl-`", ToggleCommandLog, None),
         KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
+        KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("ctrl-1", TabChanges, None),
         KeyBinding::new("ctrl-2", TabLog, None),
         KeyBinding::new("ctrl-3", TabBranches, None),
@@ -162,6 +164,10 @@ pub struct Osier {
     /// The patch clipboard (`<state>/patches`), newest first.
     pub(crate) patches: Vec<osier_config::patches::StoredPatch>,
     pub(crate) patch_selected: Option<String>,
+    /// Filled when the settings sheet opens.
+    pub(crate) ssh_status: Option<osier_auth::SshStatus>,
+    pub(crate) git_version: Option<String>,
+    pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
@@ -186,6 +192,11 @@ impl Osier {
             tracing::warn!(%error, "could not list patches");
             Vec::new()
         });
+        let config_watch = if cfg!(test) {
+            None
+        } else {
+            crate::config_watch::ConfigWatch::new(&paths.settings_file())
+        };
         let mode = match settings.diff.mode {
             osier_config::settings::DiffMode::Unified => DiffMode::Unified,
             osier_config::settings::DiffMode::Split => DiffMode::Split,
@@ -272,6 +283,9 @@ impl Osier {
             session_only_accounts: Default::default(),
             patches,
             patch_selected: None,
+            ssh_status: None,
+            git_version: None,
+            config_watch,
             diff_task: Task::ready(()),
             _subscriptions: vec![message_subscription, filter_subscription],
         };
@@ -348,7 +362,18 @@ impl Osier {
             this.select_work_file(file, None, cx);
         }
         this.update_title(window);
-        this.start_watcher_loop(cx);
+        this.start_watcher_loop(window, cx);
+        // Dev aid for screenshots: OSIER_OPEN_SETTINGS=1 opens the settings sheet at startup.
+        // The sheet needs gpui-kit's root, which exists only after this view is installed.
+        if std::env::var_os("OSIER_OPEN_SETTINGS").is_some_and(|v| v == "1") {
+            cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(300))
+                    .await;
+                let _ = this.update_in(cx, |this, window, cx| this.open_settings(window, cx));
+            })
+            .detach();
+        }
         this.load_gh_accounts(cx);
         this.rescan_projects(cx);
         this
@@ -840,13 +865,13 @@ impl Osier {
         cx.notify();
     }
 
-    fn start_watcher_loop(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+    fn start_watcher_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(400))
                     .await;
-                let alive = this.update(cx, |this, cx| {
+                let alive = this.update_in(cx, |this, window, cx| {
                     let due: Vec<usize> = this
                         .projects
                         .iter_mut()
@@ -861,6 +886,9 @@ impl Osier {
                         this.save_state();
                     }
                     if this.poll_remote_job() || this.poll_themes(cx) {
+                        cx.notify();
+                    }
+                    if this.poll_config(window, cx) {
                         cx.notify();
                     }
                     // The command log panel shows new records as they land.
@@ -1233,6 +1261,9 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &ToggleCommandLog, _, cx| this.toggle_command_log(cx)))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &TabChanges, _, cx| this.set_tab(Tab::Changes, cx)))
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
@@ -1436,6 +1467,63 @@ mod tests {
             assert!(osier.patches.is_empty(), "unshelved patch deleted");
             assert_eq!(osier.tab, super::Tab::Changes);
         });
+    }
+
+    #[gpui::test]
+    fn settings_reload_from_disk_and_account_overrides(cx: &mut TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        use osier_config::settings::ThemeMode;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+
+        // An external edit to config.toml is picked up and applied.
+        let file = h.read(cx, |osier, _| osier.paths.settings_file());
+        std::fs::create_dir_all(file.parent().expect("dir")).expect("mkdir");
+        std::fs::write(
+            &file,
+            "[appearance]\nmode = \"light\"\n[diff]\ncontext_lines = 7\n",
+        )
+        .expect("write config");
+        h.act(cx, |osier, window, cx| {
+            assert!(osier.reload_settings_from_disk(window, cx));
+            assert!(
+                !osier.reload_settings_from_disk(window, cx),
+                "unchanged second time"
+            );
+        });
+        h.read(cx, |osier, cx| {
+            assert_eq!(osier.settings.appearance.mode, ThemeMode::Light);
+            assert_eq!(osier.settings.diff.context_lines, 7);
+            assert!(!cx.theme().mode.is_dark());
+        });
+        // A broken file keeps the current settings.
+        std::fs::write(&file, "[appearance\nmode = ").expect("write config");
+        h.act(cx, |osier, window, cx| {
+            assert!(!osier.reload_settings_from_disk(window, cx));
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.settings.diff.context_lines, 7)
+        });
+
+        // Per-project account overrides can be reset from the panel.
+        h.act(cx, |osier, _, _| {
+            osier.set_project_account("/r/one", "alice", true);
+            osier.set_project_account("/r/two", "bob", false);
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.state.accounts.len(), 2);
+            assert!(osier.session_only_accounts.contains("/r/two"));
+        });
+        h.act(cx, |osier, _, cx| {
+            osier.clear_account_override("/r/two".into(), cx)
+        });
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.state.accounts.len(), 1);
+            assert!(osier.session_only_accounts.is_empty());
+        });
+        h.act(cx, |osier, _, cx| osier.clear_all_account_overrides(cx));
+        h.read(cx, |osier, _| assert!(osier.state.accounts.is_empty()));
     }
 
     #[gpui::test]

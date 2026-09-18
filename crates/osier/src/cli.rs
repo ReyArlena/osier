@@ -15,7 +15,10 @@ pub enum Mode {
     },
     /// `osier --askpass "<prompt>"` (ssh and git call it this way)
     Askpass(String),
-    Version,
+    /// `--version`, with `--verbose` adding runtime details for bug reports.
+    Version {
+        verbose: bool,
+    },
     Help,
 }
 
@@ -41,7 +44,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
             }
         }
         Some("--askpass") => Mode::Askpass(args.get(1).cloned().unwrap_or_default()),
-        Some("--version" | "-V") => Mode::Version,
+        Some("--version" | "-V") => Mode::Version {
+            verbose: args.iter().skip(1).any(|a| a == "--verbose" || a == "-v"),
+        },
         Some("--help" | "-h") => Mode::Help,
         // ssh runs `$SSH_ASKPASS "<prompt>"` with no flag; a prompt is not a path.
         Some(p)
@@ -89,7 +94,7 @@ pub fn run_credential_helper(account: &str, host: &str, operation: &str) -> i32 
 }
 
 pub const HELP: &str = "osier [path]              open the GUI (optionally on a repository)
-osier --version
+osier --version [--verbose]   (verbose adds git version, display backend and paths)
 osier --credential-helper --account <login> --host <host> <get|store|erase>
 osier --askpass <prompt>   (also used by ssh and git through SSH_ASKPASS / GIT_ASKPASS)";
 
@@ -128,6 +133,10 @@ mod tests {
             p(&["Enter passphrase for key '/home/x/.ssh/id_ed25519': "]),
             Mode::Askpass("Enter passphrase for key '/home/x/.ssh/id_ed25519': ".into())
         );
-        assert_eq!(p(&["--version"]), Mode::Version);
+        assert_eq!(p(&["--version"]), Mode::Version { verbose: false });
+        assert_eq!(
+            p(&["--version", "--verbose"]),
+            Mode::Version { verbose: true }
+        );
     }
 }

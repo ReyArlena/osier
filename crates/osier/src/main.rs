@@ -8,6 +8,7 @@ mod askpass;
 mod changes_ops;
 mod cli;
 mod command_log;
+mod config_watch;
 mod edit_pane;
 mod external;
 mod format;
@@ -18,6 +19,8 @@ mod patch_ops;
 mod project;
 mod rebase_dialog;
 mod remote_ops;
+mod runtime_info;
+mod settings_panel;
 mod themes;
 mod viewer;
 mod views;
@@ -61,8 +64,19 @@ fn main() {
                 1
             });
         }
-        cli::Mode::Version => {
+        cli::Mode::Version { verbose } => {
             println!("osier {}", env!("CARGO_PKG_VERSION"));
+            if verbose {
+                let paths = osier_config::Paths::discover().ok();
+                let runner = osier_git::GitRunner::new(Arc::new(osier_git::NoopSink));
+                let git = osier_git::GitVersion::detect(&runner)
+                    .ok()
+                    .map(|v| v.to_string());
+                print!(
+                    "{}",
+                    runtime_info::RuntimeInfo::collect(paths.as_ref(), git)
+                );
+            }
             return;
         }
         cli::Mode::Help => {

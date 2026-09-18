@@ -175,7 +175,6 @@ impl Osier {
             .unwrap_or_else(|| "detached".into());
         let has_project = project.is_some();
         let busy = !has_project || self.remote_job.is_some();
-        let later = "Available in a later phase";
 
         TitleBar::new().child(
             h_flex()
@@ -262,8 +261,10 @@ impl Osier {
                         .ghost()
                         .small()
                         .icon(Lucide::Settings)
-                        .disabled(true)
-                        .tooltip(later),
+                        .tooltip("Settings (ctrl-,)")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
+                        ),
                 ),
         )
     }

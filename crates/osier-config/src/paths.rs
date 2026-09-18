@@ -38,6 +38,18 @@ impl Paths {
         }
     }
 
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
+    }
+
     pub fn settings_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }
