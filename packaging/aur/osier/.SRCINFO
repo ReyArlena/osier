@@ -1,0 +1,24 @@
+pkgbase = osier
+	pkgdesc = Fast native git GUI
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/ReyArlena/osier
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = pkgconf
+	makedepends = vulkan-headers
+	depends = git
+	depends = libxkbcommon
+	depends = libxkbcommon-x11
+	depends = wayland
+	depends = vulkan-icd-loader
+	depends = fontconfig
+	depends = gcc-libs
+	depends = glibc
+	optdepends = github-cli: multi-account GitHub authentication
+	source = osier-0.1.0.tar.gz::https://github.com/ReyArlena/osier/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = osier

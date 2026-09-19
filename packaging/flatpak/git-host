@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run the host's git from inside the Flatpak sandbox.
+exec flatpak-spawn --host git "$@"

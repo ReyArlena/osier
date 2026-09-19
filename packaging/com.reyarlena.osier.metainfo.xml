@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.reyarlena.osier</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Osier</name>
+  <summary>Fast native git GUI</summary>
+  <developer id="com.reyarlena">
+    <name>Rey Arlena</name>
+  </developer>
+  <description>
+    <p>
+      Osier is a native git client for Linux: visual staging down to single lines, a commit
+      log with a graph, branches, stashes, worktrees, merge and rebase with in-place conflict
+      resolution, patches and a patch clipboard, and multi-account GitHub authentication
+      through the gh CLI. Every git command it runs is shown in a log.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.reyarlena.osier.desktop</launchable>
+  <url type="homepage">https://github.com/ReyArlena/osier</url>
+  <url type="bugtracker">https://github.com/ReyArlena/osier/issues</url>
+  <content_rating type="oars-1.1" />
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+  <provides>
+    <binary>osier</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-09-19" />
+  </releases>
+</component>

@@ -1,0 +1,45 @@
+# Flatpak manifest (draft, not yet built on CI). Osier talks to the host's git so the user's
+# exact git, hooks, credential helpers and gh configuration are used. That needs the
+# org.freedesktop.Flatpak portal (flatpak-spawn --host), which Flathub reviewers may question;
+# the alternative is bundling git and gh in the sandbox.
+#
+# Build: flatpak-builder --user --install --force-clean build packaging/flatpak/com.reyarlena.osier.yml
+# cargo-sources.json comes from flatpak-builder-tools:
+#   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+app-id: com.reyarlena.osier
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: osier
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network
+  - --socket=ssh-auth
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Flatpak
+  - --env=OSIER_GIT=/app/bin/git-host
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/osier/cargo
+modules:
+  - name: osier
+    buildsystem: simple
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release -p osier
+      - install -Dm755 target/release/osier /app/bin/osier
+      - install -Dm755 packaging/flatpak/git-host /app/bin/git-host
+      - install -Dm644 packaging/com.reyarlena.osier.desktop /app/share/applications/com.reyarlena.osier.desktop
+      - install -Dm644 packaging/com.reyarlena.osier.metainfo.xml /app/share/metainfo/com.reyarlena.osier.metainfo.xml
+      - install -Dm644 packaging/icons/osier.svg /app/share/icons/hicolor/scalable/apps/com.reyarlena.osier.svg
+      - for s in 16 32 48 64 128 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png /app/share/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png; done
+    sources:
+      - type: dir
+        path: ../..
+      - cargo-sources.json

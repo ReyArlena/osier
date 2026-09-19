@@ -1,0 +1,46 @@
+# Maintainer: Rey Arlena <reyarlena@gmail.com>
+pkgname=osier
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Fast native git GUI"
+arch=(x86_64 aarch64)
+url="https://github.com/ReyArlena/osier"
+license=(MIT)
+depends=(git libxkbcommon libxkbcommon-x11 wayland vulkan-icd-loader fontconfig gcc-libs glibc)
+makedepends=(cargo pkgconf vulkan-headers)
+optdepends=('github-cli: multi-account GitHub authentication')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # filled in when the release tag exists
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p osier
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/osier "$pkgdir/usr/bin/osier"
+  install -Dm644 packaging/com.reyarlena.osier.desktop "$pkgdir/usr/share/applications/com.reyarlena.osier.desktop"
+  install -Dm644 packaging/com.reyarlena.osier.metainfo.xml "$pkgdir/usr/share/metainfo/com.reyarlena.osier.metainfo.xml"
+  install -Dm644 packaging/icons/osier.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.reyarlena.osier.svg"
+  for s in 16 32 48 64 128 256 512; do
+    install -Dm644 "packaging/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png" \
+      "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png"
+  done
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

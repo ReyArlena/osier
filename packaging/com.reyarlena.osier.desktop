@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Osier
+GenericName=Git client
+Comment=Fast native git GUI
+Exec=osier %f
+Icon=com.reyarlena.osier
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;version control;diff;commit;
+MimeType=inode/directory;
+StartupWMClass=com.reyarlena.osier
