@@ -1594,6 +1594,27 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_repository_deleted_while_open_shows_an_error(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |osier, _| {
+            assert!(osier.active_project().expect("project").error.is_none());
+        });
+        std::fs::remove_dir_all(repo.path()).expect("remove repo");
+        h.act(cx, |osier, _, cx| osier.refresh_active(cx));
+        cx.run_until_parked();
+        h.read(cx, |osier, _| {
+            let project = osier.active_project().expect("project still listed");
+            assert!(
+                project.error.is_some(),
+                "refresh of a missing repo reports an error"
+            );
+            assert!(!project.loading);
+        });
+    }
+
+    #[gpui::test]
     fn theme_menu_switches_mode_and_theme(cx: &mut TestAppContext) {
         use gpui_kit::component::ActiveTheme as _;
         use osier_config::settings::ThemeMode;

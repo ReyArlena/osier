@@ -70,3 +70,170 @@ fn gh_accounts_are_discovered() {
     assert!(logins.contains(&"ReyArlena"), "{logins:?}");
     assert!(logins.contains(&"other-account"), "{logins:?}");
 }
+
+/// A runner whose every command carries Osier's credential helper for `account`, the way
+/// the app configures remote operations.
+fn context_for(account: &str) -> osier_git::ops::remote::RemoteContext {
+    let exe = Path::new(env!("CARGO_BIN_EXE_osier"));
+    osier_git::ops::remote::RemoteContext {
+        config: osier_auth::credential_config(exe, account, "github.com"),
+        env: Vec::new(),
+        cancel: None,
+    }
+}
+
+fn config_args(ctx: &osier_git::ops::remote::RemoteContext) -> Vec<String> {
+    let mut args = Vec::new();
+    for (k, v) in &ctx.config {
+        args.push("-c".to_string());
+        args.push(format!("{k}={v}"));
+    }
+    args
+}
+
+/// Clone, branch, push, hit a non-fast-forward, force-with-lease, and delete the branch
+/// again. Everything happens on a branch named `osier-live-<unix seconds>` that this test
+/// removes at the end.
+#[test]
+#[ignore = "needs OSIER_LIVE_TESTS=1, gh accounts and network; pushes to the testing repo"]
+fn push_round_trip_on_the_testing_repo_as_owner() {
+    use osier_git::ops::remote::{PushOptions, push};
+    if !live() {
+        return;
+    }
+    let ctx = context_for("ReyArlena");
+    let sink = MemorySink::new();
+    let runner = GitRunner::new(sink.clone());
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dest = dir.path().join("clone");
+    let mut args = config_args(&ctx);
+    args.extend([
+        "clone".to_string(),
+        "-q".into(),
+        TESTING_REPO.into(),
+        dest.to_string_lossy().into_owned(),
+    ]);
+    runner.run(None, &args).expect("clone as owner");
+    let repo = osier_git::Repository::discover(runner.clone(), &dest).expect("repo");
+    repo.git(["config", "user.name", "Osier live test"])
+        .unwrap();
+    repo.git(["config", "user.email", "reyarlena@gmail.com"])
+        .unwrap();
+
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("osier-live-{secs}");
+    osier_git::ops::branch::create(&repo, &branch, None, true).expect("create branch");
+    std::fs::write(dest.join("osier-live.txt"), "hello from the live test\n").unwrap();
+    osier_git::ops::stage::stage(&repo, &["osier-live.txt".into()]).unwrap();
+    osier_git::ops::commit::commit(
+        &repo,
+        &osier_git::ops::commit::CommitOptions {
+            message: "osier live test".into(),
+            amend: false,
+            signoff: false,
+            no_verify: false,
+            allow_empty: false,
+        },
+    )
+    .expect("commit");
+
+    let cleanup = |branch: &str| {
+        let mut args = config_args(&ctx);
+        args.extend([
+            "push".to_string(),
+            "origin".into(),
+            "--delete".into(),
+            branch.to_string(),
+        ]);
+        let _ = runner.run(Some(&dest), &args);
+    };
+
+    // 1. First push with upstream.
+    let result = push(
+        &repo,
+        &PushOptions {
+            remote: Some("origin".into()),
+            branch: Some(branch.clone()),
+            set_upstream: true,
+            force_with_lease: false,
+            tags: false,
+        },
+        &ctx,
+        |_| {},
+    );
+    if let Err(e) = &result {
+        cleanup(&branch);
+        panic!("first push failed: {e:?}");
+    }
+    let heads = {
+        let mut a = config_args(&ctx);
+        a.extend([
+            "ls-remote".to_string(),
+            "--heads".into(),
+            "origin".into(),
+            branch.clone(),
+        ]);
+        String::from_utf8(runner.run(Some(&dest), &a).unwrap().stdout).unwrap()
+    };
+    assert!(heads.contains(&format!("refs/heads/{branch}")), "{heads}");
+
+    // 2. Rewrite the tip locally: a plain push must now be refused as non-fast-forward.
+    repo.git(["commit", "--amend", "-m", "osier live test (amended)"])
+        .unwrap();
+    let refused = push(
+        &repo,
+        &PushOptions {
+            remote: Some("origin".into()),
+            branch: Some(branch.clone()),
+            set_upstream: false,
+            force_with_lease: false,
+            tags: false,
+        },
+        &ctx,
+        |_| {},
+    );
+    match refused {
+        Err(GitError::NonFastForward(_)) => {}
+        other => {
+            cleanup(&branch);
+            panic!("expected NonFastForward, got {other:?}");
+        }
+    }
+
+    // 3. force-with-lease is the sanctioned way through.
+    let forced = push(
+        &repo,
+        &PushOptions {
+            remote: Some("origin".into()),
+            branch: Some(branch.clone()),
+            set_upstream: false,
+            force_with_lease: true,
+            tags: false,
+        },
+        &ctx,
+        |_| {},
+    );
+    cleanup(&branch);
+    forced.expect("force-with-lease push");
+
+    // 4. Gone again, and no token anywhere in the command log.
+    let mut a = config_args(&ctx);
+    a.extend([
+        "ls-remote".to_string(),
+        "--heads".into(),
+        "origin".into(),
+        branch.clone(),
+    ]);
+    let after = String::from_utf8(runner.run(Some(&dest), &a).unwrap().stdout).unwrap();
+    assert!(
+        !after.contains(&branch),
+        "branch still on the remote: {after}"
+    );
+    for rec in sink.records() {
+        assert!(!rec.argv.join(" ").contains("gho_"), "token in argv");
+        assert!(!rec.stderr.contains("gho_"), "token in stderr");
+    }
+}

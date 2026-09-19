@@ -15,6 +15,8 @@ pub mod blame;
 pub mod config;
 pub mod diff;
 pub mod error;
+#[cfg(test)]
+mod faults;
 pub mod files;
 pub mod graph;
 pub mod log;
