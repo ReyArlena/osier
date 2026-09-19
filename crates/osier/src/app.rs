@@ -172,6 +172,8 @@ pub struct Osier {
     /// Filled when the settings sheet opens.
     pub(crate) ssh_status: Option<osier_auth::SshStatus>,
     pub(crate) git_version: Option<String>,
+    /// Focus target inside the settings sheet so Escape and its close button reach it.
+    pub(crate) settings_focus: FocusHandle,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
     /// Narrow window: title-bar buttons drop their labels.
     pub(crate) compact: bool,
@@ -293,6 +295,7 @@ impl Osier {
             blame: None,
             ssh_status: None,
             git_version: None,
+            settings_focus: cx.focus_handle(),
             config_watch,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
@@ -1612,6 +1615,35 @@ mod tests {
             );
             assert!(!project.loading);
         });
+    }
+
+    #[gpui::test]
+    fn settings_sheet_closes_on_cancel(cx: &mut TestAppContext) {
+        use gpui_kit::component::WindowExt as _;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, window, cx| osier.open_settings(window, cx));
+        cx.run_until_parked();
+        let open = cx
+            .update_window(h.window, |_, window, cx| window.has_active_sheet(cx))
+            .expect("window");
+        assert!(open, "sheet opened");
+        // Focus must sit inside the sheet, otherwise Cancel never reaches it.
+        let focused = cx
+            .update_window(h.window, |_, window, cx| {
+                window
+                    .focused(cx)
+                    .map(|f| f == h.view.read(cx).settings_focus)
+            })
+            .expect("window");
+        assert_eq!(focused, Some(true), "settings content is focused");
+        cx.dispatch_action(h.window, gpui_kit::component::dialog::Cancel);
+        cx.run_until_parked();
+        let open = cx
+            .update_window(h.window, |_, window, cx| window.has_active_sheet(cx))
+            .expect("window");
+        assert!(!open, "Cancel (close button or Escape) closed the sheet");
     }
 
     #[gpui::test]

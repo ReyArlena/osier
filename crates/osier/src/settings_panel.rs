@@ -83,6 +83,7 @@ impl Osier {
                 .map(|v| v.to_string());
         }
         let view = cx.entity();
+        let focus = self.settings_focus.clone();
         window.open_sheet(cx, move |sheet, window, cx| {
             let pages = pages(&view, window, cx);
             sheet
@@ -92,9 +93,15 @@ impl Osier {
                 .child(
                     div()
                         .size_full()
+                        .track_focus(&focus)
                         .child(SettingsView::new("osier-settings").pages(pages)),
                 )
         });
+        // The button that opened the sheet takes focus back after its click handler ran.
+        // The sheet only receives Cancel (its close button, Escape) while focus is inside
+        // it, so move focus in once the layer exists.
+        let focus = self.settings_focus.clone();
+        window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
 
     /// Save and re-apply after any settings change (panel, config reload).
