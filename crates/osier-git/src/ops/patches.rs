@@ -73,6 +73,164 @@ fn diff(repo: &Repository, mode: &[&str], paths: &[String]) -> Result<String> {
     Ok(out.stdout_str()?.to_string())
 }
 
+/// Turn a patch from another tool into a clean git diff: keep only `diff --git` sections
+/// (dropping mail headers, diffstats, signatures and PhpStorm's `Index:` / `===` /
+/// `IDEA additional info` preamble), and strip the `(revision <hash>)` / `(date <ms>)`
+/// suffix PhpStorm writes after the `---` / `+++` paths. git accepts that suffix only after
+/// a tab, and copies through a terminal or chat turn the tab into spaces.
+///
+/// Text without any `diff --git` line (a plain `diff -u` patch) is returned with only the
+/// suffixes stripped.
+pub fn normalize(text: &str) -> String {
+    if !text.lines().any(|l| l.starts_with("diff --git ")) {
+        return strip_plain_suffixes(text);
+    }
+    enum State {
+        Outside,
+        Header,
+        Hunk { old: u32, new: u32 },
+        AfterHunk,
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut state = State::Outside;
+    for raw in text.split_inclusive('\n') {
+        let line = raw.trim_end_matches('\n').trim_end_matches('\r');
+        if let State::AfterHunk = state {
+            if line.starts_with('\\') {
+                out.push_str(raw);
+                continue;
+            }
+            // Only another hunk of the same file or the next file header continue the
+            // patch; anything else (mail signature, PhpStorm preamble) starts junk.
+            if !line.starts_with("@@ ") && !line.starts_with("diff --git ") {
+                state = State::Outside;
+            }
+        }
+        match state {
+            State::Hunk { old, new } => {
+                let (old, new) = match line.chars().next() {
+                    Some(' ') | None => (old.saturating_sub(1), new.saturating_sub(1)),
+                    Some('-') => (old.saturating_sub(1), new),
+                    Some('+') => (old, new.saturating_sub(1)),
+                    Some('\\') => (old, new),
+                    // Malformed: the hunk ended early. Drop the line.
+                    _ => {
+                        state = State::Outside;
+                        continue;
+                    }
+                };
+                out.push_str(raw);
+                state = if old == 0 && new == 0 {
+                    State::AfterHunk
+                } else {
+                    State::Hunk { old, new }
+                };
+                continue;
+            }
+            State::Header | State::Outside | State::AfterHunk => {}
+        }
+        if line.starts_with("diff --git ") {
+            out.push_str(raw);
+            state = State::Header;
+        } else if let Some(rest) = line.strip_prefix("@@ ") {
+            if matches!(state, State::Outside) {
+                continue;
+            }
+            match hunk_counts(rest) {
+                Some((old, new)) => {
+                    out.push_str(raw);
+                    state = if old == 0 && new == 0 {
+                        State::AfterHunk
+                    } else {
+                        State::Hunk { old, new }
+                    };
+                }
+                None => state = State::Outside,
+            }
+        } else if let State::Header = state {
+            match strip_revision_suffix(line) {
+                Some(clean) => {
+                    out.push_str(&clean);
+                    out.push('\n');
+                }
+                None => out.push_str(raw),
+            }
+        }
+    }
+    out
+}
+
+/// Whether `git apply --3way` can work: it needs the blob ids from `index` lines, which
+/// PhpStorm and plain `diff -u` patches do not carry.
+pub fn supports_three_way(text: &str) -> bool {
+    text.lines()
+        .any(|l| l.starts_with("index ") && l.contains(".."))
+}
+
+fn hunk_counts(rest: &str) -> Option<(u32, u32)> {
+    let (ranges, _) = rest.split_once(" @@")?;
+    let mut it = ranges.split(' ');
+    let old = it.next()?.strip_prefix('-')?;
+    let new = it.next()?.strip_prefix('+')?;
+    let count = |s: &str| -> Option<u32> {
+        match s.split_once(',') {
+            Some((_, n)) => n.parse().ok(),
+            None => Some(1),
+        }
+    };
+    Some((count(old)?, count(new)?))
+}
+
+/// `--- a/x.rs    (revision abc)` to `--- a/x.rs`. Only PhpStorm's known suffixes, and only
+/// when separated from the path by whitespace.
+fn strip_revision_suffix(line: &str) -> Option<String> {
+    let (marker, rest) = if let Some(r) = line.strip_prefix("--- ") {
+        ("--- ", r)
+    } else if let Some(r) = line.strip_prefix("+++ ") {
+        ("+++ ", r)
+    } else {
+        return None;
+    };
+    let trimmed = rest.trim_end();
+    let inner_end = trimmed.strip_suffix(')')?;
+    let open = inner_end.rfind('(')?;
+    let inner = &inner_end[open + 1..];
+    let known = inner.starts_with("revision ")
+        || inner.starts_with("date ")
+        || inner == "working copy"
+        || inner == "nonexistent";
+    if !known {
+        return None;
+    }
+    let before = &inner_end[..open];
+    let path = before.trim_end_matches([' ', '\t']);
+    if path.len() == before.len() || path.is_empty() {
+        return None;
+    }
+    Some(format!("{marker}{path}"))
+}
+
+/// Suffix stripping for patches without git headers: only a `---` line directly followed
+/// by a `+++` line counts as a file header.
+fn strip_plain_suffixes(text: &str) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, raw) in lines.iter().enumerate() {
+        let line = raw.trim_end_matches('\n').trim_end_matches('\r');
+        let paired = (line.starts_with("--- ")
+            && lines.get(i + 1).is_some_and(|n| n.starts_with("+++ ")))
+            || (line.starts_with("+++ ") && i > 0 && lines[i - 1].starts_with("--- "));
+        match paired.then(|| strip_revision_suffix(line)).flatten() {
+            Some(clean) => {
+                out.push_str(&clean);
+                out.push('\n');
+            }
+            None => out.push_str(raw),
+        }
+    }
+    out
+}
+
 /// Per-file line counts from `git apply --numstat`; binary files report `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchFile {
@@ -83,6 +241,7 @@ pub struct PatchFile {
 
 /// List the files a patch touches without applying it.
 pub fn inspect(repo: &Repository, patch: &str) -> Result<Vec<PatchFile>> {
+    let patch = normalize(patch);
     let out = repo.runner().run_unchecked(
         Some(repo.workdir()),
         ["apply", "--numstat", "-z", "-"],
@@ -160,6 +319,7 @@ pub fn apply(repo: &Repository, patch: &str, options: ApplyOptions) -> Result<Ap
 }
 
 fn run(repo: &Repository, patch: &str, options: ApplyOptions, check: bool) -> Result<ApplyReport> {
+    let patch = normalize(patch);
     let mut args = vec!["apply", "--whitespace=nowarn"];
     if check {
         args.push("--check");
@@ -380,6 +540,136 @@ mod tests {
         t.commit_file("a.txt", "a\n", "first");
         assert!(inspect(&t.repo(), "hello world\n").is_err());
         assert!(inspect(&t.repo(), "").is_err() || inspect(&t.repo(), "").unwrap().is_empty());
+    }
+
+    use crate::testing::PHPSTORM_PATCH as PHPSTORM;
+
+    fn phpstorm_spaced() -> String {
+        PHPSTORM.replace("\t(revision", "    (revision")
+    }
+
+    #[test]
+    fn normalize_cleans_phpstorm_patches() {
+        for input in [PHPSTORM.to_string(), phpstorm_spaced()] {
+            let clean = normalize(&input);
+            assert!(!clean.contains("Index:"), "{clean}");
+            assert!(!clean.contains("IDEA additional info"));
+            assert!(!clean.contains("(revision"));
+            assert!(!clean.contains("Subject:"));
+            assert!(clean.starts_with("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@"));
+            assert!(clean.contains("--- /dev/null\n+++ b/notes/new.md\n"));
+            // A content line starting with `--` inside a hunk is kept as content.
+            assert!(clean.ends_with("+-- not a signature\n"), "{clean}");
+            let files = crate::diff::parse(&clean).unwrap();
+            assert_eq!(files.len(), 2);
+            assert_eq!(files[1].hunks[0].lines.len(), 2);
+        }
+        assert!(!supports_three_way(PHPSTORM));
+    }
+
+    #[test]
+    fn phpstorm_patches_apply_with_tabs_and_with_spaces() {
+        for input in [PHPSTORM.to_string(), phpstorm_spaced()] {
+            let t = TempRepo::new();
+            t.commit_file("a.txt", "one\ntwo\nthree\n", "first");
+            let files = inspect(&t.repo(), &input).unwrap();
+            let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+            assert_eq!(names, ["a.txt", "notes/new.md"]);
+            assert!(
+                check(&t.repo(), &input, ApplyOptions::default())
+                    .unwrap()
+                    .ok
+            );
+            assert!(
+                apply(&t.repo(), &input, ApplyOptions::default())
+                    .unwrap()
+                    .ok
+            );
+            assert_eq!(t.read("a.txt"), "one\nTWO\nthree\n");
+            assert_eq!(t.read("notes/new.md"), "# Notes\n-- not a signature\n");
+        }
+    }
+
+    #[test]
+    fn normalize_keeps_every_hunk_of_a_multi_hunk_file() {
+        // Two hunks in one file, PhpStorm style (no context text after the second `@@`).
+        let text = "Index: a.txt\n===================================================================\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\t(revision 1)\n+++ b/a.txt\t(revision 2)\n@@ -1,3 +1,3 @@\n l1\n-l2\n+L2\n l3\n@@ -8,3 +8,4 @@\n l8\n l9\n l10\n+l11\n";
+        let clean = normalize(text);
+        assert_eq!(clean.matches("\n@@ ").count(), 2, "{clean}");
+        let files = crate::diff::parse(&clean).unwrap();
+        assert_eq!(files[0].hunks.len(), 2);
+        let t = TempRepo::new();
+        let body: String = (1..=10).map(|n| format!("l{n}\n")).collect();
+        t.commit_file("a.txt", &body, "ten lines");
+        assert!(apply(&t.repo(), text, ApplyOptions::default()).unwrap().ok);
+        let expected: String = (1..=11)
+            .map(|n| {
+                if n == 2 {
+                    "L2\n".to_string()
+                } else {
+                    format!("l{n}\n")
+                }
+            })
+            .collect();
+        assert_eq!(t.read("a.txt"), expected);
+    }
+
+    #[test]
+    fn normalize_never_drops_hunks_from_git_output() {
+        // Round trip: a multi-file, multi-hunk git diff must survive normalize unchanged.
+        let t = TempRepo::new();
+        let body: String = (1..=40).map(|n| format!("line {n}\n")).collect();
+        t.commit_file("a.txt", &body, "a");
+        t.commit_file("b.txt", &body, "b");
+        let changed = body
+            .replace("line 2\n", "LINE 2\n")
+            .replace("line 30\n", "LINE 30\n");
+        t.write("a.txt", &changed);
+        t.write("b.txt", &changed);
+        let diff = t.git(["diff"]);
+        assert_eq!(diff.matches("\n@@ ").count(), 4);
+        assert_eq!(normalize(&diff), diff);
+    }
+
+    #[test]
+    fn normalize_keeps_git_patches_and_drops_mail_trailers() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let hash = t.commit_file("a.txt", "a\nb\n", "add b");
+        // format-patch with its default signature trailer, as another git user would send it.
+        let mail = t.git(["format-patch", "--stdout", "-1", &hash]);
+        assert!(mail.contains("\n-- \n"), "fixture has a signature");
+        let clean = normalize(&mail);
+        assert!(clean.starts_with("diff --git "));
+        assert!(!clean.contains("\n-- \n"));
+        assert!(clean.contains("\nindex "));
+        assert!(supports_three_way(&clean));
+        let files = crate::diff::parse(
+            &mail
+                .split_once("diff --git")
+                .map(|(_, r)| format!("diff --git{r}"))
+                .unwrap(),
+        );
+        assert!(files.is_err() || files.unwrap()[0].hunks[0].lines.len() == 2);
+        assert_eq!(
+            crate::diff::parse(&clean).unwrap()[0].hunks[0].lines.len(),
+            2
+        );
+        // A plain git diff passes through unchanged.
+        t.write("a.txt", "x\n");
+        let plain = t.git(["diff"]);
+        assert_eq!(normalize(&plain), plain);
+    }
+
+    #[test]
+    fn plain_unified_diffs_get_suffixes_stripped_only_on_header_pairs() {
+        let text = "--- a.txt    (revision 1)\n+++ a.txt    (working copy)\n@@ -1 +1 @@\n-old (revision 3)\n+new\n";
+        let clean = normalize(text);
+        assert!(clean.starts_with("--- a.txt\n+++ a.txt\n"));
+        assert!(
+            clean.contains("-old (revision 3)\n"),
+            "content untouched: {clean}"
+        );
     }
 
     #[test]

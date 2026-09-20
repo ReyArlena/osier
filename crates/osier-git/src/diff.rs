@@ -302,9 +302,15 @@ pub fn parse(text: &str) -> Result<Vec<DiffFile>> {
                 .ok_or_else(|| GitError::parse("diff", "hunk before file header"))?;
             let mut hunk = parse_hunk_header(line, rest)?;
             let (mut old_no, mut new_no) = (hunk.old_start, hunk.new_start);
+            // The header says how many lines follow; anything after them (another file,
+            // a mail signature, PhpStorm's `Index:` preamble) is not part of the hunk.
+            let (mut old_left, mut new_left) = (hunk.old_lines, hunk.new_lines);
             while let Some(peek) = lines.peek() {
                 let l = peek.strip_suffix('\n').unwrap_or(peek);
                 if l.starts_with("diff --git ") || l.starts_with("@@ ") {
+                    break;
+                }
+                if old_left == 0 && new_left == 0 && !l.starts_with('\\') {
                     break;
                 }
                 let l = l.to_string();
@@ -323,6 +329,14 @@ pub fn parse(text: &str) -> Result<Vec<DiffFile>> {
                     None => (LineKind::Context, ""),
                     _ => return Err(GitError::parse("diff", format!("unexpected line {l:?}"))),
                 };
+                match kind {
+                    LineKind::Context => {
+                        old_left = old_left.saturating_sub(1);
+                        new_left = new_left.saturating_sub(1);
+                    }
+                    LineKind::Added => new_left = new_left.saturating_sub(1),
+                    LineKind::Removed => old_left = old_left.saturating_sub(1),
+                }
                 let (o, n) = match kind {
                     LineKind::Context => {
                         let r = (Some(old_no), Some(new_no));

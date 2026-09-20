@@ -223,3 +223,8 @@ pub fn isolated_runner(sink: Arc<MemorySink>) -> GitRunner {
         .with_env("GIT_COMMITTER_NAME", "Osier Test")
         .with_env("GIT_COMMITTER_EMAIL", "test@example.com")
 }
+
+/// The layout PhpStorm's Git > Create Patch writes (captured from PhpStorm 2025.x, content
+/// replaced): mail subject, `Index:` + `IDEA additional info` preamble per file, `(revision)`
+/// suffixes after a tab, no `index` blob lines.
+pub const PHPSTORM_PATCH: &str = "Subject: [PATCH] Change greeting and add notes\n---\nIndex: a.txt\nIDEA additional info:\nSubsystem: com.intellij.openapi.diff.impl.patch.CharsetEP\n<+>UTF-8\n===================================================================\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\t(revision 1111111111111111111111111111111111111111)\n+++ b/a.txt\t(revision 2222222222222222222222222222222222222222)\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\nIndex: notes/new.md\nIDEA additional info:\nSubsystem: com.intellij.openapi.diff.impl.patch.CharsetEP\n<+>UTF-8\n===================================================================\ndiff --git a/notes/new.md b/notes/new.md\nnew file mode 100644\n--- /dev/null\t(revision 2222222222222222222222222222222222222222)\n+++ b/notes/new.md\t(revision 2222222222222222222222222222222222222222)\n@@ -0,0 +1,2 @@\n+# Notes\n+-- not a signature\n";

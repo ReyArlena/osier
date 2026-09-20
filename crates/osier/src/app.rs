@@ -1226,8 +1226,10 @@ fn load_patch(
             osier_git::diff::patch_text(repo, &o)?
         }
         Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new())),
-        Selection::Patch { file, .. } => std::fs::read_to_string(file)
-            .map_err(|e| LoadError::Git(format!("{}: {e}", file.display())))?,
+        Selection::Patch { file, .. } => osier_git::ops::patches::normalize(
+            &std::fs::read_to_string(file)
+                .map_err(|e| LoadError::Git(format!("{}: {e}", file.display())))?,
+        ),
         Selection::Compare {
             from,
             to,
@@ -1644,6 +1646,39 @@ mod tests {
             .update_window(h.window, |_, window, cx| window.has_active_sheet(cx))
             .expect("window");
         assert!(!open, "Cancel (close button or Escape) closed the sheet");
+    }
+
+    #[gpui::test]
+    fn phpstorm_patches_apply_and_render(cx: &mut TestAppContext) {
+        use gpui_kit::component::diff::DiffFile;
+        use osier_git::ops::patches::{ApplyOptions, normalize};
+        use osier_git::testing::PHPSTORM_PATCH;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\ntwo\nthree\n", "first");
+        let h = Harness::open(cx, &repo);
+        // The diff view gets the normalised text; gpui-kit's parser must accept it.
+        for text in [
+            PHPSTORM_PATCH.to_string(),
+            PHPSTORM_PATCH.replace("\t(revision", "    (revision"),
+        ] {
+            let files = DiffFile::parse(&normalize(&text)).expect("gpui-kit parses it");
+            assert_eq!(files.len(), 2);
+        }
+        let spaced = PHPSTORM_PATCH.replace("\t(revision", "    (revision");
+        h.act(cx, |osier, window, cx| {
+            osier.run_apply(
+                spaced.clone(),
+                ApplyOptions::default(),
+                "clipboard patch".into(),
+                None,
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        assert_eq!(repo.read("a.txt"), "one\nTWO\nthree\n");
+        assert_eq!(repo.read("notes/new.md"), "# Notes\n-- not a signature\n");
+        h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Changes));
     }
 
     #[gpui::test]

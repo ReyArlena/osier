@@ -409,6 +409,19 @@ impl Osier {
                         cx,
                     );
                 }
+                Ok((_, report)) if !git_patches::supports_three_way(&text) => {
+                    // PhpStorm and plain `diff -u` patches carry no blob ids, so git cannot
+                    // fall back to a three-way merge. Say so instead of offering it.
+                    let rejected = file_list(report.rejected.iter().map(String::as_str));
+                    window.push_notification(
+                        Notification::error(format!("{label} does not apply cleanly"))
+                            .message(format!(
+                                "Rejected:\n{rejected}\n\n{}\n\nThis patch has no blob ids (PhpStorm or plain diff), so a three-way merge is not possible. Bring the files closer to the patch's base and try again.",
+                                report.message
+                            )),
+                        cx,
+                    );
+                }
                 Ok((_, report)) => {
                     let rejected = file_list(report.rejected.iter().map(String::as_str));
                     let text = text.clone();
