@@ -142,6 +142,9 @@ pub struct PushOptions {
     /// `--force-with-lease`. Never plain `--force`.
     pub force_with_lease: bool,
     pub tags: bool,
+    /// Delete this ref on the remote instead of pushing (`push <remote> --delete <ref>`),
+    /// e.g. `refs/tags/v1`. Uses `remote` or `origin`; the other flags are ignored.
+    pub delete: Option<String>,
 }
 
 pub fn push(
@@ -151,6 +154,12 @@ pub fn push(
     on_progress: impl FnMut(Progress) + Send + 'static,
 ) -> Result<String> {
     let mut args: Vec<String> = vec!["push".into(), "--progress".into()];
+    if let Some(refname) = &options.delete {
+        args.push(options.remote.clone().unwrap_or_else(|| "origin".into()));
+        args.push("--delete".into());
+        args.push(refname.clone());
+        return run(repo, ctx, args, on_progress);
+    }
     if options.set_upstream {
         args.push("--set-upstream".into());
     }
@@ -475,6 +484,50 @@ mod tests {
                 .any(|w| w[0] == "-c" && w[1] == "osier.marker=yes"),
             "{:?}",
             last.argv
+        );
+    }
+
+    #[test]
+    fn push_delete_removes_a_remote_tag() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["tag", "v1"]);
+        t.git(["push", "-q", "origin", "v1"]);
+        let tags_on_remote = || {
+            let out = std::process::Command::new("git")
+                .args(["-C", bare.to_string_lossy().as_ref(), "tag"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(tags_on_remote().trim(), "v1");
+        push(
+            &t.repo(),
+            &PushOptions {
+                remote: Some("origin".into()),
+                delete: Some("refs/tags/v1".into()),
+                ..Default::default()
+            },
+            &RemoteContext::default(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(tags_on_remote().trim(), "");
+        // git treats deleting a missing ref as success (with a warning); an unknown remote
+        // is the failure path.
+        assert!(
+            push(
+                &t.repo(),
+                &PushOptions {
+                    remote: Some("nope".into()),
+                    delete: Some("refs/tags/v1".into()),
+                    ..Default::default()
+                },
+                &RemoteContext::default(),
+                |_| {},
+            )
+            .is_err()
         );
     }
 }

@@ -22,6 +22,7 @@ use osier_git::{GitRunner, Repository};
 pub struct Snapshot {
     pub status: RepoStatus,
     pub branches: Vec<Branch>,
+    pub tags: Vec<osier_git::refs::Tag>,
     pub commits: Vec<Commit>,
     pub graph: Vec<GraphRow>,
     pub stashes: Vec<StashEntry>,
@@ -85,6 +86,8 @@ pub struct Project {
     pub revision: u64,
     pub selection: Selection,
     pub selected_commit: Option<usize>,
+    /// Second commit of a two-commit compare picked in the Log (shift/ctrl-click).
+    pub compare_commit: Option<usize>,
     pub log_page_size: usize,
     /// When set, the Log shows this file's history (`log --follow`).
     pub log_path: Option<String>,
@@ -110,6 +113,7 @@ impl Project {
             revision: 0,
             selection: Selection::None,
             selected_commit: None,
+            compare_commit: None,
             log_page_size,
             log_path: None,
             task: Task::ready(()),
@@ -254,6 +258,7 @@ pub fn load_snapshot(
     let status = osier_git::status::status(repo, StatusOptions::default())
         .map_err(|e| format!("status: {e}"))?;
     let branches = osier_git::refs::branches(repo).map_err(|e| format!("branches: {e}"))?;
+    let tags = osier_git::refs::tags(repo).map_err(|e| format!("tags: {e}"))?;
     let commits = osier_git::log::log(
         repo,
         &LogOptions {
@@ -284,6 +289,7 @@ pub fn load_snapshot(
     Ok(Snapshot {
         status,
         branches,
+        tags,
         commits,
         graph,
         stashes,

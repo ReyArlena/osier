@@ -509,6 +509,31 @@ fn git_page(view: &Entity<Osier>) -> SettingPage {
                 .default_value(defaults.viewer.remote_images),
             )
             .description("Fetch http(s) images such as README badges. Off shows repository files only."),
+            SettingItem::new(
+                "Markdown files open as",
+                SettingField::dropdown(
+                    vec![
+                        ("rendered".into(), "Rendered".into()),
+                        ("code".into(), "Code".into()),
+                    ],
+                    get(view, |o| match o.settings.viewer.markdown_default {
+                        osier_config::settings::MarkdownMode::Rendered => "rendered".into(),
+                        osier_config::settings::MarkdownMode::Code => "code".into(),
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.viewer.markdown_default = if v.as_ref() == "code" {
+                            osier_config::settings::MarkdownMode::Code
+                        } else {
+                            osier_config::settings::MarkdownMode::Rendered
+                        };
+                        // A new default makes per-type overrides that equal it redundant.
+                        let d = o.settings.viewer.markdown_default;
+                        o.settings.viewer.markdown_modes.retain(|_, m| *m != d);
+                    }),
+                )
+                .default_value("rendered".to_string()),
+            )
+            .description("The Rendered/Code toggle remembers its choice per file type on top of this."),
         ]))
 }
 

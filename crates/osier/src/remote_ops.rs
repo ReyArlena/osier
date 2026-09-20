@@ -54,6 +54,16 @@ impl RemoteOp {
                 PullStrategy::Merge => "Pull with merge".into(),
                 PullStrategy::Rebase => "Pull with rebase".into(),
             },
+            RemoteOp::Push(o) if o.delete.is_some() => format!(
+                "Delete {} on {}",
+                o.delete
+                    .as_deref()
+                    .map(|r| r
+                        .trim_start_matches("refs/tags/")
+                        .trim_start_matches("refs/heads/"))
+                    .unwrap_or_default(),
+                o.remote.as_deref().unwrap_or("origin")
+            ),
             RemoteOp::Push(o) => match (o.set_upstream, o.force_with_lease) {
                 (_, true) => "Force push with lease".into(),
                 (true, false) => "Push and set upstream".into(),

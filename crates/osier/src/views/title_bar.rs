@@ -167,6 +167,89 @@ impl Osier {
             })
     }
 
+    /// The branch button: switch, merge into current or rebase onto any local branch, plus
+    /// new branch and a jump to the Branches tab.
+    fn render_branch_menu(&self, current: String, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::app::Tab;
+        use osier_git::ops::integrate::MergeMode;
+        let others: Vec<String> = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map(|s| {
+                s.branches
+                    .iter()
+                    .filter(|b| !b.is_remote && b.name != current)
+                    .map(|b| b.name.clone())
+                    .take(30)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let w = cx.weak_entity();
+        Button::new("branch")
+            .ghost()
+            .small()
+            .icon(Lucide::GitBranch)
+            .when(!self.compact, |b| b.label(current.clone()))
+            .tooltip(format!("Branch {current}"))
+            .dropdown_menu(move |menu, window, cx| {
+                let act = |f: MenuHandler| {
+                    let w = w.clone();
+                    move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        let _ = w.update(cx, |this, cx| f(this, window, cx));
+                    }
+                };
+                let mut menu = menu
+                    .item(
+                        PopupMenuItem::new("New branch…")
+                            .icon(Lucide::Plus)
+                            .on_click(act(Box::new(|this, window, cx| {
+                                this.prompt_new_branch(None, window, cx)
+                            }))),
+                    )
+                    .item(
+                        PopupMenuItem::new("Branches tab")
+                            .on_click(act(Box::new(|this, _, cx| this.set_tab(Tab::Branches, cx)))),
+                    );
+                if !others.is_empty() {
+                    menu = menu.separator().label("Local branches");
+                }
+                for name in &others {
+                    let (n1, n2, n3) = (name.clone(), name.clone(), name.clone());
+                    let cur = current.clone();
+                    let w = w.clone();
+                    menu = menu.submenu(name.clone(), window, cx, move |sub, _, _| {
+                        let act = |f: MenuHandler| {
+                            let w = w.clone();
+                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                let _ = w.update(cx, |this, cx| f(this, window, cx));
+                            }
+                        };
+                        let (n1, n2, n3) = (n1.clone(), n2.clone(), n3.clone());
+                        sub.item(PopupMenuItem::new("Check out").on_click(act(Box::new(
+                            move |this, window, cx| {
+                                this.checkout_branch(n1.clone(), false, window, cx)
+                            },
+                        ))))
+                        .item(
+                            PopupMenuItem::new(format!("Merge into {cur}")).on_click(act(
+                                Box::new(move |this, window, cx| {
+                                    this.merge_branch(n2.clone(), MergeMode::Default, window, cx)
+                                }),
+                            )),
+                        )
+                        .item(
+                            PopupMenuItem::new(format!("Rebase {cur} onto it…")).on_click(act(
+                                Box::new(move |this, window, cx| {
+                                    this.confirm_rebase_onto(n3.clone(), window, cx)
+                                }),
+                            )),
+                        )
+                    });
+                }
+                menu
+            })
+    }
+
     pub(crate) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let project = self.active_project();
         let branch = project
@@ -192,17 +275,7 @@ impl Osier {
                                 .child(tilde(&p.path)),
                         )
                         .child(Separator::vertical().h_4().mx_1())
-                        .child(
-                            Button::new("branch")
-                                .ghost()
-                                .small()
-                                .icon(Lucide::GitBranch)
-                                .when(!self.compact, |b| b.label(branch))
-                                .tooltip("Branches")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.set_tab(crate::app::Tab::Branches, cx)
-                                })),
-                        )
+                        .child(self.render_branch_menu(branch.clone(), cx))
                 })
                 .when(!has_project, |this| {
                     this.child(div().text_sm().font_medium().child("Osier"))

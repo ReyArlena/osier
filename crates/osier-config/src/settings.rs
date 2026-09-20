@@ -131,12 +131,43 @@ pub struct Viewer {
     /// Fetch images referenced by http(s) URLs in markdown (README badges and the like).
     /// Off means only files inside the repository are shown.
     pub remote_images: bool,
+    /// How markdown files open in the Files tab.
+    pub markdown_default: MarkdownMode,
+    /// Per extension overrides (`md`, `mdx`, ...), written when the Rendered/Code toggle is
+    /// used on a file of that type.
+    pub markdown_modes: std::collections::BTreeMap<String, MarkdownMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkdownMode {
+    #[default]
+    Rendered,
+    Code,
+}
+
+impl Viewer {
+    /// The mode for a file name, from its extension override or the default.
+    pub fn markdown_mode_for(&self, path: &str) -> MarkdownMode {
+        extension(path)
+            .and_then(|e| self.markdown_modes.get(&e).copied())
+            .unwrap_or(self.markdown_default)
+    }
+}
+
+/// Lower-case extension of a path, without the dot.
+pub fn extension(path: &str) -> Option<String> {
+    let name = path.rsplit('/').next()?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    (!stem.is_empty() && !ext.is_empty()).then(|| ext.to_ascii_lowercase())
 }
 
 impl Default for Viewer {
     fn default() -> Self {
         Self {
             remote_images: true,
+            markdown_default: MarkdownMode::Rendered,
+            markdown_modes: Default::default(),
         }
     }
 }
@@ -219,5 +250,18 @@ mod tests {
             Settings::load(&paths),
             Err(crate::ConfigError::Parse { .. })
         ));
+    }
+
+    #[test]
+    fn markdown_mode_by_extension() {
+        let mut v = Viewer::default();
+        assert_eq!(v.markdown_mode_for("README.md"), MarkdownMode::Rendered);
+        v.markdown_modes.insert("mdx".into(), MarkdownMode::Code);
+        assert_eq!(v.markdown_mode_for("docs/page.MDX"), MarkdownMode::Code);
+        assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Rendered);
+        v.markdown_default = MarkdownMode::Code;
+        assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Code);
+        assert_eq!(extension(".bashrc"), None);
+        assert_eq!(extension("a/b.c/README"), None);
     }
 }

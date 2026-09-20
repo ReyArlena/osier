@@ -150,6 +150,39 @@ impl Osier {
     }
 
     /// Discard with a confirmation that says exactly what is lost.
+    /// Messages committed before in the active repository, newest first.
+    pub(crate) fn recent_commit_messages(&self) -> Vec<String> {
+        let Some(p) = self.active_project() else {
+            return Vec::new();
+        };
+        let key = p.path.to_string_lossy().into_owned();
+        self.state
+            .commit_messages
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Space in the Changes list: stage the selected file, or unstage it when staged.
+    pub(crate) fn toggle_stage_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((path, area)) = self.diff_area() else {
+            return;
+        };
+        match area {
+            Area::Staged => self.unstage_paths(vec![path], window, cx),
+            Area::Unstaged | Area::Untracked => self.stage_paths(vec![path], window, cx),
+            // Conflicts are resolved first, then marked; staging them here would hide markers.
+            Area::Conflicted => {}
+        }
+    }
+
+    /// Delete in the Changes list: discard the selected file (with the usual confirmation).
+    pub(crate) fn discard_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((path, area)) = self.diff_area() {
+            self.discard_file(path, area, window, cx);
+        }
+    }
+
     pub(crate) fn discard_file(
         &mut self,
         path: String,

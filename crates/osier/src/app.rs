@@ -38,6 +38,8 @@ gpui_kit::actions!(
         TabPatches,
         SelectNext,
         SelectPrev,
+        ToggleStageSelected,
+        DiscardSelected,
         CommitStaged,
         Fetch,
         Pull,
@@ -72,6 +74,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("up", SelectPrev, Some("OsierList")),
         KeyBinding::new("j", SelectNext, Some("OsierList")),
         KeyBinding::new("k", SelectPrev, Some("OsierList")),
+        KeyBinding::new("space", ToggleStageSelected, Some("OsierList")),
+        KeyBinding::new("delete", DiscardSelected, Some("OsierList")),
     ]);
 }
 
@@ -146,6 +150,8 @@ pub struct Osier {
     pub(crate) viewer: Option<crate::viewer::Viewer>,
     /// Markdown files show rendered by default; this toggles to source.
     pub(crate) markdown_as_code: bool,
+    /// Filter box above the Files tree.
+    pub(crate) files_filter: Entity<gpui_kit::component::input::InputState>,
     pub(crate) files_tree: Entity<gpui_kit::component::tree::TreeState>,
     pub(crate) show_ignored: bool,
     /// Hash of the path set the tree was built from, so expansion survives refreshes.
@@ -220,6 +226,15 @@ impl Osier {
                 .rows(4)
                 .placeholder("Commit message (ctrl-enter to commit)")
         });
+        let files_filter = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx).placeholder("Filter files")
+        });
+        let files_filter_subscription =
+            cx.subscribe_in(&files_filter, window, |_, _, ev: &InputEvent, _, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
         let sidebar_filter = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx).placeholder("Filter projects")
         });
@@ -244,6 +259,7 @@ impl Osier {
             editor: None,
             viewer: None,
             markdown_as_code: false,
+            files_filter,
             files_tree: cx.new(|cx| gpui_kit::component::tree::TreeState::new(cx)),
             show_ignored: false,
             files_tree_key: 0,
@@ -299,7 +315,11 @@ impl Osier {
             config_watch,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
-            _subscriptions: vec![message_subscription, filter_subscription],
+            _subscriptions: vec![
+                message_subscription,
+                filter_subscription,
+                files_filter_subscription,
+            ],
         };
         this.apply_appearance(cx);
         let diff_entity = this.diff.clone();
@@ -427,10 +447,25 @@ impl Osier {
     }
 
     /// Recents and scanned repositories that are not open, filtered, with their origin.
+    /// Pinned repositories that are not open, filtered like the rest of the sidebar.
+    pub(crate) fn pinned_entries(&self, cx: &App) -> Vec<PathBuf> {
+        let filter = self.sidebar_filter_text(cx);
+        self.state
+            .pinned
+            .iter()
+            .filter(|p| !self.projects.iter().any(|o| &o.path == *p))
+            .filter(|p| Self::matches_filter(p, &filter))
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn recent_entries(&self, cx: &App) -> Vec<(PathBuf, Option<PathBuf>)> {
         let filter = self.sidebar_filter_text(cx);
         let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
         for p in self.state.recent_not_open() {
+            if self.state.is_pinned(p) {
+                continue;
+            }
             if Self::matches_filter(p, &filter) {
                 let provider =
                     osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
@@ -439,6 +474,7 @@ impl Osier {
         }
         for p in &self.scanned {
             if !self.state.open_projects.contains(p)
+                && !self.state.is_pinned(p)
                 && !out.iter().any(|(q, _)| q == p)
                 && Self::matches_filter(p, &filter)
             {
@@ -987,8 +1023,70 @@ impl Osier {
             hash: commit.hash.clone(),
         };
         p.selected_commit = Some(ix);
+        p.compare_commit = None;
         self.log_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
         self.reload_selection(cx);
+        cx.notify();
+    }
+
+    /// Compare the selected commit with the one at `ix` (shift/ctrl-click or the row menu).
+    /// The older commit (lower in the log) is the base. Without a selection, select `ix`.
+    pub(crate) fn compare_with_selected(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(p) = self.active_project_mut() else {
+            return;
+        };
+        let Some(anchor) = p.selected_commit.filter(|a| *a != ix) else {
+            self.select_commit(ix, cx);
+            return;
+        };
+        let (Some(a), Some(b)) = (p.commit_at(anchor), p.commit_at(ix)) else {
+            return;
+        };
+        let (older, newer) = if anchor > ix { (a, b) } else { (b, a) };
+        let (from, to) = (older.hash.clone(), newer.hash.clone());
+        p.compare_commit = Some(ix);
+        self.diff_force_large = false;
+        self.editor = None;
+        if let Some(p) = self.active_project_mut() {
+            p.selection = Selection::Compare {
+                from,
+                to,
+                since_merge_base: false,
+            };
+        }
+        self.reload_selection(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn compare_with_hash(&mut self, hash: String, cx: &mut Context<Self>) {
+        let ix = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|s| s.commits.iter().position(|c| c.hash == hash));
+        if let Some(ix) = ix {
+            self.compare_with_selected(ix, cx);
+        }
+    }
+
+    /// Pin or unpin a repository in the sidebar's Pinned group.
+    pub(crate) fn toggle_pin(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.state.toggle_pin(path);
+        self.save_state();
+        cx.notify();
+    }
+
+    /// Drag and drop in the Open list: move the project at `from` to position `to`.
+    pub(crate) fn move_project_to(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        let len = self.projects.len();
+        if from >= len || to >= len || from == to {
+            return;
+        }
+        let active_path = self.active.map(|a| self.projects[a].path.clone());
+        let project = self.projects.remove(from);
+        self.projects.insert(to, project);
+        self.active = active_path.and_then(|p| self.projects.iter().position(|x| x.path == p));
+        self.state.open_projects = self.projects.iter().map(|p| p.path.clone()).collect();
+        self.save_state();
         cx.notify();
     }
 
@@ -1303,6 +1401,12 @@ impl Render for Osier {
             }))
             .on_action(cx.listener(|this, _: &Push, window, cx| {
                 this.start_remote(crate::remote_ops::RemoteOp::push_default(), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleStageSelected, window, cx| {
+                this.toggle_stage_selected(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &DiscardSelected, window, cx| {
+                this.discard_selected(window, cx)
             }))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_selection(-1, cx)))
@@ -1679,6 +1783,239 @@ mod tests {
         assert_eq!(repo.read("a.txt"), "one\nTWO\nthree\n");
         assert_eq!(repo.read("notes/new.md"), "# Notes\n-- not a signature\n");
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Changes));
+    }
+
+    #[gpui::test]
+    fn commit_message_history_and_keyboard_staging(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.write("a.txt", "two\n");
+        let h = Harness::open(cx, &repo);
+
+        // Space on the selected file stages it, a second Space unstages it.
+        h.act(cx, |osier, _, cx| {
+            osier.select_file("a.txt".into(), Area::Unstaged, cx)
+        });
+        h.act(cx, |osier, window, cx| {
+            osier.toggle_stage_selected(window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            repo.git(["diff", "--cached", "--name-only"]).trim(),
+            "a.txt"
+        );
+        h.act(cx, |osier, _, cx| {
+            osier.select_file("a.txt".into(), Area::Staged, cx)
+        });
+        h.act(cx, |osier, window, cx| {
+            osier.toggle_stage_selected(window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(repo.git(["diff", "--cached", "--name-only"]).trim(), "");
+
+        // Delete asks before discarding.
+        h.act(cx, |osier, _, cx| {
+            osier.select_file("a.txt".into(), Area::Unstaged, cx)
+        });
+        h.act(cx, |osier, window, cx| osier.discard_selected(window, cx));
+        let asked = cx
+            .update_window(h.window, |_, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.has_active_dialog(cx)
+            })
+            .expect("window");
+        assert!(asked, "discard opens a confirmation");
+        assert_eq!(repo.read("a.txt"), "two\n", "nothing discarded yet");
+
+        // Committed messages come back in the history, newest first, and fill the box.
+        h.act(cx, |osier, window, cx| {
+            use gpui_kit::component::WindowExt as _;
+            window.close_dialog(cx);
+            osier.stage_paths(vec!["a.txt".into()], window, cx);
+        });
+        cx.run_until_parked();
+        h.act(cx, |osier, window, cx| {
+            osier.set_message("Second commit message", window, cx);
+            osier.commit(window, cx);
+        });
+        cx.run_until_parked();
+        let history = h.read(cx, |osier, _| osier.recent_commit_messages());
+        assert_eq!(
+            history.first().map(String::as_str),
+            Some("Second commit message")
+        );
+        h.act(cx, |osier, window, cx| {
+            osier.set_message(&history[0], window, cx)
+        });
+        h.read(cx, |osier, cx| {
+            assert_eq!(osier.commit_message_text(cx), "Second commit message")
+        });
+    }
+
+    #[gpui::test]
+    fn tags_compare_picks_and_view_at_head(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.commit_file("a.txt", "two\n", "second");
+        repo.git(["tag", "-a", "-m", "release", "v1"]);
+        repo.write("a.txt", "three\n");
+        let h = Harness::open(cx, &repo);
+
+        h.read(cx, |osier, _| {
+            let tags = &osier
+                .active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .tags;
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0].name, "v1");
+            assert!(tags[0].annotated);
+        });
+
+        // Select the newest commit, then compare with the older one: older is the base.
+        h.act(cx, |osier, _, cx| osier.select_commit(0, cx));
+        h.act(cx, |osier, _, cx| osier.compare_with_selected(1, cx));
+        h.read(cx, |osier, _| {
+            let p = osier.active_project().unwrap();
+            let commits = &p.snapshot.as_ref().unwrap().commits;
+            assert_eq!(p.compare_commit, Some(1));
+            assert_eq!(
+                p.selection,
+                Selection::Compare {
+                    from: commits[1].hash.clone(),
+                    to: commits[0].hash.clone(),
+                    since_merge_base: false,
+                }
+            );
+        });
+        // A plain click clears the compare partner.
+        h.act(cx, |osier, _, cx| osier.select_commit(1, cx));
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.active_project().unwrap().compare_commit, None)
+        });
+
+        // View at HEAD shows the committed text, not the working tree.
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("a.txt".into(), Some("HEAD".into()), cx)
+        });
+        h.read(cx, |osier, _| match &osier.viewer {
+            Some(crate::viewer::Viewer::Code { text, .. }) => assert_eq!(text.as_ref(), "two\n"),
+            other => panic!("unexpected viewer {other:?}"),
+        });
+    }
+
+    #[gpui::test]
+    fn pins_and_drag_reorder(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let other = TempRepo::new();
+        other.commit_file("b.txt", "b\n", "first");
+        let third = TempRepo::new();
+        third.commit_file("c.txt", "c\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, window, cx| {
+            osier.open_project_notify(other.path(), window, cx);
+            osier.open_project_notify(third.path(), window, cx);
+        });
+        cx.run_until_parked();
+        let names = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |osier, _| {
+                osier
+                    .projects
+                    .iter()
+                    .map(|p| p.path.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
+        let before = names(&h, cx);
+        assert_eq!(before.len(), 3);
+        // Drag the last project to the top.
+        h.act(cx, |osier, _, cx| osier.move_project_to(2, 0, cx));
+        let after = names(&h, cx);
+        assert_eq!(after[0], before[2]);
+        assert_eq!(after[1], before[0]);
+        h.read(cx, |osier, _| {
+            assert_eq!(osier.state.open_projects, after, "order is persisted");
+            assert_eq!(
+                osier.active_project().unwrap().path,
+                before[2],
+                "the active project follows its row"
+            );
+        });
+
+        // Pin the second repository, close it: it moves to Pinned, not Recent.
+        let pinned_path = before[1].clone();
+        h.act(cx, |osier, _, cx| osier.toggle_pin(&pinned_path, cx));
+        h.act(cx, |osier, window, cx| {
+            let ix = osier
+                .projects
+                .iter()
+                .position(|p| p.path == pinned_path)
+                .unwrap();
+            osier.close_project(ix, window, cx);
+        });
+        h.read(cx, |osier, cx| {
+            assert_eq!(osier.pinned_entries(cx), vec![pinned_path.clone()]);
+            assert!(
+                !osier
+                    .recent_entries(cx)
+                    .iter()
+                    .any(|(p, _)| p == &pinned_path)
+            );
+        });
+        h.act(cx, |osier, _, cx| osier.toggle_pin(&pinned_path, cx));
+        h.read(cx, |osier, cx| {
+            assert!(osier.pinned_entries(cx).is_empty());
+            assert!(
+                osier
+                    .recent_entries(cx)
+                    .iter()
+                    .any(|(p, _)| p == &pinned_path)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_mode_is_remembered_per_file_type(cx: &mut TestAppContext) {
+        use osier_config::settings::MarkdownMode;
+        let repo = TempRepo::new();
+        repo.commit_file("README.md", "# Title\n", "first");
+        repo.commit_file("notes.md", "# Notes\n", "second");
+        repo.commit_file("page.mdx", "# Page\n", "third");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("README.md".into(), None, cx)
+        });
+        h.read(cx, |osier, _| {
+            assert!(!osier.markdown_as_code, "rendered by default")
+        });
+        h.act(cx, |osier, _, cx| osier.toggle_markdown_code(cx));
+        h.read(cx, |osier, _| {
+            assert!(osier.markdown_as_code);
+            assert_eq!(
+                osier.settings.viewer.markdown_modes.get("md"),
+                Some(&MarkdownMode::Code)
+            );
+        });
+        // Another .md opens as code; .mdx keeps the default.
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("notes.md".into(), None, cx)
+        });
+        h.read(cx, |osier, _| assert!(osier.markdown_as_code));
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("page.mdx".into(), None, cx)
+        });
+        h.read(cx, |osier, _| assert!(!osier.markdown_as_code));
+        // Toggling back to the default drops the override instead of storing it.
+        h.act(cx, |osier, _, cx| {
+            osier.select_work_file("notes.md".into(), None, cx)
+        });
+        h.act(cx, |osier, _, cx| osier.toggle_markdown_code(cx));
+        h.read(cx, |osier, _| {
+            assert!(osier.settings.viewer.markdown_modes.is_empty())
+        });
     }
 
     #[gpui::test]

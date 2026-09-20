@@ -269,6 +269,119 @@ impl Osier {
             }
         }
 
+        // Tags, newest first.
+        if !snapshot.tags.is_empty() {
+            list = list.child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(muted)
+                    .child("Tags")
+                    .child(snapshot.tags.len().to_string()),
+            );
+            let remotes: Vec<String> = snapshot.remotes.iter().map(|r| r.name.clone()).collect();
+            for (ix, t) in snapshot.tags.iter().enumerate() {
+                let name = t.name.clone();
+                let target = t.target.clone();
+                let weak = weak.clone();
+                let remotes = remotes.clone();
+                list = list.child(
+                    h_flex()
+                        .id(("tag", ix))
+                        .group("row")
+                        .px_3()
+                        .py_1p5()
+                        .gap_2()
+                        .items_center()
+                        .hover(|this| this.bg(cx.theme().list_hover))
+                        .child(Icon::new(Lucide::Tag).xsmall())
+                        .child(div().text_sm().flex_none().child(t.name.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(t.subject.clone()),
+                        )
+                        .when(t.annotated, |this| {
+                            this.child(Tag::secondary().xsmall().child("annotated"))
+                        })
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_none()
+                                .child(t.target[..t.target.len().min(7)].to_string()),
+                        )
+                        .child(
+                            Button::new(("tag-menu", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::Ellipsis)
+                                .dropdown_menu(move |menu, _, _| {
+                                    let (n1, n2, n3) = (name.clone(), name.clone(), name.clone());
+                                    let (t1, t2) = (target.clone(), target.clone());
+                                    let (w1, w2, w3, w4) =
+                                        (weak.clone(), weak.clone(), weak.clone(), weak.clone());
+                                    let mut menu = menu
+                                        .item(PopupMenuItem::new("Show commit").on_click(
+                                            move |_, _, cx| {
+                                                let _ = w1.update(cx, |this, cx| {
+                                                    this.select_commit_hash(t1.clone(), cx)
+                                                });
+                                            },
+                                        ))
+                                        .item(PopupMenuItem::new("Check out (detached)").on_click(
+                                            move |_, window, cx| {
+                                                let _ = w2.update(cx, |this, cx| {
+                                                    this.checkout_commit(t2.clone(), window, cx)
+                                                });
+                                            },
+                                        ))
+                                        .item(PopupMenuItem::new("Copy name").on_click(
+                                            move |_, window, cx| {
+                                                let _ = w3.update(cx, |this, cx| {
+                                                    this.copy_to_clipboard(n1.clone(), window, cx)
+                                                });
+                                            },
+                                        ))
+                                        .separator()
+                                        .item(PopupMenuItem::new("Delete…").on_click(
+                                            move |_, window, cx| {
+                                                let _ = w4.update(cx, |this, cx| {
+                                                    this.confirm_delete_tag(n2.clone(), window, cx)
+                                                });
+                                            },
+                                        ));
+                                    for r in &remotes {
+                                        let (w, n, r2) = (weak.clone(), n3.clone(), r.clone());
+                                        menu = menu.item(
+                                            PopupMenuItem::new(format!("Delete on {r}…")).on_click(
+                                                move |_, window, cx| {
+                                                    let _ = w.update(cx, |this, cx| {
+                                                        this.confirm_delete_remote_tag(
+                                                            n.clone(),
+                                                            r2.clone(),
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    });
+                                                },
+                                            ),
+                                        );
+                                    }
+                                    menu
+                                }),
+                        ),
+                );
+            }
+        }
+
         // Worktrees: the main checkout plus linked ones.
         if snapshot.worktrees.len() > 1 {
             list = list.child(

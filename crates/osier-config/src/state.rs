@@ -15,6 +15,8 @@ pub struct State {
     pub active_project: Option<PathBuf>,
     /// Most recent first.
     pub recent: Vec<PathBuf>,
+    /// Repositories kept in the sidebar's Pinned group whether or not they are open.
+    pub pinned: Vec<PathBuf>,
     pub layout: Layout,
     /// Last window position and size (logical pixels). Compositors may ignore it.
     pub window: Option<WindowGeometry>,
@@ -92,6 +94,21 @@ impl State {
         list.truncate(20);
     }
 
+    pub fn is_pinned(&self, path: &Path) -> bool {
+        self.pinned.iter().any(|p| p == path)
+    }
+
+    /// Pin or unpin `path`. Returns the new pinned state.
+    pub fn toggle_pin(&mut self, path: &Path) -> bool {
+        if self.is_pinned(path) {
+            self.pinned.retain(|p| p != path);
+            false
+        } else {
+            self.pinned.push(path.to_path_buf());
+            true
+        }
+    }
+
     pub fn forget_recent(&mut self, path: &Path) {
         self.recent.retain(|p| p != path);
     }
@@ -135,5 +152,21 @@ mod tests {
         s.save(&paths).unwrap();
         let again = State::load(&paths).unwrap();
         assert_eq!(again.open_projects, vec![PathBuf::from("/tmp/x")]);
+    }
+
+    #[test]
+    fn pins_toggle_and_survive_a_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::Paths::under(dir.path());
+        let mut s = State::default();
+        let p = std::path::Path::new("/r/one");
+        assert!(s.toggle_pin(p));
+        assert!(s.is_pinned(p));
+        s.save(&paths).unwrap();
+        let loaded = State::load(&paths).unwrap();
+        assert!(loaded.is_pinned(p));
+        let mut loaded = loaded;
+        assert!(!loaded.toggle_pin(p));
+        assert!(loaded.pinned.is_empty());
     }
 }

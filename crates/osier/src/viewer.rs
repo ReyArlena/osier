@@ -124,6 +124,8 @@ impl Osier {
             let text: SharedString = String::from_utf8_lossy(&bytes).into_owned().into();
             let language = language_for(&path);
             if is_markdown(&path) {
+                self.markdown_as_code = self.settings.viewer.markdown_mode_for(&path)
+                    == osier_config::settings::MarkdownMode::Code;
                 Viewer::Markdown {
                     text,
                     language,
@@ -171,8 +173,28 @@ impl Osier {
         slot.clone()
     }
 
+    /// Switch the markdown viewer between rendered and source, and remember the choice for
+    /// this file type (`viewer.markdown_modes` in config.toml).
     pub(crate) fn toggle_markdown_code(&mut self, cx: &mut Context<Self>) {
+        use osier_config::settings::{MarkdownMode, extension};
         self.markdown_as_code = !self.markdown_as_code;
+        let path = match self.active_project().map(|p| &p.selection) {
+            Some(crate::project::Selection::WorkFile { path, .. }) => Some(path.clone()),
+            _ => None,
+        };
+        if let Some(ext) = path.as_deref().and_then(extension) {
+            let mode = if self.markdown_as_code {
+                MarkdownMode::Code
+            } else {
+                MarkdownMode::Rendered
+            };
+            if mode == self.settings.viewer.markdown_default {
+                self.settings.viewer.markdown_modes.remove(&ext);
+            } else {
+                self.settings.viewer.markdown_modes.insert(ext, mode);
+            }
+            self.save_settings();
+        }
         cx.notify();
     }
 }

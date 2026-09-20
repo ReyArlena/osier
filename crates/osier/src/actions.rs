@@ -383,6 +383,61 @@ impl Osier {
         );
     }
 
+    pub(crate) fn confirm_delete_tag(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm(
+            "Delete tag?",
+            format!("Tag {name} is deleted locally. Copies already pushed to a remote stay there."),
+            "Delete",
+            true,
+            move |this, window, cx| {
+                let n = name.clone();
+                this.run_op(
+                    format!("Deleted tag {n}"),
+                    move |repo| tag::delete(repo, &n),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Delete a tag on a remote. Goes through the remote job so the usual account choice
+    /// and progress apply.
+    pub(crate) fn confirm_delete_remote_tag(
+        &mut self,
+        name: String,
+        remote_name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm(
+            format!("Delete tag on {remote_name}?"),
+            format!("Tag {name} is removed from {remote_name}. Other clones keep their copy until they prune tags."),
+            "Delete on remote",
+            true,
+            move |this, window, cx| {
+                this.start_remote(
+                    crate::remote_ops::RemoteOp::Push(remote::PushOptions {
+                        remote: Some(remote_name.clone()),
+                        delete: Some(format!("refs/tags/{name}")),
+                        ..Default::default()
+                    }),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+    }
+
     pub(crate) fn confirm_reset(
         &mut self,
         hash: String,

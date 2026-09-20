@@ -57,6 +57,7 @@ impl Osier {
         let commits = Arc::new(snapshot.commits.clone());
         let graph = Arc::new(snapshot.graph.clone());
         let selected = project.selected_commit;
+        let compare = project.compare_commit;
         let colors = lane_colors(cx);
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
         let owner = cx.entity().downgrade();
@@ -146,13 +147,20 @@ impl Osier {
                                 let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                 let menu_owner = owner.clone();
                                 ListItem::new(("commit", ix))
-                                    .selected(selected == Some(ix))
+                                    .selected(selected == Some(ix) || compare == Some(ix))
                                     .h(px(crate::graph::ROW_HEIGHT))
                                     .px_2()
                                     .w_full()
-                                    .on_click(move |_, _, cx| {
-                                        let _ =
-                                            owner.update(cx, |this, cx| this.select_commit(ix, cx));
+                                    .on_click(move |event, _, cx| {
+                                        // Shift or ctrl-click: compare with the selected commit.
+                                        let m = event.modifiers();
+                                        let _ = owner.update(cx, |this, cx| {
+                                            if m.shift || m.control {
+                                                this.compare_with_selected(ix, cx)
+                                            } else {
+                                                this.select_commit(ix, cx)
+                                            }
+                                        });
                                     })
                                     .child(
                                         h_flex()
@@ -318,6 +326,12 @@ impl Osier {
                                                                         w,
                                                                         cx,
                                                                     )
+                                                                }),
+                                                            ))
+                                                            .item(item(
+                                                                "Compare with selected commit",
+                                                                std::rc::Rc::new(|t, h, _, cx| {
+                                                                    t.compare_with_hash(h, cx)
                                                                 }),
                                                             ))
                                                             .separator()

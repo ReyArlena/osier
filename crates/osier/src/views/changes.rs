@@ -2,7 +2,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tag::Tag;
@@ -425,6 +425,35 @@ impl Osier {
                             .text_xs()
                             .text_color(muted)
                             .child(div().truncate().flex_1().min_w_0().child(identity))
+                            .child({
+                                let messages = self.recent_commit_messages();
+                                let weak = cx.weak_entity();
+                                Button::new("message-history")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Lucide::Clock)
+                                    .tooltip("Recent commit messages")
+                                    .disabled(messages.is_empty())
+                                    .dropdown_menu(move |mut menu, _, _| {
+                                        for msg in &messages {
+                                            let first = msg.lines().next().unwrap_or("").trim();
+                                            let label: String = if first.chars().count() > 60 {
+                                                first.chars().take(59).chain(['…']).collect()
+                                            } else {
+                                                first.to_string()
+                                            };
+                                            let (w, m) = (weak.clone(), msg.clone());
+                                            menu = menu.item(PopupMenuItem::new(label).on_click(
+                                                move |_, window, cx| {
+                                                    let _ = w.update(cx, |this, cx| {
+                                                        this.set_message(&m, window, cx)
+                                                    });
+                                                },
+                                            ));
+                                        }
+                                        menu
+                                    })
+                            })
                             .when(subject_len > 0, |this| {
                                 this.child(
                                     div()
