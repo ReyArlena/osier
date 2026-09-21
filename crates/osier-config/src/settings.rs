@@ -33,6 +33,17 @@ pub struct Appearance {
     pub ui_font: Option<String>,
     pub mono_font: Option<String>,
     pub font_size: Option<f32>,
+    /// How the sidebar marks a project with uncommitted changes.
+    pub changes_indicator: ChangesIndicator,
+}
+
+/// `icon` tints the project's folder icon, `dot` draws a dot before its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangesIndicator {
+    #[default]
+    Icon,
+    Dot,
 }
 
 impl Default for Appearance {
@@ -45,6 +56,7 @@ impl Default for Appearance {
             ui_font: None,
             mono_font: None,
             font_size: None,
+            changes_indicator: ChangesIndicator::Icon,
         }
     }
 }
@@ -263,5 +275,15 @@ mod tests {
         assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Code);
         assert_eq!(extension(".bashrc"), None);
         assert_eq!(extension("a/b.c/README"), None);
+    }
+
+    #[test]
+    fn changes_indicator_defaults_to_icon_and_reads_dot() {
+        assert_eq!(
+            Settings::default().appearance.changes_indicator,
+            ChangesIndicator::Icon
+        );
+        let s: Settings = toml::from_str("[appearance]\nchanges_indicator = \"dot\"\n").unwrap();
+        assert_eq!(s.appearance.changes_indicator, ChangesIndicator::Dot);
     }
 }

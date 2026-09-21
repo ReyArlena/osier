@@ -322,6 +322,35 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 .disabled(!dux_available),
             ]))
         .group(
+            SettingGroup::new().title("Sidebar").item(
+                SettingItem::new(
+                    "Uncommitted changes",
+                    SettingField::dropdown(
+                        vec![
+                            ("icon".into(), "Icon colour".into()),
+                            ("dot".into(), "Dot".into()),
+                        ],
+                        get(view, |o| {
+                            match o.settings.appearance.changes_indicator {
+                                osier_config::settings::ChangesIndicator::Icon => "icon",
+                                osier_config::settings::ChangesIndicator::Dot => "dot",
+                            }
+                            .into()
+                        }),
+                        set(view, |o, v: SharedString, _| {
+                            o.settings.appearance.changes_indicator = if v.as_ref() == "dot" {
+                                osier_config::settings::ChangesIndicator::Dot
+                            } else {
+                                osier_config::settings::ChangesIndicator::Icon
+                            }
+                        }),
+                    )
+                    .default_value("icon".to_string()),
+                )
+                .description("How a project with uncommitted changes is marked in the sidebar."),
+            ),
+        )
+        .group(
             SettingGroup::new()
                 .title("Fonts")
                 .description("Leave empty to use the theme's fonts.")

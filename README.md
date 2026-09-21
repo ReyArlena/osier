@@ -84,6 +84,7 @@ dux_shell_sync = false        # follow Dux Shell colours when its cache exists
 # ui_font = "Inter"
 # mono_font = "JetBrains Mono"
 # font_size = 14.0
+changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 
 [editor]
 # command = "zed {file}:{line}"   # {path} = repository, {file}, {line}; empty = xdg-open

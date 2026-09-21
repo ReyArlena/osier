@@ -17,6 +17,16 @@ use crate::test_ids::TestId as _;
 
 type MoveHandler = std::rc::Rc<dyn Fn(usize, usize, &mut App)>;
 
+// Geometry of gpui-kit's sidebar row: 8px padding, 16px icon, 8px gap, 28px tall.
+const DOT_SIZE: f32 = 6.0;
+const DOT_GAP: f32 = 14.0;
+const DOT_LEFT: f32 = 8.0 + 16.0 + 8.0 + 2.0;
+const DOT_TOP: f32 = (28.0 - DOT_SIZE) / 2.0;
+
+fn dot_label_style() -> StyleRefinement {
+    StyleRefinement::default().pl(px(DOT_GAP))
+}
+
 /// What is being dragged in the Open list: the project's index and its name for the preview.
 #[derive(Clone)]
 struct ProjectDrag {
@@ -49,6 +59,8 @@ pub(crate) struct ReorderMenu {
     items: Vec<SidebarMenuItem>,
     /// Test id per row (see `test_ids.rs`).
     ids: Vec<String>,
+    /// Rows that get a changes dot before their name, and its colour.
+    dots: Vec<Option<Hsla>>,
     drag: Option<(Vec<(usize, SharedString)>, MoveHandler)>,
     collapsed: bool,
 }
@@ -58,6 +70,7 @@ impl ReorderMenu {
         Self {
             items: Vec::new(),
             ids: Vec::new(),
+            dots: Vec::new(),
             drag: None,
             collapsed: false,
         }
@@ -66,6 +79,15 @@ impl ReorderMenu {
     fn child(mut self, test_id: String, item: SidebarMenuItem) -> Self {
         self.items.push(item);
         self.ids.push(test_id);
+        self.dots.push(None);
+        self
+    }
+
+    /// A row with a dot drawn in front of its label.
+    fn child_with_dot(mut self, test_id: String, item: SidebarMenuItem, dot: Hsla) -> Self {
+        self.items.push(item);
+        self.ids.push(test_id);
+        self.dots.push(Some(dot));
         self
     }
 
@@ -98,6 +120,7 @@ impl SidebarItem for ReorderMenu {
         let collapsed = self.collapsed;
         let drag = self.drag;
         let ids = self.ids;
+        let dots = self.dots;
         v_flex()
             .gap_2()
             .children(self.items.into_iter().enumerate().map(|(row, item)| {
@@ -107,6 +130,24 @@ impl SidebarItem for ReorderMenu {
                     .render(row_id.clone(), window, cx)
                     .into_any_element();
                 let test_id = ids.get(row).cloned().unwrap_or_default();
+                // gpui-kit rows have no slot before the label. The label gets DOT_GAP of left
+                // padding (`dot_label_style`) and the dot is drawn into that space.
+                let el = match dots.get(row).copied().flatten() {
+                    Some(color) if !collapsed => div()
+                        .relative()
+                        .child(el)
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px(DOT_LEFT))
+                                .top(px(DOT_TOP))
+                                .size(px(DOT_SIZE))
+                                .rounded_full()
+                                .bg(color),
+                        )
+                        .into_any_element(),
+                    _ => el,
+                };
                 match drag
                     .as_ref()
                     .and_then(|(map, h)| map.get(row).map(|e| (e.clone(), h.clone())))
@@ -160,11 +201,20 @@ impl Osier {
             let loading = project.loading;
             let menu_weak = weak.clone();
             let path = project.path.clone();
+            let changes_color = cx.theme().warning;
+            let by_dot = dirty
+                && self.settings.appearance.changes_indicator
+                    == osier_config::settings::ChangesIndicator::Dot;
+            let by_icon = dirty && !by_dot;
             let item = SidebarMenuItem::new(project.name.clone())
-                .icon(Lucide::FolderGit2)
+                .icon(
+                    Icon::new(Lucide::FolderGit2)
+                        .when(by_icon, |icon| icon.text_color(changes_color)),
+                )
+                .when(by_dot, |item| item.label_style(dot_label_style()))
                 .active(self.active == Some(ix))
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
-                .suffix(move |_, cx| {
+                .suffix(move |_, _| {
                     // Ahead/behind the upstream, like the status bar, only when non-zero; a dot
                     // marks uncommitted changes in the working tree.
                     let arrows = match (ahead, behind) {
@@ -173,7 +223,6 @@ impl Osier {
                         (0, b) => Some(format!("↓{b}")),
                         (a, b) => Some(format!("↑{a} ↓{b}")),
                     };
-                    let warning = cx.theme().warning;
                     h_flex()
                         .gap_1()
                         .items_center()
@@ -182,9 +231,6 @@ impl Osier {
                         })
                         .when_some(arrows.filter(|_| !loading), |this, a| {
                             this.child(Tag::secondary().xsmall().child(a))
-                        })
-                        .when(dirty && !loading, |this| {
-                            this.child(div().size(px(6.)).rounded_full().bg(warning))
                         })
                         .when(pinned, |this| this.child(Icon::new(Lucide::Pin).xsmall()))
                         .into_any_element()
@@ -247,7 +293,12 @@ impl Osier {
                         |this, ix, window, cx| this.close_project(ix, window, cx),
                     )))
                 });
-            open = open.child(format!("sidebar-open:{}", project.name), item);
+            let test_id = format!("sidebar-open:{}", project.name);
+            open = if by_dot {
+                open.child_with_dot(test_id, item, changes_color)
+            } else {
+                open.child(test_id, item)
+            };
         }
 
         // Drag to reorder; the menu's Move up/down stays for keyboard users.
