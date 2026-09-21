@@ -149,11 +149,14 @@ impl Osier {
             shown_open += 1;
             open_rows.push((ix, project.name.clone().into()));
             let pinned = self.state.is_pinned(&project.path);
-            let changes = project
+            let (dirty, ahead, behind) = project
                 .snapshot
                 .as_ref()
-                .map(|s| s.status.entries.len())
-                .unwrap_or(0);
+                .map(|s| {
+                    let b = &s.status.branch;
+                    (!s.status.entries.is_empty(), b.ahead, b.behind)
+                })
+                .unwrap_or_default();
             let loading = project.loading;
             let menu_weak = weak.clone();
             let path = project.path.clone();
@@ -161,15 +164,27 @@ impl Osier {
                 .icon(Lucide::FolderGit2)
                 .active(self.active == Some(ix))
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
-                .suffix(move |_, _| {
+                .suffix(move |_, cx| {
+                    // Ahead/behind the upstream, like the status bar, only when non-zero; a dot
+                    // marks uncommitted changes in the working tree.
+                    let arrows = match (ahead, behind) {
+                        (0, 0) => None,
+                        (a, 0) => Some(format!("↑{a}")),
+                        (0, b) => Some(format!("↓{b}")),
+                        (a, b) => Some(format!("↑{a} ↓{b}")),
+                    };
+                    let warning = cx.theme().warning;
                     h_flex()
                         .gap_1()
                         .items_center()
                         .when(loading, |this| {
                             this.child(Tag::secondary().xsmall().child("…"))
                         })
-                        .when(changes > 0 && !loading, |this| {
-                            this.child(Tag::secondary().xsmall().child(changes.to_string()))
+                        .when_some(arrows.filter(|_| !loading), |this, a| {
+                            this.child(Tag::secondary().xsmall().child(a))
+                        })
+                        .when(dirty && !loading, |this| {
+                            this.child(div().size(px(6.)).rounded_full().bg(warning))
                         })
                         .when(pinned, |this| this.child(Icon::new(Lucide::Pin).xsmall()))
                         .into_any_element()

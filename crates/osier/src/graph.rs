@@ -54,7 +54,11 @@ pub fn graph_cell(
                 }
                 // A sideways edge belongs to the side branch (the outer lane), whether it
                 // forks off here or merges in, so it takes that lane's colour.
-                let lane = if e.from == e.to { e.to } else { e.from.max(e.to) };
+                let lane = if e.from == e.to {
+                    e.to
+                } else {
+                    e.from.max(e.to)
+                };
                 if let Ok(path) = b.build() {
                     window.paint_path(path, color(lane));
                 }
