@@ -10,6 +10,7 @@ use gpui_kit::*;
 use osier_git::repo::InProgress;
 
 use crate::app::Osier;
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_status_bar(
@@ -81,6 +82,7 @@ impl Osier {
                                 .child(div().truncate().max_w(px(360.)).child(text))
                                 .child(
                                     Button::new("cancel-remote")
+                                        .test_id("cancel-remote")
                                         .ghost()
                                         .xsmall()
                                         .label("Cancel")

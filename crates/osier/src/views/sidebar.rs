@@ -13,6 +13,7 @@ use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::format::tilde;
+use crate::test_ids::TestId as _;
 
 type MoveHandler = std::rc::Rc<dyn Fn(usize, usize, &mut App)>;
 
@@ -46,6 +47,8 @@ impl Render for DragPreview {
 #[derive(Clone)]
 pub(crate) struct ReorderMenu {
     items: Vec<SidebarMenuItem>,
+    /// Test id per row (see `test_ids.rs`).
+    ids: Vec<String>,
     drag: Option<(Vec<(usize, SharedString)>, MoveHandler)>,
     collapsed: bool,
 }
@@ -54,13 +57,15 @@ impl ReorderMenu {
     fn new() -> Self {
         Self {
             items: Vec::new(),
+            ids: Vec::new(),
             drag: None,
             collapsed: false,
         }
     }
 
-    fn child(mut self, item: SidebarMenuItem) -> Self {
+    fn child(mut self, test_id: String, item: SidebarMenuItem) -> Self {
         self.items.push(item);
+        self.ids.push(test_id);
         self
     }
 
@@ -92,6 +97,7 @@ impl SidebarItem for ReorderMenu {
         let marker = cx.theme().primary;
         let collapsed = self.collapsed;
         let drag = self.drag;
+        let ids = self.ids;
         v_flex()
             .gap_2()
             .children(self.items.into_iter().enumerate().map(|(row, item)| {
@@ -100,13 +106,15 @@ impl SidebarItem for ReorderMenu {
                     .collapsed(collapsed)
                     .render(row_id.clone(), window, cx)
                     .into_any_element();
+                let test_id = ids.get(row).cloned().unwrap_or_default();
                 match drag
                     .as_ref()
                     .and_then(|(map, h)| map.get(row).map(|e| (e.clone(), h.clone())))
                 {
-                    None => el,
+                    None => div().test_id(test_id).child(el).into_any_element(),
                     Some(((project_ix, name), on_move)) => div()
                         .id(SharedString::from(format!("{row_id}-drag")))
+                        .test_id(test_id)
                         .on_drag(
                             ProjectDrag {
                                 ix: project_ix,
@@ -224,7 +232,7 @@ impl Osier {
                         |this, ix, window, cx| this.close_project(ix, window, cx),
                     )))
                 });
-            open = open.child(item);
+            open = open.child(format!("sidebar-open:{}", project.name), item);
         }
 
         // Drag to reorder; the menu's Move up/down stays for keyboard users.
@@ -248,7 +256,8 @@ impl Osier {
             let missing = !path.is_dir();
             let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
             pinned_menu = pinned_menu.child(
-                SidebarMenuItem::new(name)
+                format!("sidebar-pinned:{name}"),
+                SidebarMenuItem::new(name.clone())
                     .icon(if missing {
                         Lucide::FolderX
                     } else {
@@ -288,7 +297,8 @@ impl Osier {
             let menu_path = path.clone();
             let from_scan = provider.is_some();
             recent = recent.child(
-                SidebarMenuItem::new(name)
+                format!("sidebar-recent:{name}"),
+                SidebarMenuItem::new(name.clone())
                     .icon(if missing {
                         Lucide::FolderX
                     } else if from_scan {
@@ -366,10 +376,11 @@ impl Osier {
                                 ),
                         )
                         .child(
+                            div().test_id("sidebar-filter").child(
                             Input::new(&self.sidebar_filter)
                                 .small()
                                 .cleanable(true)
-                                .prefix(Icon::new(Lucide::Search).xsmall()),
+                                .prefix(Icon::new(Lucide::Search).xsmall())),
                         ),
                 ),
             )
@@ -407,7 +418,7 @@ impl Osier {
                             )
                         })
                         .child(
-                            Button::new("open-repo")
+                            Button::new("open-repo").test_id("open-repo")
                                 .outline()
                                 .small()
                                 .w_full()

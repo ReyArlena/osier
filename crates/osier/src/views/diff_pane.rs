@@ -19,6 +19,7 @@ use gpui_kit::*;
 use crate::app::Osier;
 use crate::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_diff_pane(
@@ -150,7 +151,7 @@ impl Osier {
                     self.settings.diff.large_file_bytes as f64 / (1024.0 * 1024.0)
                 )))
                 .child(
-                    Button::new("load-anyway")
+                    Button::new("load-anyway").test_id("load-anyway")
                         .outline()
                         .small()
                         .label("Load anyway")
@@ -305,7 +306,7 @@ impl Osier {
                     .child(div().flex_1())
                     .when(matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing, |this| {
                         this.child(
-                            Button::new("md-rendered")
+                            Button::new("md-rendered").test_id("md-rendered")
                                 .ghost()
                                 .xsmall()
                                 .label("Rendered")
@@ -317,7 +318,7 @@ impl Osier {
                                 })),
                         )
                         .child(
-                            Button::new("md-code")
+                            Button::new("md-code").test_id("md-code")
                                 .ghost()
                                 .xsmall()
                                 .label("Code")
@@ -331,7 +332,7 @@ impl Osier {
                     })
                     .when(blame.is_some(), |this| {
                         this.child(
-                            Button::new("close-blame")
+                            Button::new("close-blame").test_id("close-blame")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::X)
@@ -351,7 +352,7 @@ impl Osier {
                     })
                     .when(viewing && !editing, |this| {
                         this.child(
-                            Button::new("view-edit")
+                            Button::new("view-edit").test_id("view-edit")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Pencil)
@@ -361,14 +362,14 @@ impl Osier {
                     })
                     .when(editing, |this| {
                         this.child(
-                            Button::new("editor-save")
+                            Button::new("editor-save").test_id("editor-save")
                                 .primary()
                                 .xsmall()
                                 .label("Save")
                                 .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
                         )
                         .child(
-                            Button::new("editor-cancel")
+                            Button::new("editor-cancel").test_id("editor-cancel")
                                 .ghost()
                                 .xsmall()
                                 .label("Cancel")
@@ -378,7 +379,7 @@ impl Osier {
                     .when(!editing && matches!(&area, Some((_, Area::Conflicted))), |this| {
                         let ready = self.can_apply_resolution(cx);
                         this.child(
-                            Button::new("apply-resolution")
+                            Button::new("apply-resolution").test_id("apply-resolution")
                                 .primary()
                                 .xsmall()
                                 .label("Apply resolution")
@@ -391,7 +392,7 @@ impl Osier {
                                 .on_click(cx.listener(|this, _, window, cx| this.apply_conflict_resolution(window, cx))),
                         )
                         .child(
-                            Button::new("edit-result")
+                            Button::new("edit-result").test_id("edit-result")
                                 .outline()
                                 .xsmall()
                                 .label("Edit result")
@@ -401,7 +402,7 @@ impl Osier {
                     })
                     .when(!editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted), |this| {
                         this.child(
-                            Button::new("edit-file")
+                            Button::new("edit-file").test_id("edit-file")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Pencil)
@@ -423,7 +424,7 @@ impl Osier {
 
                         this
                         .child(
-                            Button::new("unified")
+                            Button::new("unified").test_id("unified")
                                 .ghost()
                                 .xsmall()
                                 .label("Unified")
@@ -433,7 +434,7 @@ impl Osier {
                                 })),
                         )
                         .child(
-                            Button::new("split")
+                            Button::new("split").test_id("split")
                                 .ghost()
                                 .xsmall()
                                 .label("Split")
@@ -443,7 +444,7 @@ impl Osier {
                                 })),
                         )
                         .child(
-                            Button::new("wrap")
+                            Button::new("wrap").test_id("wrap")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::TextWrap)
@@ -453,7 +454,7 @@ impl Osier {
                         )
                         .child(Separator::vertical().h_4())
                         .child(
-                            Button::new("revert")
+                            Button::new("revert").test_id("revert")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Undo2)

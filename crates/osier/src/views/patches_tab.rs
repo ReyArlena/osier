@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::format::relative_time;
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_patches(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -34,6 +35,7 @@ impl Osier {
             .child(div().flex_1())
             .child(
                 Button::new("shelve-all")
+                    .test_id("shelve-all")
                     .outline()
                     .xsmall()
                     .icon(Lucide::Package)
@@ -46,6 +48,7 @@ impl Osier {
             )
             .child(
                 Button::new("apply-clipboard")
+                    .test_id("apply-clipboard")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::ClipboardPaste)
@@ -57,6 +60,7 @@ impl Osier {
             )
             .child(
                 Button::new("apply-file")
+                    .test_id("apply-file")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::FileInput)
@@ -68,6 +72,7 @@ impl Osier {
             )
             .child(
                 Button::new("open-patches-dir")
+                    .test_id("open-patches-dir")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::FolderOpen)
@@ -121,6 +126,7 @@ impl Osier {
             list = list.child(
                 h_flex()
                     .id(("patch", ix))
+                    .test_id(format!("patch-row:{}", p.id))
                     .group("row")
                     .px_3()
                     .py_1p5()

@@ -7,6 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -138,6 +139,7 @@ impl Osier {
                     .child(div().flex_1())
                     .child(
                         Button::new("clear-log")
+                            .test_id("clear-log")
                             .ghost()
                             .xsmall()
                             .label("Clear")
@@ -149,6 +151,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("close-log")
+                            .test_id("close-log")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::X)

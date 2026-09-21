@@ -8,6 +8,7 @@ use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::format::relative_time;
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_stashes(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -45,6 +46,7 @@ impl Osier {
             .child(div().flex_1())
             .child(
                 Button::new("stash-push")
+                    .test_id("stash-push")
                     .outline()
                     .xsmall()
                     .icon(Lucide::Archive)
@@ -76,6 +78,7 @@ impl Osier {
             list = list.child(
                 h_flex()
                     .id(("stash", s.index))
+                    .test_id(format!("stash-row:{}", s.index))
                     .group("row")
                     .px_3()
                     .py_1p5()

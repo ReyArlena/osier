@@ -247,12 +247,19 @@ impl Osier {
                 _ => {}
             },
         );
-        let message_subscription =
-            cx.subscribe_in(&commit_message, window, |_, _, ev: &InputEvent, _, cx| {
-                if matches!(ev, InputEvent::Change) {
-                    cx.notify();
-                }
-            });
+        let message_subscription = cx.subscribe_in(
+            &commit_message,
+            window,
+            |this, _, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => cx.notify(),
+                // ctrl-enter inside the box: the textarea turns it into a secondary Enter,
+                // so the window-level CommitStaged binding never sees it.
+                InputEvent::PressEnter {
+                    secondary: true, ..
+                } => this.commit(window, cx),
+                _ => {}
+            },
+        );
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             commit_message,
@@ -400,6 +407,10 @@ impl Osier {
         }
         this.update_title(window);
         this.start_watcher_loop(window, cx);
+        // Without a focused element the app's key bindings have no dispatch path, so
+        // shortcuts would only work after the first click into a list.
+        let root_focus = this.focus_handle.clone();
+        window.defer(cx, move |window, cx| root_focus.focus(window, cx));
         // Dev aid for screenshots: OSIER_OPEN_SETTINGS=1 opens the settings sheet at startup.
         // The sheet needs gpui-kit's root, which exists only after this view is installed.
         if std::env::var_os("OSIER_OPEN_SETTINGS").is_some_and(|v| v == "1") {
@@ -1544,6 +1555,173 @@ mod tests {
         fn read<R>(&self, cx: &mut TestAppContext, f: impl FnOnce(&Osier, &gpui::App) -> R) -> R {
             cx.update(|cx| f(self.view.read(cx), cx))
         }
+
+        // ----- simulated input (see `test_ids.rs` for the id convention) -----
+
+        fn visual(&self, cx: &TestAppContext) -> gpui::VisualTestContext {
+            gpui::VisualTestContext::from_window(self.window, cx)
+        }
+
+        /// Bounds of the element with test id `id` in the last rendered frame.
+        fn bounds(&self, cx: &mut TestAppContext, id: &str) -> Option<gpui::Bounds<gpui::Pixels>> {
+            // gpui keys the map by `&'static str`; leaking a few test strings is fine.
+            let id: &'static str = Box::leak(id.to_string().into_boxed_str());
+            self.visual(cx).debug_bounds(id)
+        }
+
+        /// Click the centre of the element with test id `id`, as a user would.
+        fn click(&self, cx: &mut TestAppContext, id: &str) {
+            self.click_with(cx, id, gpui::Modifiers::none());
+        }
+
+        fn click_with(&self, cx: &mut TestAppContext, id: &str, modifiers: gpui::Modifiers) {
+            let bounds = self
+                .bounds(cx, id)
+                .unwrap_or_else(|| panic!("no element with test id {id:?} in the last frame"));
+            self.visual(cx).simulate_click(bounds.center(), modifiers);
+            cx.run_until_parked();
+        }
+
+        /// Keystrokes in gpui notation, space separated: `"ctrl-, escape"`.
+        fn keys(&self, cx: &mut TestAppContext, keys: &str) {
+            cx.simulate_keystrokes(self.window, keys);
+            cx.run_until_parked();
+        }
+
+        /// Text typed into whatever has focus.
+        fn type_text(&self, cx: &mut TestAppContext, text: &str) {
+            cx.simulate_input(self.window, text);
+            cx.run_until_parked();
+        }
+
+        fn has_sheet(&self, cx: &mut TestAppContext) -> bool {
+            use gpui_kit::component::WindowExt as _;
+            cx.update_window(self.window, |_, window, cx| window.has_active_sheet(cx))
+                .expect("window")
+        }
+    }
+
+    // ----- tests driven only by clicks, keystrokes and typing -----
+
+    #[gpui::test]
+    fn ui_settings_open_by_click_and_close_by_escape(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "settings");
+        assert!(h.has_sheet(cx), "the gear opens settings");
+        assert!(
+            h.bounds(cx, "settings-sheet").is_some(),
+            "sheet content is drawn"
+        );
+        h.keys(cx, "escape");
+        assert!(!h.has_sheet(cx), "escape reaches the sheet and closes it");
+        h.keys(cx, "ctrl-,");
+        assert!(h.has_sheet(cx), "the keyboard shortcut opens it too");
+        h.keys(cx, "escape");
+        assert!(!h.has_sheet(cx));
+    }
+
+    #[gpui::test]
+    fn ui_stage_with_the_checkbox_and_commit_from_the_keyboard(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.write("a.txt", "two\n");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-stage:unstaged:a.txt");
+        assert_eq!(
+            repo.git(["diff", "--cached", "--name-only"]).trim(),
+            "a.txt"
+        );
+        assert!(
+            h.bounds(cx, "change-row:staged:a.txt").is_some(),
+            "the row moved to Staged"
+        );
+        h.click(cx, "commit-message");
+        h.type_text(cx, "Typed in the commit box");
+        h.keys(cx, "ctrl-enter");
+        assert_eq!(
+            repo.git(["log", "-1", "--format=%s"]).trim(),
+            "Typed in the commit box"
+        );
+        assert!(repo.git(["status", "--porcelain"]).trim().is_empty());
+    }
+
+    #[gpui::test]
+    fn ui_list_keys_select_and_stage(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        repo.write("a.txt", "A\n");
+        repo.write("b.txt", "B\n");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:a.txt");
+        h.keys(cx, "down");
+        h.read(cx, |osier, _| {
+            assert_eq!(
+                osier.active_project().unwrap().selection,
+                Selection::File {
+                    path: "b.txt".into(),
+                    area: Area::Unstaged
+                }
+            )
+        });
+        h.keys(cx, "space");
+        assert_eq!(
+            repo.git(["diff", "--cached", "--name-only"]).trim(),
+            "b.txt"
+        );
+        h.keys(cx, "j");
+        h.keys(cx, "delete");
+        assert!(
+            cx.update_window(h.window, |_, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.has_active_dialog(cx)
+            })
+            .unwrap(),
+            "delete asks first"
+        );
+        h.keys(cx, "escape");
+        assert_eq!(repo.read("a.txt"), "A\n");
+    }
+
+    #[gpui::test]
+    fn ui_tabs_and_command_palette(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-log");
+        h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
+        h.keys(cx, "f1");
+        h.type_text(cx, "Patches tab");
+        h.keys(cx, "enter");
+        h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Patches));
+        h.keys(cx, "ctrl-1");
+        h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Changes));
+    }
+
+    #[gpui::test]
+    fn ui_shift_click_compares_two_commits(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.commit_file("a.txt", "two\n", "second");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-log");
+        h.click(cx, "log-row:0");
+        h.click_with(
+            cx,
+            "log-row:1",
+            gpui::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        );
+        h.read(cx, |osier, _| {
+            assert!(matches!(
+                osier.active_project().unwrap().selection,
+                Selection::Compare { .. }
+            ));
+        });
     }
 
     #[gpui::test]

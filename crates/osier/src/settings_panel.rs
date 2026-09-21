@@ -21,6 +21,7 @@ use osier_config::settings::ThemeMode;
 
 use crate::app::Osier;
 use crate::runtime_info::RuntimeInfo;
+use crate::test_ids::TestId as _;
 use crate::themes::ThemeStore;
 
 fn get<T: 'static>(
@@ -84,16 +85,22 @@ impl Osier {
         }
         let view = cx.entity();
         let focus = self.settings_focus.clone();
+        let root_focus = self.focus_handle.clone();
         window.open_sheet(cx, move |sheet, window, cx| {
             let pages = pages(&view, window, cx);
+            let root_focus = root_focus.clone();
             sheet
                 .title("Settings")
                 .size(relative(0.9))
                 .overlay_closable(true)
+                // The sheet restores the focus it found on opening, which may be a handle
+                // whose element is gone. Put focus back on the app so shortcuts keep working.
+                .on_close(move |_, window, cx| root_focus.focus(window, cx))
                 .child(
                     div()
                         .size_full()
                         .track_focus(&focus)
+                        .test_id("settings-sheet")
                         .child(SettingsView::new("osier-settings").pages(pages)),
                 )
         });
@@ -699,7 +706,7 @@ fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     let v = v1.clone();
                     col.child(
                         h_flex().pt_1().child(
-                            Button::new("refresh-accounts")
+                            Button::new("refresh-accounts").test_id("refresh-accounts")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::RefreshCw)
@@ -766,7 +773,7 @@ fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     col.when(!o.state.accounts.is_empty(), |this| {
                         this.child(
                             h_flex().pt_1().child(
-                                Button::new("reset-all-accounts")
+                                Button::new("reset-all-accounts").test_id("reset-all-accounts")
                                     .outline()
                                     .with_size(options.size())
                                     .label("Reset all")
@@ -870,7 +877,7 @@ fn projects_page(view: &Entity<Osier>) -> SettingPage {
                     let v = v1.clone();
                     col.child(
                         h_flex().pt_1().child(
-                            Button::new("add-scan-dir")
+                            Button::new("add-scan-dir").test_id("add-scan-dir")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::FolderPlus)
@@ -917,7 +924,7 @@ fn projects_page(view: &Entity<Osier>) -> SettingPage {
                             if n == 1 { "repository" } else { "repositories" }
                         )))
                         .child(
-                            Button::new("clear-recents")
+                            Button::new("clear-recents").test_id("clear-recents")
                                 .outline()
                                 .with_size(options.size())
                                 .label("Clear all recents")
@@ -951,7 +958,7 @@ fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     }
                     col.child(
                         h_flex().pt_1().child(
-                            Button::new("copy-runtime")
+                            Button::new("copy-runtime").test_id("copy-runtime")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::Copy)
@@ -973,7 +980,7 @@ fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     h_flex()
                         .gap_2()
                         .child(
-                            Button::new("edit-config")
+                            Button::new("edit-config").test_id("edit-config")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::SquarePen)
@@ -984,7 +991,7 @@ fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                 }),
                         )
                         .child(
-                            Button::new("open-config-dir")
+                            Button::new("open-config-dir").test_id("open-config-dir")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::FolderOpen)
@@ -1010,7 +1017,7 @@ fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     )
                     .child(
                         h_flex().gap_2().child(
-                            Button::new("repo-link")
+                            Button::new("repo-link").test_id("repo-link")
                                 .outline()
                                 .with_size(options.size())
                                 .icon(Lucide::Github)

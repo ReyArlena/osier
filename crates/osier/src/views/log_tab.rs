@@ -16,6 +16,7 @@ use osier_git::ops::reset::ResetMode;
 use osier_git::ops::patches::PatchSource;
 
 use crate::app::Osier;
+use crate::test_ids::TestId as _;
 
 /// Menu handler receiving the commit hash.
 type CommitHandler = std::rc::Rc<dyn Fn(&mut Osier, String, &mut Window, &mut Context<Osier>)>;
@@ -92,6 +93,7 @@ impl Osier {
                     .when(project.log_path.is_some(), |this| {
                         this.child(
                             Button::new("clear-history")
+                                .test_id("clear-history")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::X)
@@ -105,6 +107,7 @@ impl Osier {
                     .child(div().flex_1())
                     .child(
                         Button::new("toggle-reflog")
+                            .test_id("toggle-reflog")
                             .ghost()
                             .xsmall()
                             .label("Reflog")
@@ -117,6 +120,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("refresh-log")
+                            .test_id("refresh-log")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::RefreshCw)
@@ -147,6 +151,7 @@ impl Osier {
                                 let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                 let menu_owner = owner.clone();
                                 ListItem::new(("commit", ix))
+                                    .test_id(format!("log-row:{ix}"))
                                     .selected(selected == Some(ix) || compare == Some(ix))
                                     .h(px(crate::graph::ROW_HEIGHT))
                                     .px_2()
@@ -553,6 +558,7 @@ impl Osier {
                     .child(div().flex_1())
                     .child(
                         Button::new("close-reflog")
+                            .test_id("close-reflog")
                             .ghost()
                             .xsmall()
                             .label("Back to log")

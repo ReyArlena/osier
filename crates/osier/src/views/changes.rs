@@ -15,6 +15,7 @@ use osier_git::status::StatusEntry;
 
 use crate::app::Osier;
 use crate::project::{Area, Selection};
+use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
 
 fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
@@ -94,6 +95,7 @@ impl Osier {
                         let paths = group_paths.clone();
                         this.child(
                             Button::new("unstage-group")
+                                .test_id("unstage-group")
                                 .ghost()
                                 .xsmall()
                                 .label("Unstage all")
@@ -128,6 +130,11 @@ impl Osier {
                 list = list.child(
                     h_flex()
                         .id((title, ix))
+                        .test_id(format!(
+                            "change-row:{}:{}",
+                            title.to_lowercase(),
+                            entry.path
+                        ))
                         .group("row")
                         .px_3()
                         .py_1()
@@ -217,6 +224,11 @@ impl Osier {
                         })
                         .child(
                             Checkbox::new(SharedString::from(format!("stage-{title}-{ix}")))
+                                .test_id(format!(
+                                    "change-stage:{}:{}",
+                                    title.to_lowercase(),
+                                    entry.path
+                                ))
                                 .small()
                                 .checked(area == Area::Staged)
                                 .disabled(area == Area::Conflicted)
@@ -382,6 +394,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("stage-all")
+                            .test_id("stage-all")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::ListChecks)
@@ -393,6 +406,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("unstage-all")
+                            .test_id("unstage-all")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::ListX)
@@ -404,6 +418,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("refresh-changes")
+                            .test_id("refresh-changes")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::RefreshCw)
@@ -417,7 +432,11 @@ impl Osier {
                 v_flex()
                     .p_3()
                     .gap_2()
-                    .child(Textarea::new(&self.commit_message))
+                    .child(
+                        div()
+                            .test_id("commit-message")
+                            .child(Textarea::new(&self.commit_message)),
+                    )
                     .child(
                         h_flex()
                             .gap_3()
@@ -429,6 +448,7 @@ impl Osier {
                                 let messages = self.recent_commit_messages();
                                 let weak = cx.weak_entity();
                                 Button::new("message-history")
+                                    .test_id("message-history")
                                     .ghost()
                                     .xsmall()
                                     .icon(Lucide::Clock)
@@ -493,6 +513,7 @@ impl Osier {
                             .child(div().flex_1())
                             .child(
                                 Button::new("commit-push")
+                                    .test_id("commit-push")
                                     .outline()
                                     .small()
                                     .label("Commit and Push")
@@ -504,6 +525,7 @@ impl Osier {
                             )
                             .child(
                                 Button::new("commit")
+                                    .test_id("commit")
                                     .primary()
                                     .small()
                                     .icon(Lucide::GitCommitHorizontal)

@@ -23,6 +23,7 @@ mod rebase_dialog;
 mod remote_ops;
 mod runtime_info;
 mod settings_panel;
+mod test_ids;
 mod themes;
 mod viewer;
 mod views;

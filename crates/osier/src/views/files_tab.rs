@@ -15,6 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::test_ids::TestId as _;
 
 /// Build a tree from flat paths. Folders first, then files, both alphabetical.
 /// `expand_all` opens every folder (used while filtering so matches are visible).
@@ -179,7 +180,7 @@ impl Osier {
                             }),
                     )
                     .child(
-                        div().w(px(180.)).flex_none().child(
+                        div().w(px(180.)).flex_none().test_id("files-filter").child(
                             Input::new(&self.files_filter)
                                 .xsmall()
                                 .cleanable(true)
@@ -188,6 +189,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("show-ignored")
+                            .test_id("show-ignored")
                             .ghost()
                             .xsmall()
                             .label("Ignored")

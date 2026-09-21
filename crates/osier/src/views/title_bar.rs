@@ -13,6 +13,7 @@ use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::format::tilde;
+use crate::test_ids::TestId as _;
 
 type MenuHandler = Box<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;
 
@@ -32,6 +33,7 @@ impl Osier {
         let dux_on = a.dux_shell_sync && dux_available;
         let active = cx.theme().theme_name().clone();
         Button::new("theme")
+            .test_id("theme")
             .ghost()
             .small()
             .icon(if cx.theme().mode.is_dark() {
@@ -105,6 +107,7 @@ impl Osier {
         let all = self.all_changes_source();
         let has_project = self.active_project().is_some();
         Button::new("patch")
+            .test_id("patch")
             .ghost()
             .small()
             .icon(Lucide::ClipboardCopy)
@@ -186,6 +189,7 @@ impl Osier {
             .unwrap_or_default();
         let w = cx.weak_entity();
         Button::new("branch")
+            .test_id("branch")
             .ghost()
             .small()
             .icon(Lucide::GitBranch)
@@ -283,6 +287,7 @@ impl Osier {
                 .child(div().flex_1())
                 .child(
                     Button::new("open-editor")
+                        .test_id("open-editor")
                         .ghost()
                         .small()
                         .icon(Lucide::SquareArrowOutUpRight)
@@ -296,6 +301,7 @@ impl Osier {
                 )
                 .child(
                     Button::new("refresh")
+                        .test_id("refresh")
                         .ghost()
                         .small()
                         .icon(Lucide::RefreshCw)
@@ -311,6 +317,7 @@ impl Osier {
                 .child(Separator::vertical().h_4().mx_1())
                 .child(
                     Button::new("stash")
+                        .test_id("stash")
                         .ghost()
                         .small()
                         .icon(Lucide::Archive)
@@ -321,6 +328,7 @@ impl Osier {
                 .child(self.render_patch_menu(cx))
                 .child(
                     Button::new("command-log")
+                        .test_id("command-log")
                         .ghost()
                         .small()
                         .icon(Lucide::SquareTerminal)
@@ -331,6 +339,7 @@ impl Osier {
                 .child(self.render_theme_menu(cx))
                 .child(
                     Button::new("settings")
+                        .test_id("settings")
                         .ghost()
                         .small()
                         .icon(Lucide::Settings)
@@ -363,6 +372,7 @@ impl Osier {
         let weak3 = cx.entity().downgrade();
         let has_gh = !self.gh_accounts.is_empty();
         let mut button = Button::new(id)
+            .test_id(id)
             .ghost()
             .small()
             .icon(icon)

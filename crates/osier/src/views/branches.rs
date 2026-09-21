@@ -10,6 +10,7 @@ use osier_git::refs::Branch;
 
 use crate::app::Osier;
 use crate::format::relative_time;
+use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::MergeMode;
 
 impl Osier {
@@ -67,6 +68,7 @@ impl Osier {
                     list.child(
                         h_flex()
                             .id((title, ix))
+                            .test_id(format!("branch-row:{}", b.name))
                             .group("row")
                             .px_3()
                             .py_1p5()
@@ -291,6 +293,7 @@ impl Osier {
                 list = list.child(
                     h_flex()
                         .id(("tag", ix))
+                        .test_id(format!("tag-row:{}", t.name))
                         .group("row")
                         .px_3()
                         .py_1p5()
@@ -488,6 +491,7 @@ impl Osier {
                     .child(div().flex_1())
                     .child(
                         Button::new("submodules-update-all")
+                            .test_id("submodules-update-all")
                             .ghost()
                             .xsmall()
                             .label("Update all")
@@ -643,6 +647,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("add-worktree")
+                            .test_id("add-worktree")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::FolderTree)
@@ -654,6 +659,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("add-remote")
+                            .test_id("add-remote")
                             .ghost()
                             .xsmall()
                             .icon(Lucide::Globe)
@@ -664,6 +670,7 @@ impl Osier {
                     )
                     .child(
                         Button::new("new-branch")
+                            .test_id("new-branch")
                             .outline()
                             .xsmall()
                             .icon(Lucide::GitBranchPlus)

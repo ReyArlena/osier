@@ -22,6 +22,7 @@ use gpui_kit::*;
 use osier_git::repo::InProgress;
 
 use crate::app::{Osier, Tab};
+use crate::test_ids::TestId as _;
 
 impl Osier {
     pub(crate) fn render_center(
@@ -38,7 +39,16 @@ impl Osier {
             .track_focus(&self.list_focus)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| this.list_focus.focus(window, cx)),
+                cx.listener(|this, _, window, cx| {
+                    // Take focus for the list keys (arrows, space, delete) unless something
+                    // inside the panel already has it: the commit box or a filter input
+                    // focuses itself on the same click and must keep it.
+                    let inner_has_focus = this.list_focus.contains_focused(window, cx)
+                        && !this.list_focus.is_focused(window);
+                    if !inner_has_focus {
+                        this.list_focus.focus(window, cx);
+                    }
+                }),
             )
             .when_some(self.in_progress(), |this, op| {
                 this.child(self.render_in_progress_bar(op, cx))
@@ -54,7 +64,11 @@ impl Osier {
                             this.set_tab(*tab, cx);
                         }
                     }))
-                    .children(Tab::ALL.iter().map(|t| KitTab::new().label(t.label()))),
+                    .children(Tab::ALL.iter().map(|t| {
+                        KitTab::new()
+                            .label(t.label())
+                            .test_id(format!("tab-{}", t.label().to_lowercase()))
+                    })),
             )
             .child(div().flex_1().min_h_0().child(match self.tab {
                 Tab::Changes => self.render_changes(cx).into_any_element(),
@@ -99,6 +113,7 @@ impl Osier {
             .child(div().text_sm().flex_1().min_w_0().child(text))
             .child(
                 Button::new("ip-continue")
+                    .test_id("ip-continue")
                     .primary()
                     .xsmall()
                     .label("Continue")
@@ -110,6 +125,7 @@ impl Osier {
             .when(skippable, |this| {
                 this.child(
                     Button::new("ip-skip")
+                        .test_id("ip-skip")
                         .outline()
                         .xsmall()
                         .label("Skip commit")
@@ -120,6 +136,7 @@ impl Osier {
             })
             .child(
                 Button::new("ip-abort")
+                    .test_id("ip-abort")
                     .danger()
                     .xsmall()
                     .label("Abort")
