@@ -6,7 +6,7 @@ use osier_git::graph::{Edge, GraphRow};
 pub const LANE_WIDTH: f32 = 14.0;
 pub const NODE_RADIUS: f32 = 5.0;
 /// Row height of the log list; the canvas needs a definite height to lay out lines.
-pub const ROW_HEIGHT: f32 = 40.0;
+pub const ROW_HEIGHT: f32 = 30.0;
 
 /// Colours for lanes, cycling.
 pub fn lane_colors(cx: &App) -> [Hsla; 5] {
@@ -33,15 +33,12 @@ pub fn graph_cell(
             let bottom = top + bounds.size.height;
             let color = |lane: usize| colors[lane % colors.len()];
 
-            // Top half: edges arriving from the previous row end at their `to` lane.
+            // Top half: edges arriving from the previous row. The previous row's bottom half
+            // already moved them into their `to` lane, so they continue straight down.
             for e in &incoming {
                 let mut b = PathBuilder::stroke(px(2.));
-                b.move_to(point(x_of(e.from), top));
-                if e.from == e.to {
-                    b.line_to(point(x_of(e.to), mid));
-                } else {
-                    b.curve_to(point(x_of(e.to), mid), point(x_of(e.from), mid));
-                }
+                b.move_to(point(x_of(e.to), top));
+                b.line_to(point(x_of(e.to), mid));
                 if let Ok(path) = b.build() {
                     window.paint_path(path, color(e.to));
                 }
@@ -55,8 +52,11 @@ pub fn graph_cell(
                 } else {
                     b.curve_to(point(x_of(e.to), bottom), point(x_of(e.to), mid));
                 }
+                // A sideways edge belongs to the side branch (the outer lane), whether it
+                // forks off here or merges in, so it takes that lane's colour.
+                let lane = if e.from == e.to { e.to } else { e.from.max(e.to) };
                 if let Ok(path) = b.build() {
-                    window.paint_path(path, color(e.to));
+                    window.paint_path(path, color(lane));
                 }
             }
             // Node.

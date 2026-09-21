@@ -60,11 +60,6 @@ impl Osier {
             ..Default::default()
         };
         let subject = message.lines().next().unwrap_or("").to_string();
-        if let Some(p) = self.active_project() {
-            let path = p.path.clone();
-            self.state.push_commit_message(&path, &message);
-            self.save_state();
-        }
         let summary = if self.amend {
             format!("Amended: {subject}")
         } else {
@@ -93,11 +88,6 @@ impl Osier {
             ..Default::default()
         };
         let subject = message.lines().next().unwrap_or("").to_string();
-        if let Some(p) = self.active_project() {
-            let path = p.path.clone();
-            self.state.push_commit_message(&path, &message);
-            self.save_state();
-        }
         self.set_message("", window, cx);
         self.amend = false;
         self.run_op_then(
@@ -150,16 +140,11 @@ impl Osier {
     }
 
     /// Discard with a confirmation that says exactly what is lost.
-    /// Messages committed before in the active repository, newest first.
+    /// The last five commit messages on HEAD (from any tool), newest first.
     pub(crate) fn recent_commit_messages(&self) -> Vec<String> {
-        let Some(p) = self.active_project() else {
-            return Vec::new();
-        };
-        let key = p.path.to_string_lossy().into_owned();
-        self.state
-            .commit_messages
-            .get(&key)
-            .cloned()
+        self.active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map(|s| s.recent_messages.clone())
             .unwrap_or_default()
     }
 

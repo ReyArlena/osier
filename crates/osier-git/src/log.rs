@@ -94,6 +94,27 @@ pub fn log(repo: &Repository, options: &LogOptions) -> Result<Vec<Commit>> {
     }
 }
 
+/// Full messages of the last `n` commits on HEAD, newest first, duplicates removed. Empty on
+/// an unborn branch (git exits 128 there).
+pub fn recent_messages(repo: &Repository, n: usize) -> Result<Vec<String>> {
+    let out = repo.runner().run_allowing(
+        Some(repo.workdir()),
+        ["log", &format!("-{n}"), "--format=%B%x00", "HEAD"],
+        &[0, 128],
+    )?;
+    if out.record.status != Some(0) {
+        return Ok(Vec::new());
+    }
+    let mut messages: Vec<String> = Vec::new();
+    for m in out.stdout_str()?.split('\0') {
+        let m = m.trim();
+        if !m.is_empty() && !messages.iter().any(|x| x == m) {
+            messages.push(m.to_string());
+        }
+    }
+    Ok(messages)
+}
+
 pub fn parse(bytes: &[u8]) -> Result<Vec<Commit>> {
     bytes
         .split(|b| *b == 0)
@@ -222,5 +243,28 @@ mod tests {
     fn empty_repo_has_empty_log() {
         let t = TempRepo::new();
         assert!(log(&t.repo(), &LogOptions::default()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn recent_messages_come_from_head_newest_first() {
+        let t = TempRepo::new();
+        assert!(
+            recent_messages(&t.repo(), 5).unwrap().is_empty(),
+            "unborn branch"
+        );
+        t.commit_file("a.txt", "a\n", "first");
+        t.write("a.txt", "b\n");
+        t.git(["commit", "-qam", "second\n\nwith a body"]);
+        for n in 3..=8 {
+            t.commit_file("a.txt", &format!("{n}\n"), &format!("commit {n}"));
+        }
+        let m = recent_messages(&t.repo(), 5).unwrap();
+        assert_eq!(m.len(), 5);
+        assert_eq!(m[0], "commit 8");
+        let all = recent_messages(&t.repo(), 50).unwrap();
+        assert!(
+            all.contains(&"second\n\nwith a body".to_string()),
+            "{all:?}"
+        );
     }
 }

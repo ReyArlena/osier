@@ -20,8 +20,6 @@ pub struct State {
     pub layout: Layout,
     /// Last window position and size (logical pixels). Compositors may ignore it.
     pub window: Option<WindowGeometry>,
-    /// Recent commit messages per repository path, newest first.
-    pub commit_messages: std::collections::BTreeMap<String, Vec<String>>,
     /// GitHub (gh) account chosen per repository path ("always use for this project").
     pub accounts: std::collections::BTreeMap<String, String>,
     /// Pull strategy remembered per repository path: `merge` or `rebase`.
@@ -53,6 +51,8 @@ const MAX_RECENT: usize = 30;
 impl State {
     pub fn load(paths: &Paths) -> Result<Self> {
         let mut s: Self = crate::read_toml(&paths.state_file())?;
+        // Older versions stored commit messages here; the history now comes from git log.
+        s.extra.remove("commit_messages");
         if s.layout == Layout::default() && s.open_projects.is_empty() {
             s.layout.sidebar_visible = true;
         }
@@ -83,15 +83,6 @@ impl State {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_path_buf());
         self.recent.truncate(MAX_RECENT);
-    }
-
-    /// Remember a commit message for `repo` (deduplicated, newest first, capped).
-    pub fn push_commit_message(&mut self, repo: &Path, message: &str) {
-        let key = repo.to_string_lossy().into_owned();
-        let list = self.commit_messages.entry(key).or_default();
-        list.retain(|m| m != message);
-        list.insert(0, message.to_string());
-        list.truncate(20);
     }
 
     pub fn is_pinned(&self, path: &Path) -> bool {

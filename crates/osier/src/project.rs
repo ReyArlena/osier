@@ -32,6 +32,8 @@ pub struct Snapshot {
     pub files: Vec<String>,
     pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
     pub submodules: Vec<osier_git::submodule::Submodule>,
+    /// Last five commit messages on HEAD, for the commit box history menu.
+    pub recent_messages: Vec<String>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
 }
@@ -281,6 +283,7 @@ pub fn load_snapshot(
     files.dedup();
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
+    let recent_messages = osier_git::log::recent_messages(repo, 5).unwrap_or_default();
     // A broken .gitmodules must not take the whole snapshot down.
     let submodules = osier_git::submodule::list(repo).unwrap_or_else(|e| {
         tracing::debug!(error = %e, "submodule listing unavailable");
@@ -298,6 +301,7 @@ pub fn load_snapshot(
         files,
         worktrees,
         submodules,
+        recent_messages,
         identity,
         in_progress: repo.in_progress(),
     })
