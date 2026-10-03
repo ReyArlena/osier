@@ -273,7 +273,13 @@ impl Osier {
                 .when_some(project, |this, p| {
                     this.child(div().text_sm().font_medium().child(p.name.clone()))
                         .child(
+                            // Long paths shrink with an ellipsis instead of being cut by the
+                            // window edge. (A fade overlay would also dim the end of a path
+                            // that fits, since this element is only as wide as its text.)
                             div()
+                                .min_w_0()
+                                .flex_shrink(1.)
+                                .truncate()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tilde(&p.path)),

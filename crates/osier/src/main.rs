@@ -12,6 +12,7 @@ mod command_log;
 mod config_watch;
 mod edit_pane;
 mod external;
+mod fade;
 mod format;
 mod graph;
 mod hunk_ops;

@@ -59,6 +59,10 @@ impl Osier {
         let graph = Arc::new(snapshot.graph.clone());
         let selected = project.selected_commit;
         let compare = project.compare_commit;
+        // Colours behind a row, for the fade over clipped badges (see `fade.rs`).
+        let row_bg = cx.theme().background;
+        let row_hover = row_bg.blend(cx.theme().list_hover);
+        let row_selected = row_bg.blend(cx.theme().list_active);
         let colors = lane_colors(cx);
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
         let owner = cx.entity().downgrade();
@@ -150,9 +154,16 @@ impl Osier {
                                 let hash = commit.hash.clone();
                                 let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                 let menu_owner = owner.clone();
+                                let is_selected = selected == Some(ix) || compare == Some(ix);
+                                let (fade_base, fade_hover) = if is_selected {
+                                    (row_selected, row_selected)
+                                } else {
+                                    (row_bg, row_hover)
+                                };
                                 ListItem::new(("commit", ix))
                                     .test_id(format!("log-row:{ix}"))
-                                    .selected(selected == Some(ix) || compare == Some(ix))
+                                    .group("log-row")
+                                    .selected(is_selected)
                                     .h(px(crate::graph::ROW_HEIGHT))
                                     .px_2()
                                     .w_full()
@@ -181,6 +192,7 @@ impl Osier {
                                             ))
                                             .child(
                                                 h_flex()
+                                                    .relative()
                                                     .flex_1()
                                                     .min_w_0()
                                                     .overflow_hidden()
@@ -211,6 +223,16 @@ impl Osier {
                                                             .truncate()
                                                             .min_w_0()
                                                             .child(subject),
+                                                    )
+                                                    // Badges that do not fit fade out instead
+                                                    // of being cut mid-letter.
+                                                    .child(
+                                                        crate::fade::fade_right(fade_base)
+                                                            .group_hover("log-row", move |s| {
+                                                                s.bg(crate::fade::fade_fill(
+                                                                    fade_hover,
+                                                                ))
+                                                            }),
                                                     ),
                                             )
                                             .child(

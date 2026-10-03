@@ -23,8 +23,52 @@ const DOT_GAP: f32 = 14.0;
 const DOT_LEFT: f32 = 8.0 + 16.0 + 8.0 + 2.0;
 const DOT_TOP: f32 = (28.0 - DOT_SIZE) / 2.0;
 
-fn dot_label_style() -> StyleRefinement {
-    StyleRefinement::default().pl(px(DOT_GAP))
+/// Label style for every row: one line, so the fade below lines up with it; with room for
+/// the changes dot when `dot`.
+fn label_style(dot: bool) -> StyleRefinement {
+    let style = StyleRefinement::default().whitespace_nowrap();
+    if dot { style.pl(px(DOT_GAP)) } else { style }
+}
+
+/// Colours behind a sidebar row, for the name fade (see `fade.rs`).
+#[derive(Clone, Copy)]
+struct RowFade {
+    base: Hsla,
+    hover: Hsla,
+    active: Hsla,
+}
+
+impl RowFade {
+    fn new(cx: &App) -> Self {
+        let base = cx.theme().sidebar;
+        Self {
+            base,
+            hover: base.blend(cx.theme().sidebar_accent.opacity(0.8)),
+            active: base.blend(cx.theme().sidebar_accent),
+        }
+    }
+}
+
+/// The suffix of every row: a fade over the end of the name, then the badges. gpui-kit puts
+/// the suffix right after the name (8px gap), so the fade is pinned to the suffix's left edge
+/// and reaches back over the name. The suffix keeps a fixed height so the fade covers the line
+/// even with no badges.
+fn row_suffix(fade: RowFade, active: bool) -> Div {
+    let (color, hover) = if active {
+        (fade.active, fade.active)
+    } else {
+        (fade.base, fade.hover)
+    };
+    h_flex().relative().h_5().gap_1().items_center().child(
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(px(-(crate::fade::FADE_WIDTH + 8.0)))
+            .w(px(crate::fade::FADE_WIDTH))
+            .bg(crate::fade::fade_fill(color))
+            .group_hover("sidebar-row", move |s| s.bg(crate::fade::fade_fill(hover))),
+    )
 }
 
 /// `↑a ↓b`, only the non-zero parts; `None` when in sync.
@@ -172,10 +216,15 @@ impl SidebarItem for ReorderMenu {
                     .as_ref()
                     .and_then(|(map, h)| map.get(row).map(|e| (e.clone(), h.clone())))
                 {
-                    None => div().test_id(test_id).child(el).into_any_element(),
+                    None => div()
+                        .group("sidebar-row")
+                        .test_id(test_id)
+                        .child(el)
+                        .into_any_element(),
                     Some(((project_ix, name), on_move)) => div()
                         .id(SharedString::from(format!("{row_id}-drag")))
                         .test_id(test_id)
+                        .group("sidebar-row")
                         .on_drag(
                             ProjectDrag {
                                 ix: project_ix,
@@ -212,11 +261,14 @@ impl Osier {
             && self.settings.appearance.changes_indicator
                 == osier_config::settings::ChangesIndicator::Dot;
         let arrows = badge.and_then(|b| arrows_text(b.ahead, b.behind));
+        let fade = RowFade::new(cx);
         let item = SidebarMenuItem::new(name.to_string())
             .icon(Icon::new(icon).when(dirty && !by_dot, |i| i.text_color(color)))
-            .when(by_dot, |item| item.label_style(dot_label_style()))
-            .when_some(arrows, |item, a| {
-                item.suffix(move |_, _| Tag::secondary().xsmall().child(a.clone()))
+            .label_style(label_style(by_dot))
+            .suffix(move |_, _| {
+                row_suffix(fade, false).when_some(arrows.clone(), |this, a| {
+                    this.child(Tag::secondary().xsmall().child(a))
+                })
             });
         (item, by_dot.then_some(color))
     }
@@ -252,20 +304,20 @@ impl Osier {
                 && self.settings.appearance.changes_indicator
                     == osier_config::settings::ChangesIndicator::Dot;
             let by_icon = dirty && !by_dot;
+            let fade = RowFade::new(cx);
+            let is_active = self.active == Some(ix);
             let item = SidebarMenuItem::new(project.name.clone())
                 .icon(
                     Icon::new(Lucide::FolderGit2)
                         .when(by_icon, |icon| icon.text_color(changes_color)),
                 )
-                .when(by_dot, |item| item.label_style(dot_label_style()))
-                .active(self.active == Some(ix))
+                .label_style(label_style(by_dot))
+                .active(is_active)
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
                 .suffix(move |_, _| {
                     // Ahead/behind the upstream, like the status bar, only when non-zero.
                     let arrows = arrows_text(ahead, behind);
-                    h_flex()
-                        .gap_1()
-                        .items_center()
+                    row_suffix(fade, is_active)
                         .when(loading, |this| {
                             this.child(Tag::secondary().xsmall().child("…"))
                         })
