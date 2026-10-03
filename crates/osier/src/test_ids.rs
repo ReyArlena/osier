@@ -15,7 +15,7 @@
 //! - Log rows `log-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
 //!   Stashes `stash-row:<index>`, Patches `patch-row:<id>`
 //! - inputs by their container: `commit-message`, `files-filter`, `sidebar-filter`
-//! - the settings sheet content `settings-sheet`
+//! - the settings dialog content `settings-dialog`
 
 use gpui_kit::InteractiveElement;
 

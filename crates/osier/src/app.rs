@@ -1643,9 +1643,9 @@ mod tests {
             cx.run_until_parked();
         }
 
-        fn has_sheet(&self, cx: &mut TestAppContext) -> bool {
+        fn has_settings(&self, cx: &mut TestAppContext) -> bool {
             use gpui_kit::component::WindowExt as _;
-            cx.update_window(self.window, |_, window, cx| window.has_active_sheet(cx))
+            cx.update_window(self.window, |_, window, cx| window.has_active_dialog(cx))
                 .expect("window")
         }
     }
@@ -1843,17 +1843,20 @@ mod tests {
         repo.commit_file("a.txt", "one\n", "first");
         let h = Harness::open(cx, &repo);
         h.click(cx, "settings");
-        assert!(h.has_sheet(cx), "the gear opens settings");
+        assert!(h.has_settings(cx), "the gear opens settings");
         assert!(
-            h.bounds(cx, "settings-sheet").is_some(),
-            "sheet content is drawn"
+            h.bounds(cx, "settings-dialog").is_some(),
+            "dialog content is drawn"
         );
         h.keys(cx, "escape");
-        assert!(!h.has_sheet(cx), "escape reaches the sheet and closes it");
+        assert!(
+            !h.has_settings(cx),
+            "escape reaches the dialog and closes it"
+        );
         h.keys(cx, "ctrl-,");
-        assert!(h.has_sheet(cx), "the keyboard shortcut opens it too");
+        assert!(h.has_settings(cx), "the keyboard shortcut opens it too");
         h.keys(cx, "escape");
-        assert!(!h.has_sheet(cx));
+        assert!(!h.has_settings(cx));
     }
 
     #[gpui::test]
@@ -2136,7 +2139,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn settings_sheet_closes_on_cancel(cx: &mut TestAppContext) {
+    fn settings_dialog_closes_on_cancel(cx: &mut TestAppContext) {
         use gpui_kit::component::WindowExt as _;
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "first");
@@ -2144,9 +2147,9 @@ mod tests {
         h.act(cx, |osier, window, cx| osier.open_settings(window, cx));
         cx.run_until_parked();
         let open = cx
-            .update_window(h.window, |_, window, cx| window.has_active_sheet(cx))
+            .update_window(h.window, |_, window, cx| window.has_active_dialog(cx))
             .expect("window");
-        assert!(open, "sheet opened");
+        assert!(open, "dialog opened");
         // Focus must sit inside the sheet, otherwise Cancel never reaches it.
         let focused = cx
             .update_window(h.window, |_, window, cx| {
@@ -2159,9 +2162,9 @@ mod tests {
         cx.dispatch_action(h.window, gpui_kit::component::dialog::Cancel);
         cx.run_until_parked();
         let open = cx
-            .update_window(h.window, |_, window, cx| window.has_active_sheet(cx))
+            .update_window(h.window, |_, window, cx| window.has_active_dialog(cx))
             .expect("window");
-        assert!(!open, "Cancel (close button or Escape) closed the sheet");
+        assert!(!open, "Cancel (close button or Escape) closed the dialog");
     }
 
     #[gpui::test]

@@ -74,7 +74,11 @@ fn kv(label: &str, value: impl Into<SharedString>, cx: &App) -> impl IntoElement
 }
 
 impl Osier {
-    /// Open the settings sheet. Account and ssh details are refreshed first.
+    /// Open settings as a large centered dialog. Account and ssh details are refreshed first.
+    ///
+    /// Not a sheet: gpui-kit shrinks the toast layer by an open sheet's width, so with a
+    /// wide sheet any toast raised from settings (Scan now, Clear recents) lands off-screen.
+    /// Dialogs leave toasts where they are.
     pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.load_gh_accounts(cx);
         self.ssh_status = Some(osier_auth::ssh::status());
@@ -86,26 +90,34 @@ impl Osier {
         let view = cx.entity();
         let focus = self.settings_focus.clone();
         let root_focus = self.focus_handle.clone();
-        window.open_sheet(cx, move |sheet, window, cx| {
-            let pages = pages(&view, window, cx);
+        window.open_dialog(cx, move |dialog, window, _| {
+            // Sized from the window each time the layer is built, so it follows resizes.
+            let viewport = window.viewport_size();
+            let width = (viewport.width * 0.9).min(px(1100.));
+            let height = (viewport.height * 0.8).min(px(820.));
             let root_focus = root_focus.clone();
-            sheet
+            let (view, focus) = (view.clone(), focus.clone());
+            dialog
                 .title("Settings")
-                .size(relative(0.9))
+                .w(width)
+                .centered()
                 .overlay_closable(true)
-                // The sheet restores the focus it found on opening, which may be a handle
-                // whose element is gone. Put focus back on the app so shortcuts keep working.
+                // Put focus back on the app so shortcuts keep working after closing.
                 .on_close(move |_, window, cx| root_focus.focus(window, cx))
-                .child(
-                    div()
-                        .size_full()
-                        .track_focus(&focus)
-                        .test_id("settings-sheet")
-                        .child(SettingsView::new("osier-settings").pages(pages)),
-                )
+                .content(move |content, window, cx| {
+                    let pages = pages(&view, window, cx);
+                    content.child(
+                        div()
+                            .w_full()
+                            .h(height)
+                            .track_focus(&focus)
+                            .test_id("settings-dialog")
+                            .child(SettingsView::new("osier-settings").pages(pages)),
+                    )
+                })
         });
-        // The button that opened the sheet takes focus back after its click handler ran.
-        // The sheet only receives Cancel (its close button, Escape) while focus is inside
+        // The button that opened settings takes focus back after its click handler ran.
+        // The dialog only receives Cancel (its close button, Escape) while focus is inside
         // it, so move focus in once the layer exists.
         let focus = self.settings_focus.clone();
         window.defer(cx, move |window, cx| focus.focus(window, cx));
