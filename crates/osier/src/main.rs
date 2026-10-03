@@ -20,6 +20,7 @@ mod palette;
 mod patch_ops;
 mod project;
 mod rebase_dialog;
+mod recent_status;
 mod remote_ops;
 mod runtime_info;
 mod settings_panel;

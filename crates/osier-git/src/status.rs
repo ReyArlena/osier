@@ -2,6 +2,7 @@
 
 use crate::error::{GitError, Result};
 use crate::repo::Repository;
+use crate::runner::GitRunner;
 
 /// State of one path in the index and working tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +112,65 @@ pub fn status(repo: &Repository, options: StatusOptions) -> Result<RepoStatus> {
     }
     let out = repo.git(args)?;
     parse(&out.stdout)
+}
+
+/// What the sidebar shows for a repository that is not open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QuickStatus {
+    /// `None` when the working tree was not checked.
+    pub dirty: Option<bool>,
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// Ahead/behind from refs only: `rev-list --left-right --count HEAD...@{upstream}`. No
+/// working-tree scan, so it costs about the same on any repository size. No upstream or an
+/// unborn branch gives zeros.
+pub fn quick_refs(runner: &GitRunner, path: &std::path::Path) -> Result<QuickStatus> {
+    let out = runner.run_allowing(
+        Some(path),
+        ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+        &[0, 128],
+    )?;
+    if out.record.status != Some(0) {
+        return Ok(QuickStatus::default());
+    }
+    let text = out.stdout_str()?.trim().to_string();
+    let (a, b) = text
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| GitError::parse("rev-list --count", text.clone()))?;
+    Ok(QuickStatus {
+        dirty: None,
+        ahead: a
+            .trim()
+            .parse()
+            .map_err(|_| GitError::parse("rev-list --count", a.to_string()))?,
+        behind: b
+            .trim()
+            .parse()
+            .map_err(|_| GitError::parse("rev-list --count", b.to_string()))?,
+    })
+}
+
+/// Dirty flag plus ahead/behind from one `git status`. Untracked folders are reported but not
+/// descended into (`--untracked-files=normal`), which keeps big untracked trees cheap.
+pub fn quick_full(runner: &GitRunner, path: &std::path::Path) -> Result<QuickStatus> {
+    let out = runner.run(
+        Some(path),
+        [
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=normal",
+        ],
+    )?;
+    let status = parse(&out.stdout)?;
+    Ok(QuickStatus {
+        dirty: Some(!status.entries.is_empty()),
+        ahead: status.branch.ahead,
+        behind: status.branch.behind,
+    })
 }
 
 /// Parse `--porcelain=v2 -z` output.
@@ -363,6 +423,73 @@ u UU N... 100644 100644 100644 100644 1111 2222 3333 conflict.txt\0\
         let s = status(&t.repo(), StatusOptions::default()).unwrap();
         assert!(find(&s, "c.txt").is_conflicted());
         assert_eq!(t.repo().in_progress(), Some(crate::repo::InProgress::Merge));
+    }
+}
+
+#[cfg(test)]
+mod quick_tests {
+    use super::*;
+    use crate::testing::TempRepo;
+
+    #[test]
+    fn quick_checks_report_ahead_behind_and_dirty() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let runner = t.runner();
+        // No upstream yet: zeros, not an error.
+        assert_eq!(
+            quick_refs(&runner, t.path()).unwrap(),
+            QuickStatus::default()
+        );
+        let bare = t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "HEAD"]);
+        t.commit_file("a.txt", "b\n", "ahead one");
+        t.commit_file("a.txt", "c\n", "ahead two");
+        // Someone else pushes one commit; fetch it.
+        let other = tempfile::tempdir().unwrap();
+        let clone = other.path().join("c");
+        t.git([
+            "clone",
+            "-q",
+            bare.to_string_lossy().as_ref(),
+            clone.to_string_lossy().as_ref(),
+        ]);
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&clone)
+                .args(["-c", "user.name=o", "-c", "user.email=o@example.com"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "{args:?}");
+        };
+        std::fs::write(clone.join("b.txt"), "b\n").unwrap();
+        git(&["add", "b.txt"]);
+        git(&["commit", "-qm", "theirs"]);
+        git(&["push", "-q"]);
+        t.git(["fetch", "-q"]);
+
+        let refs = quick_refs(&runner, t.path()).unwrap();
+        assert_eq!((refs.ahead, refs.behind, refs.dirty), (2, 1, None));
+        let full = quick_full(&runner, t.path()).unwrap();
+        assert_eq!((full.ahead, full.behind, full.dirty), (2, 1, Some(false)));
+        std::fs::create_dir_all(t.path().join("build/deep")).unwrap();
+        std::fs::write(t.path().join("build/deep/x.o"), "x").unwrap();
+        assert_eq!(quick_full(&runner, t.path()).unwrap().dirty, Some(true));
+    }
+
+    #[test]
+    fn quick_checks_fail_cleanly_outside_a_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = crate::testing::isolated_runner(crate::runner::MemorySink::new());
+        assert!(quick_full(&runner, dir.path()).is_err());
+        // rev-list outside a repo exits 128 as well: zeros.
+        assert_eq!(
+            quick_refs(&runner, dir.path()).unwrap(),
+            QuickStatus::default()
+        );
     }
 }
 

@@ -181,6 +181,10 @@ pub struct Osier {
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
+    /// Badges for projects that are not open (`recent_status.rs`).
+    pub(crate) recent_status: crate::recent_status::RecentStatus,
+    /// Interval slider on the settings page (`projects.recent_status_minutes`).
+    pub(crate) recent_interval: Entity<gpui_kit::component::slider::SliderState>,
     /// Narrow window: title-bar buttons drop their labels.
     pub(crate) compact: bool,
     /// Command log opened by the dev env var: do not persist that as a preference.
@@ -206,6 +210,16 @@ impl Osier {
         let patches = osier_config::patches::list(&paths).unwrap_or_else(|error| {
             tracing::warn!(%error, "could not list patches");
             Vec::new()
+        });
+        let recent_status =
+            crate::recent_status::RecentStatus::new(settings.projects.recent_status, &paths);
+        let minutes = settings.projects.recent_status_minutes.clamp(1, 60) as f32;
+        let recent_interval = cx.new(|_| {
+            gpui_kit::component::slider::SliderState::new()
+                .min(1.)
+                .max(60.)
+                .step(1.)
+                .default_value(minutes)
         });
         let config_watch = if cfg!(test) {
             None
@@ -320,6 +334,8 @@ impl Osier {
             git_version: None,
             settings_focus: cx.focus_handle(),
             config_watch,
+            recent_status,
+            recent_interval,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
             _subscriptions: vec![
@@ -346,6 +362,30 @@ impl Osier {
                     cx.notify();
                 }
             }));
+        this._subscriptions
+            .push(cx.observe_window_activation(window, |this, window, _| {
+                if window.is_window_active() {
+                    this.recent_status_on_focus();
+                }
+            }));
+        let slider = this.recent_interval.clone();
+        this._subscriptions.push(cx.subscribe(
+            &slider,
+            |this, _, ev: &gpui_kit::component::slider::SliderEvent, cx| {
+                use gpui_kit::component::slider::SliderEvent;
+                match ev {
+                    SliderEvent::Change(v) => {
+                        this.settings.projects.recent_status_minutes = v.start().round() as u32;
+                        cx.notify();
+                    }
+                    SliderEvent::Release(v) => {
+                        this.settings.projects.recent_status_minutes = v.start().round() as u32;
+                        this.save_settings();
+                        cx.notify();
+                    }
+                }
+            },
+        ));
         this._subscriptions
             .push(cx.observe_window_bounds(window, |this, window, cx| {
                 let b = window.bounds();
@@ -919,6 +959,14 @@ impl Osier {
                     project.selection = Selection::File { path, area };
                     reload = true;
                 }
+                let b = &snapshot.status.branch;
+                self.recent_status.record(
+                    path,
+                    !snapshot.status.entries.is_empty(),
+                    b.ahead,
+                    b.behind,
+                );
+                let project = &mut self.projects[ix];
                 project.snapshot = Some(snapshot);
                 project.error = None;
             }
@@ -956,6 +1004,7 @@ impl Osier {
                     if this.poll_config(window, cx) {
                         cx.notify();
                     }
+                    this.pump_recent_status(cx);
                     // The command log panel shows new records as they land.
                     let version = this.sink.version();
                     if this.command_log_visible && version != this.log_version_seen {
@@ -1599,6 +1648,151 @@ mod tests {
             cx.update_window(self.window, |_, window, cx| window.has_active_sheet(cx))
                 .expect("window")
         }
+    }
+
+    // ----- status of projects that are not open -----
+
+    /// A repository with an upstream, `ahead` local commits and optionally a dirty tree.
+    fn repo_with_upstream(ahead: usize, dirty: bool) -> TempRepo {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "HEAD"]);
+        for n in 0..ahead {
+            t.commit_file("a.txt", &format!("{n}\n"), &format!("local {n}"));
+        }
+        if dirty {
+            t.write("new.txt", "x\n");
+        }
+        t
+    }
+
+    fn set_recent_mode(
+        h: &Harness,
+        cx: &mut TestAppContext,
+        mode: osier_config::settings::RecentStatusMode,
+    ) {
+        h.act(cx, |osier, _, cx| {
+            osier.settings.projects.recent_status = mode;
+            osier.apply_recent_status_mode(cx);
+        });
+    }
+
+    /// Run the tick-loop step until the queue is empty (the tick loop's timer does not run in
+    /// tests).
+    fn drain_recent(h: &Harness, cx: &mut TestAppContext) {
+        for _ in 0..100 {
+            h.act(cx, |osier, _, cx| osier.pump_recent_status(cx));
+            cx.run_until_parked();
+            let idle = h.read(cx, |o, _| {
+                o.recent_status_queue_len() == 0 && !o.recent_status_busy()
+            });
+            if idle {
+                h.act(cx, |osier, _, cx| osier.pump_recent_status(cx));
+                return;
+            }
+        }
+        panic!("recent status queue did not drain");
+    }
+
+    #[gpui::test]
+    fn recent_status_never_does_nothing(cx: &mut TestAppContext) {
+        let repo = repo_with_upstream(2, true);
+        let other = repo_with_upstream(1, false);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, _| {
+            osier.state.recent.push(other.path().to_path_buf())
+        });
+        drain_recent(&h, cx);
+        h.read(cx, |osier, _| {
+            assert!(osier.recent_badge(other.path()).is_none());
+            assert!(osier.recent_badge(repo.path()).is_none());
+            let cache = osier_config::status_cache::StatusCache::file(&osier.paths);
+            assert!(!cache.exists(), "nothing written in never mode");
+        });
+    }
+
+    #[gpui::test]
+    fn recent_status_cached_keeps_values_from_the_last_open(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let repo = repo_with_upstream(2, true);
+        let h = Harness::open(cx, &repo);
+        set_recent_mode(&h, cx, RecentStatusMode::Cached);
+        h.act(cx, |osier, window, cx| osier.close_project(0, window, cx));
+        drain_recent(&h, cx);
+        h.read(cx, |osier, _| {
+            let b = osier.recent_badge(repo.path()).expect("cached badge");
+            assert_eq!((b.dirty, b.ahead, b.behind), (Some(true), 2, 0));
+            let cache = osier_config::status_cache::StatusCache::load(&osier.paths);
+            assert_eq!(
+                cache.get(repo.path()).map(|b| b.ahead),
+                Some(2),
+                "written to disk"
+            );
+            assert_eq!(
+                osier.recent_status_queue_len(),
+                0,
+                "cached mode runs no git"
+            );
+        });
+        // Switching to never hides everything again.
+        set_recent_mode(&h, cx, RecentStatusMode::Never);
+        h.read(cx, |osier, _| {
+            assert!(osier.recent_badge(repo.path()).is_none())
+        });
+    }
+
+    #[gpui::test]
+    fn recent_status_check_mode_reads_projects_that_were_never_opened(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let repo = repo_with_upstream(0, false);
+        let other = repo_with_upstream(3, true);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, _| {
+            osier.state.recent.push(other.path().to_path_buf())
+        });
+        set_recent_mode(&h, cx, RecentStatusMode::Check);
+        drain_recent(&h, cx);
+        h.read(cx, |osier, _| {
+            let b = osier.recent_badge(other.path()).expect("checked");
+            assert_eq!((b.dirty, b.ahead, b.behind), (Some(true), 3, 0));
+        });
+        // Focus regained: everything is queued again.
+        h.act(cx, |osier, _, _| osier.recent_status_on_focus());
+        h.read(cx, |osier, _| assert!(osier.recent_status_queue_len() >= 1));
+    }
+
+    #[gpui::test]
+    fn recent_status_watch_mode_follows_commits_without_a_change_marker(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let repo = repo_with_upstream(0, false);
+        let other = repo_with_upstream(1, true);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, _| {
+            osier.state.recent.push(other.path().to_path_buf())
+        });
+        set_recent_mode(&h, cx, RecentStatusMode::Watch);
+        drain_recent(&h, cx);
+        h.read(cx, |osier, _| {
+            let b = osier.recent_badge(other.path()).expect("checked");
+            assert_eq!((b.ahead, b.dirty), (1, None), "refs only in watch mode");
+            assert!(!osier.recent_status.shows_changes());
+        });
+        // A commit made by another tool reaches us through the .git watcher.
+        other.git(["add", "new.txt"]);
+        other.git(["commit", "-qm", "outside"]);
+        let mut ahead = 1;
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            drain_recent(&h, cx);
+            ahead = h.read(cx, |o, _| {
+                o.recent_badge(other.path()).map(|b| b.ahead).unwrap_or(0)
+            });
+            if ahead == 2 {
+                break;
+            }
+        }
+        assert_eq!(ahead, 2, "the watcher saw the commit");
     }
 
     // ----- tests driven only by clicks, keystrokes and typing -----

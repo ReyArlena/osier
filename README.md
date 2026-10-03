@@ -93,6 +93,9 @@ changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted ch
 [projects]
 scan_dirs = ["~/Projects", "~/Work"]   # children listed under Recents
 scan_depth = 1
+recent_status = "never"       # badges on projects that are not open:
+                              # never | cached | watch | check
+recent_status_minutes = 2     # check mode sweep interval, 1 to 60
 
 [diff]
 context_lines = 3

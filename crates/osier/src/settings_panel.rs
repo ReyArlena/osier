@@ -115,6 +115,7 @@ impl Osier {
     pub(crate) fn settings_changed(&mut self, cx: &mut Context<Self>) {
         self.save_settings();
         self.apply_appearance(cx);
+        self.apply_recent_status_mode(cx);
         self.rescan_projects(cx);
         let mode = match self.settings.diff.mode {
             osier_config::settings::DiffMode::Split => DiffMode::Split,
@@ -133,6 +134,10 @@ impl Osier {
         match Settings::load(&self.paths) {
             Ok(fresh) if fresh != self.settings => {
                 self.settings = fresh;
+                self.apply_recent_status_mode(cx);
+                let minutes = self.settings.projects.recent_status_minutes.clamp(1, 60) as f32;
+                self.recent_interval
+                    .update(cx, |s, cx| s.set_value(minutes, window, cx));
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
@@ -935,6 +940,72 @@ fn projects_page(view: &Entity<Osier>) -> SettingPage {
                     )
                     .description("1 looks at direct children only."),
                 ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Status of projects that are not open")
+                .description("Ahead/behind badges and the changes marker on pinned, recent and scanned projects.")
+                .item(
+                    SettingItem::new(
+                        "Show status",
+                        SettingField::dropdown(
+                            vec![
+                                ("never".into(), "Never".into()),
+                                ("cached".into(), "From when it was last open".into()),
+                                ("watch".into(), "Watch git (ahead/behind only)".into()),
+                                ("check".into(), "Watch git and check every N minutes".into()),
+                            ],
+                            get(view, |o| {
+                                use osier_config::settings::RecentStatusMode as M;
+                                match o.settings.projects.recent_status {
+                                    M::Never => "never",
+                                    M::Cached => "cached",
+                                    M::Watch => "watch",
+                                    M::Check => "check",
+                                }
+                                .into()
+                            }),
+                            set(view, |o, v: SharedString, _| {
+                                use osier_config::settings::RecentStatusMode as M;
+                                o.settings.projects.recent_status = match v.as_ref() {
+                                    "cached" => M::Cached,
+                                    "watch" => M::Watch,
+                                    "check" => M::Check,
+                                    _ => M::Never,
+                                };
+                            }),
+                        )
+                        .default_value("never".to_string()),
+                    )
+                    .description("Never runs nothing in the background. Watch modes use a few file watches per repository and one git process at a time."),
+                )
+                .item(SettingItem::render({
+                    let v = view.clone();
+                    move |options, _, cx| {
+                        let o = v.read(cx);
+                        let checking = o.settings.projects.recent_status
+                            == osier_config::settings::RecentStatusMode::Check;
+                        let minutes = o.settings.projects.recent_status_minutes.clamp(1, 60);
+                        let slider = o.recent_interval.clone();
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .when(!checking, |this| this.opacity(0.5))
+                            .child(div().text_sm().flex_none().child("Check every"))
+                            .child(
+                                div().flex_1().child(
+                                    gpui_kit::component::slider::Slider::new(&slider)
+                                        .disabled(!checking || options.is_disabled()),
+                                ),
+                            )
+                            .child(div().text_sm().w(px(64.)).flex_none().child(if minutes == 1 {
+                                "1 minute".to_string()
+                            } else {
+                                format!("{minutes} minutes")
+                            }))
+                    }
+                })),
         )
         .group(
             SettingGroup::new()

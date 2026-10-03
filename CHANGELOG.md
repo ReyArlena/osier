@@ -28,6 +28,9 @@ All notable changes to Osier are documented here. The format follows
 - Settings sheet (appearance, diff, git, editors, accounts, projects, about), with
   `config.toml` reloaded on external change and `osier --version --verbose` runtime info.
 - Command palette, git command log panel, operation history, project sidebar with scan
-  directories, filter and recents.
+  directories, filter, recents, pins and drag reordering.
+- Sidebar badges: ahead/behind arrows and an uncommitted-changes marker (icon colour or
+  dot), optionally also for projects that are not open (cached, watched or checked on an
+  interval).
 - Packaging: install script, desktop entry and icon, GitHub Actions CI and release
   workflows, Flatpak manifest draft and AUR PKGBUILDs.

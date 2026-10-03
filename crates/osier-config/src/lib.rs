@@ -15,6 +15,7 @@ pub mod paths;
 pub mod scan;
 pub mod settings;
 pub mod state;
+pub mod status_cache;
 
 pub use paths::Paths;
 pub use settings::Settings;

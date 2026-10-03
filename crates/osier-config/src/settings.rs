@@ -79,12 +79,48 @@ pub struct Editor {
     pub terminal: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Projects {
     /// Directories whose immediate children are scanned for repositories into Recents.
     pub scan_dirs: Vec<PathBuf>,
     pub scan_depth: Option<u8>,
+    /// Badges (ahead/behind, uncommitted changes) on projects that are not open.
+    pub recent_status: RecentStatusMode,
+    /// Sweep interval for `recent_status = "check"`, 1 to 60 minutes.
+    pub recent_status_minutes: u32,
+}
+
+impl Default for Projects {
+    fn default() -> Self {
+        Self {
+            scan_dirs: Vec::new(),
+            scan_depth: None,
+            recent_status: RecentStatusMode::Never,
+            recent_status_minutes: 2,
+        }
+    }
+}
+
+impl Projects {
+    pub fn recent_status_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(u64::from(self.recent_status_minutes.clamp(1, 60)) * 60)
+    }
+}
+
+/// How the sidebar learns the state of projects that are not open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RecentStatusMode {
+    /// No badges, no cache, no watchers, no background git.
+    #[default]
+    Never,
+    /// Values remembered from when the project was last open. No background git.
+    Cached,
+    /// Watch each repository's `.git`; re-read ahead/behind when it changes. No change marker.
+    Watch,
+    /// `Watch` plus a full status of every repository every N minutes and on window focus.
+    Check,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -285,5 +321,16 @@ mod tests {
         );
         let s: Settings = toml::from_str("[appearance]\nchanges_indicator = \"dot\"\n").unwrap();
         assert_eq!(s.appearance.changes_indicator, ChangesIndicator::Dot);
+    }
+
+    #[test]
+    fn recent_status_defaults_off_and_clamps_the_interval() {
+        let p = Settings::default().projects;
+        assert_eq!(p.recent_status, RecentStatusMode::Never);
+        let s: Settings =
+            toml::from_str("[projects]\nrecent_status = \"check\"\nrecent_status_minutes = 600\n")
+                .unwrap();
+        assert_eq!(s.projects.recent_status, RecentStatusMode::Check);
+        assert_eq!(s.projects.recent_status_interval().as_secs(), 3600);
     }
 }

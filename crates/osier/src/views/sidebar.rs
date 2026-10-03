@@ -27,6 +27,26 @@ fn dot_label_style() -> StyleRefinement {
     StyleRefinement::default().pl(px(DOT_GAP))
 }
 
+/// `↑a ↓b`, only the non-zero parts; `None` when in sync.
+fn arrows_text(ahead: u32, behind: u32) -> Option<String> {
+    match (ahead, behind) {
+        (0, 0) => None,
+        (a, 0) => Some(format!("↑{a}")),
+        (0, b) => Some(format!("↓{b}")),
+        (a, b) => Some(format!("↑{a} ↓{b}")),
+    }
+}
+
+impl ReorderMenu {
+    /// Add a row, with a dot in front of its label when `dot` is set.
+    fn row(self, test_id: String, item: SidebarMenuItem, dot: Option<Hsla>) -> Self {
+        match dot {
+            Some(color) => self.child_with_dot(test_id, item, color),
+            None => self.child(test_id, item),
+        }
+    }
+}
+
 /// What is being dragged in the Open list: the project's index and its name for the preview.
 #[derive(Clone)]
 struct ProjectDrag {
@@ -175,6 +195,32 @@ impl SidebarItem for ReorderMenu {
 }
 
 impl Osier {
+    /// A row for a project that is not open, with its last known status: ↑/↓ suffix and the
+    /// changes marker (icon colour or a dot, per `appearance.changes_indicator`).
+    fn status_item(
+        &self,
+        path: &std::path::Path,
+        name: &str,
+        icon: Lucide,
+        cx: &App,
+    ) -> (SidebarMenuItem, Option<Hsla>) {
+        let badge = self.recent_badge(path);
+        let color = cx.theme().warning;
+        let dirty =
+            self.recent_status.shows_changes() && badge.and_then(|b| b.dirty).unwrap_or(false);
+        let by_dot = dirty
+            && self.settings.appearance.changes_indicator
+                == osier_config::settings::ChangesIndicator::Dot;
+        let arrows = badge.and_then(|b| arrows_text(b.ahead, b.behind));
+        let item = SidebarMenuItem::new(name.to_string())
+            .icon(Icon::new(icon).when(dirty && !by_dot, |i| i.text_color(color)))
+            .when(by_dot, |item| item.label_style(dot_label_style()))
+            .when_some(arrows, |item, a| {
+                item.suffix(move |_, _| Tag::secondary().xsmall().child(a.clone()))
+            });
+        (item, by_dot.then_some(color))
+    }
+
     pub(crate) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = cx.entity().downgrade();
         let filter = self.sidebar_filter_text(cx);
@@ -215,14 +261,8 @@ impl Osier {
                 .active(self.active == Some(ix))
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
                 .suffix(move |_, _| {
-                    // Ahead/behind the upstream, like the status bar, only when non-zero; a dot
-                    // marks uncommitted changes in the working tree.
-                    let arrows = match (ahead, behind) {
-                        (0, 0) => None,
-                        (a, 0) => Some(format!("↑{a}")),
-                        (0, b) => Some(format!("↓{b}")),
-                        (a, b) => Some(format!("↑{a} ↓{b}")),
-                    };
+                    // Ahead/behind the upstream, like the status bar, only when non-zero.
+                    let arrows = arrows_text(ahead, behind);
                     h_flex()
                         .gap_1()
                         .items_center()
@@ -321,31 +361,35 @@ impl Osier {
                 .unwrap_or_else(|| path.display().to_string());
             let missing = !path.is_dir();
             let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
-            pinned_menu = pinned_menu.child(
+            let (item, dot) = self.status_item(
+                &path,
+                &name,
+                if missing {
+                    Lucide::FolderX
+                } else {
+                    Lucide::Pin
+                },
+                cx,
+            );
+            pinned_menu = pinned_menu.row(
                 format!("sidebar-pinned:{name}"),
-                SidebarMenuItem::new(name.clone())
-                    .icon(if missing {
-                        Lucide::FolderX
-                    } else {
-                        Lucide::Pin
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_project_notify(&open_path, window, cx);
+                item.on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_project_notify(&open_path, window, cx);
+                }))
+                .context_menu(move |menu, _, _| {
+                    let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
+                    let (p1, p2) = (menu_path.clone(), menu_path.clone());
+                    menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
+                        let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
                     }))
-                    .context_menu(move |menu, _, _| {
-                        let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
-                        let (p1, p2) = (menu_path.clone(), menu_path.clone());
-                        menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
-                            let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
-                        }))
-                        .item(
-                            PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
-                                let p = p2.to_string_lossy().into_owned();
-                                let _ =
-                                    w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
-                            }),
-                        )
-                    }),
+                    .item(
+                        PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                            let p = p2.to_string_lossy().into_owned();
+                            let _ = w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                        }),
+                    )
+                }),
+                dot,
             );
         }
 
@@ -362,46 +406,43 @@ impl Osier {
             let menu_weak = weak.clone();
             let menu_path = path.clone();
             let from_scan = provider.is_some();
-            recent = recent.child(
+            let icon = if missing {
+                Lucide::FolderX
+            } else if from_scan {
+                Lucide::FolderSearch
+            } else {
+                Lucide::Folder
+            };
+            let (item, dot) = self.status_item(&path, &name, icon, cx);
+            recent = recent.row(
                 format!("sidebar-recent:{name}"),
-                SidebarMenuItem::new(name.clone())
-                    .icon(if missing {
-                        Lucide::FolderX
-                    } else if from_scan {
-                        Lucide::FolderSearch
-                    } else {
-                        Lucide::Folder
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_project_notify(&open_path, window, cx);
+                item.on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_project_notify(&open_path, window, cx);
+                }))
+                .context_menu(move |menu, _, _| {
+                    let (w1, w2, w3) = (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
+                    let (p1, p2, p3) = (menu_path.clone(), menu_path.clone(), menu_path.clone());
+                    menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
+                        let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
                     }))
-                    .context_menu(move |menu, _, _| {
-                        let (w1, w2, w3) =
-                            (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
-                        let (p1, p2, p3) =
-                            (menu_path.clone(), menu_path.clone(), menu_path.clone());
-                        menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
-                            let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
-                        }))
-                        .item(
-                            PopupMenuItem::new(if from_scan {
-                                "Remove from recents (from a scan directory)"
-                            } else {
-                                "Remove from recents"
-                            })
-                            .on_click(move |_, window, cx| {
-                                let _ =
-                                    w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
-                            }),
-                        )
-                        .item(
-                            PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
-                                let p = p2.to_string_lossy().into_owned();
-                                let _ =
-                                    w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
-                            }),
-                        )
-                    }),
+                    .item(
+                        PopupMenuItem::new(if from_scan {
+                            "Remove from recents (from a scan directory)"
+                        } else {
+                            "Remove from recents"
+                        })
+                        .on_click(move |_, window, cx| {
+                            let _ = w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                            let p = p2.to_string_lossy().into_owned();
+                            let _ = w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                        }),
+                    )
+                }),
+                dot,
             );
         }
 
