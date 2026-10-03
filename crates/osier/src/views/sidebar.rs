@@ -26,9 +26,18 @@ const DOT_TOP: f32 = (28.0 - DOT_SIZE) / 2.0;
 /// Label style for every row: one line, so the fade below lines up with it; with room for
 /// the changes dot when `dot`.
 fn label_style(dot: bool) -> StyleRefinement {
-    let style = StyleRefinement::default().whitespace_nowrap();
+    // The negative right margin lets the name use gpui-kit's 8px gap before the suffix slot;
+    // the fade below ends exactly at the slot, so nothing shows through the gap.
+    let style = StyleRefinement::default()
+        .whitespace_nowrap()
+        .mr(px(-SUFFIX_GAP));
     if dot { style.pl(px(DOT_GAP)) } else { style }
 }
+
+/// gpui-kit's gap between a row's name and its suffix slot.
+const SUFFIX_GAP: f32 = 8.0;
+/// Sidebar rows are short on space, so their fade is tighter than the log's.
+const ROW_FADE_WIDTH: f32 = 14.0;
 
 /// Colours behind a sidebar row, for the name fade (see `fade.rs`).
 #[derive(Clone, Copy)]
@@ -49,9 +58,9 @@ impl RowFade {
     }
 }
 
-/// The suffix of every row: a fade over the end of the name, then the badges. gpui-kit puts
-/// the suffix right after the name (8px gap), so the fade is pinned to the suffix's left edge
-/// and reaches back over the name. The suffix keeps a fixed height so the fade covers the line
+/// The suffix of every row: a fade over the end of the name, then the badges. The name runs
+/// up to the suffix's left edge (see `label_style`), and the fade is pinned there, reaching
+/// back over the last letters. The suffix keeps a fixed height so the fade covers the line
 /// even with no badges.
 fn row_suffix(fade: RowFade, active: bool) -> Div {
     let (color, hover) = if active {
@@ -64,8 +73,8 @@ fn row_suffix(fade: RowFade, active: bool) -> Div {
             .absolute()
             .top_0()
             .bottom_0()
-            .left(px(-(crate::fade::FADE_WIDTH + 8.0)))
-            .w(px(crate::fade::FADE_WIDTH))
+            .left(px(-ROW_FADE_WIDTH))
+            .w(px(ROW_FADE_WIDTH))
             .bg(crate::fade::fade_fill(color))
             .group_hover("sidebar-row", move |s| s.bg(crate::fade::fade_fill(hover))),
     )
