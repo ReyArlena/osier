@@ -33,34 +33,60 @@ pub fn graph_cell(
             let bottom = top + bounds.size.height;
             let color = |lane: usize| colors[lane % colors.len()];
 
-            // Top half: edges arriving from the previous row. The previous row's bottom half
-            // already moved them into their `to` lane, so they continue straight down.
+            // An edge runs from `from` at this row's middle to `to` at the next row's middle.
+            // A lane change is one cubic S-curve over that whole span, with control points on
+            // the row boundary above each end. Split at its midpoint (de Casteljau, t = 0.5)
+            // it gives two halves that meet on the boundary with the same slope, so the curve
+            // is continuous across the two canvases with no flat step.
+            let h = bounds.size.height;
+            let half_x = |e: &Edge| (x_of(e.from) + x_of(e.to)) / 2.;
+            // A sideways edge belongs to the side branch (the outer lane), whether it forks off
+            // here or merges in, so both halves take that lane's colour.
+            let edge_color = |e: &Edge| {
+                if e.from == e.to {
+                    color(e.to)
+                } else {
+                    color(e.from.max(e.to))
+                }
+            };
+
+            // Top half: second halves of edges arriving from the previous row.
             for e in &incoming {
                 let mut b = PathBuilder::stroke(px(2.));
-                b.move_to(point(x_of(e.to), top));
-                b.line_to(point(x_of(e.to), mid));
+                if e.from == e.to {
+                    b.move_to(point(x_of(e.to), top));
+                    b.line_to(point(x_of(e.to), mid));
+                } else {
+                    // Second half: M, ((xf + 3xt) / 4, B + h/8), (xt, B + h/4), (xt, B + h/2).
+                    let (xf, xt) = (x_of(e.from), x_of(e.to));
+                    b.move_to(point(half_x(e), top));
+                    b.cubic_bezier_to(
+                        point(xt, mid),
+                        point((xf + xt * 3.) / 4., top + h / 8.),
+                        point(xt, top + h / 4.),
+                    );
+                }
                 if let Ok(path) = b.build() {
-                    window.paint_path(path, color(e.to));
+                    window.paint_path(path, edge_color(e));
                 }
             }
-            // Bottom half: edges leaving this row.
+            // Bottom half: first halves of edges leaving this row.
             for e in &row.edges {
                 let mut b = PathBuilder::stroke(px(2.));
                 b.move_to(point(x_of(e.from), mid));
                 if e.from == e.to {
                     b.line_to(point(x_of(e.to), bottom));
                 } else {
-                    b.curve_to(point(x_of(e.to), bottom), point(x_of(e.to), mid));
+                    // First half: (xf, B - h/2), (xf, B - h/4), ((3xf + xt) / 4, B - h/8), M.
+                    let (xf, xt) = (x_of(e.from), x_of(e.to));
+                    b.cubic_bezier_to(
+                        point(half_x(e), bottom),
+                        point(xf, bottom - h / 4.),
+                        point((xf * 3. + xt) / 4., bottom - h / 8.),
+                    );
                 }
-                // A sideways edge belongs to the side branch (the outer lane), whether it
-                // forks off here or merges in, so it takes that lane's colour.
-                let lane = if e.from == e.to {
-                    e.to
-                } else {
-                    e.from.max(e.to)
-                };
                 if let Ok(path) = b.build() {
-                    window.paint_path(path, color(lane));
+                    window.paint_path(path, edge_color(e));
                 }
             }
             // Node.
