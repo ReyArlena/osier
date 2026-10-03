@@ -128,6 +128,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "General",
+            "Scan project status now",
+            Lucide::RefreshCw,
+            None,
+            false,
+            |o, w, cx| o.scan_recent_now(w, cx),
+        ),
+        cmd(
+            "General",
             "Quit",
             Lucide::LogOut,
             Some("ctrl-q"),

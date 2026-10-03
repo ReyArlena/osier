@@ -1005,6 +1005,43 @@ fn projects_page(view: &Entity<Osier>) -> SettingPage {
                                 format!("{minutes} minutes")
                             }))
                     }
+                }))
+                .item(SettingItem::render({
+                    let v = view.clone();
+                    move |options, _, cx| {
+                        use osier_config::settings::RecentStatusMode as M;
+                        let mode = v.read(cx).settings.projects.recent_status;
+                        let hint = match mode {
+                            M::Never => "Turn the status on to scan.",
+                            M::Cached => "One full check now; the results are cached.",
+                            M::Watch => "Re-read ahead/behind of every project now.",
+                            M::Check => "Full check of every project now; the timer restarts.",
+                        };
+                        let v = v.clone();
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(hint),
+                            )
+                            .child(
+                                Button::new("scan-recent-now")
+                                    .test_id("scan-recent-now")
+                                    .outline()
+                                    .with_size(options.size())
+                                    .icon(Lucide::RefreshCw)
+                                    .label("Scan now")
+                                    .disabled(mode == M::Never || options.is_disabled())
+                                    .on_click(move |_, window, cx| {
+                                        v.update(cx, |o, cx| o.scan_recent_now(window, cx));
+                                    }),
+                            )
+                    }
                 })),
         )
         .group(

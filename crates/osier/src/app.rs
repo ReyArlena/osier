@@ -1763,6 +1763,46 @@ mod tests {
     }
 
     #[gpui::test]
+    fn scan_now_follows_the_mode(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let repo = repo_with_upstream(0, false);
+        let a = repo_with_upstream(1, true);
+        let b = repo_with_upstream(0, false);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, _| {
+            osier.state.recent.push(a.path().to_path_buf());
+            osier.state.recent.push(b.path().to_path_buf());
+        });
+        // Never: nothing queued, nothing shown.
+        h.act(cx, |osier, window, cx| osier.scan_recent_now(window, cx));
+        h.read(cx, |o, _| assert_eq!(o.recent_status_queue_len(), 0));
+        // Cached: a one-off full check, so the change marker becomes known.
+        set_recent_mode(&h, cx, RecentStatusMode::Cached);
+        h.act(cx, |osier, window, cx| osier.scan_recent_now(window, cx));
+        drain_recent(&h, cx);
+        h.read(cx, |o, _| {
+            let badge = o.recent_badge(a.path()).expect("scanned");
+            assert_eq!((badge.dirty, badge.ahead), (Some(true), 1));
+            assert!(o.recent_badge(b.path()).is_some());
+        });
+        // Watch: refs only; the change marker from the earlier full check is kept.
+        set_recent_mode(&h, cx, RecentStatusMode::Watch);
+        drain_recent(&h, cx);
+        a.git(["commit", "-q", "--allow-empty", "-m", "more"]);
+        h.act(cx, |osier, window, cx| osier.scan_recent_now(window, cx));
+        drain_recent(&h, cx);
+        h.read(cx, |o, _| {
+            let badge = o.recent_badge(a.path()).unwrap();
+            assert_eq!(badge.ahead, 2);
+            assert_eq!(
+                badge.dirty,
+                Some(true),
+                "refs-only scan keeps the last marker"
+            );
+        });
+    }
+
+    #[gpui::test]
     fn recent_status_watch_mode_follows_commits_without_a_change_marker(cx: &mut TestAppContext) {
         use osier_config::settings::RecentStatusMode;
         let repo = repo_with_upstream(0, false);

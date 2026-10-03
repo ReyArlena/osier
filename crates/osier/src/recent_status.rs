@@ -271,6 +271,26 @@ impl RecentStatus {
             self.enqueue(repo, full);
         }
     }
+
+    /// "Scan now", following the mode: refs only for `watch`, full status for `check` (the
+    /// sweep timer restarts), and a one-off full check for `cached`, which never runs git on
+    /// its own. Returns how many repositories were queued.
+    pub fn scan_now(&mut self, tracked: Vec<PathBuf>) -> usize {
+        let full = match self.mode {
+            RecentStatusMode::Never => return 0,
+            RecentStatusMode::Watch => false,
+            RecentStatusMode::Check => {
+                self.last_sweep = Some(Instant::now());
+                true
+            }
+            RecentStatusMode::Cached => true,
+        };
+        let n = tracked.len();
+        for repo in tracked {
+            self.enqueue(repo, full);
+        }
+        n
+    }
 }
 
 impl Osier {
@@ -397,6 +417,28 @@ impl Osier {
                 tracing::warn!(%error, "could not save the project status cache");
             }
         }
+    }
+
+    /// The "Scan now" button and palette command.
+    pub(crate) fn scan_recent_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::WindowExt as _;
+        let targets = self.recent_status_targets();
+        let n = self.recent_status.scan_now(targets);
+        if self.recent_status.mode == RecentStatusMode::Never {
+            return;
+        }
+        window.push_notification(
+            match n {
+                0 => {
+                    "No projects to check: pinned and recent projects that are not open are checked"
+                        .to_string()
+                }
+                1 => "Checking 1 project".to_string(),
+                n => format!("Checking {n} projects"),
+            },
+            cx,
+        );
+        self.pump_recent_status(cx);
     }
 
     /// Window focus came back: in `check` mode, re-check everything (edits made elsewhere).
