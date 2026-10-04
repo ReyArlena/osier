@@ -544,7 +544,15 @@ impl Osier {
                                 ),
                         )
                         .child(
-                            div().test_id("sidebar-filter").child(
+                            div()
+                                .test_id("sidebar-filter")
+                                .on_action(cx.listener(
+                                    |this, _: &gpui_kit::component::input::Escape, window, cx| {
+                                        let input = this.sidebar_filter.clone();
+                                        this.escape_filter(input, window, cx)
+                                    },
+                                ))
+                                .child(
                             Input::new(&self.sidebar_filter)
                                 .small()
                                 .cleanable(true)

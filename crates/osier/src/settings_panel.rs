@@ -111,6 +111,17 @@ impl Osier {
                             .w_full()
                             .h(height)
                             .track_focus(&focus)
+                            .key_context("OsierSettings")
+                            .on_action({
+                                let focus = focus.clone();
+                                // `/`: the settings page's own search box. It lives inside
+                                // gpui-kit's component, out of reach, but it is the first tab
+                                // stop after this container.
+                                move |_: &crate::app::FocusSettingsSearch, window, cx| {
+                                    focus.focus(window, cx);
+                                    window.focus_next(cx);
+                                }
+                            })
                             .test_id("settings-dialog")
                             .child(SettingsView::new("osier-settings").pages(pages)),
                     )

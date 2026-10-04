@@ -16,6 +16,7 @@ mod fade;
 mod format;
 mod graph;
 mod hunk_ops;
+mod keymap;
 mod ops;
 mod palette;
 mod patch_ops;

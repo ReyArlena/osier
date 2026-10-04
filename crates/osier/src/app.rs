@@ -40,6 +40,9 @@ gpui_kit::actions!(
         SelectPrev,
         ToggleStageSelected,
         DiscardSelected,
+        FocusProjectSearch,
+        FocusFileSearch,
+        FocusSettingsSearch,
         CommitStaged,
         Fetch,
         Pull,
@@ -48,35 +51,7 @@ gpui_kit::actions!(
 );
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("ctrl-q", Quit, None),
-        KeyBinding::new("ctrl-r", Refresh, None),
-        KeyBinding::new("f5", Refresh, None),
-        KeyBinding::new("ctrl-o", OpenRepository, None),
-        KeyBinding::new("ctrl-w", CloseProject, None),
-        KeyBinding::new("ctrl-b", ToggleSidebar, None),
-        KeyBinding::new("ctrl-`", ToggleCommandLog, None),
-        KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
-        KeyBinding::new("ctrl-,", OpenSettings, None),
-        KeyBinding::new("ctrl-shift-a", OpenCommandPalette, None),
-        KeyBinding::new("f1", OpenCommandPalette, None),
-        KeyBinding::new("ctrl-1", TabChanges, None),
-        KeyBinding::new("ctrl-2", TabLog, None),
-        KeyBinding::new("ctrl-3", TabBranches, None),
-        KeyBinding::new("ctrl-4", TabStashes, None),
-        KeyBinding::new("ctrl-5", TabFiles, None),
-        KeyBinding::new("ctrl-6", TabPatches, None),
-        KeyBinding::new("ctrl-enter", CommitStaged, None),
-        KeyBinding::new("ctrl-shift-f", Fetch, None),
-        KeyBinding::new("ctrl-shift-l", Pull, None),
-        KeyBinding::new("ctrl-shift-p", Push, None),
-        KeyBinding::new("down", SelectNext, Some("OsierList")),
-        KeyBinding::new("up", SelectPrev, Some("OsierList")),
-        KeyBinding::new("j", SelectNext, Some("OsierList")),
-        KeyBinding::new("k", SelectPrev, Some("OsierList")),
-        KeyBinding::new("space", ToggleStageSelected, Some("OsierList")),
-        KeyBinding::new("delete", DiscardSelected, Some("OsierList")),
-    ]);
+    cx.bind_keys(crate::keymap::default_bindings(cx));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +310,8 @@ impl Osier {
             blame: None,
             ssh_status: None,
             git_version: None,
-            settings_focus: cx.focus_handle(),
+            // A tab stop, so moving to the next stop from here lands on the settings search.
+            settings_focus: cx.focus_handle().tab_stop(true),
             config_watch,
             recent_status,
             recent_interval,
@@ -1301,6 +1277,41 @@ impl Osier {
         cx.notify();
     }
 
+    /// `/`: the sidebar's project filter (showing the sidebar if hidden).
+    pub(crate) fn focus_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.sidebar_visible {
+            self.toggle_sidebar(cx);
+        }
+        self.sidebar_filter
+            .update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// `?`: the Files tab and its filter.
+    pub(crate) fn focus_file_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_project().is_none() {
+            return;
+        }
+        self.set_tab(Tab::Files, cx);
+        self.files_filter
+            .update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// Escape in a filter box: clear it, or when it is already empty, leave it so the app's
+    /// keys work again.
+    pub(crate) fn escape_filter(
+        &mut self,
+        input: Entity<gpui_kit::component::input::InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if input.read(cx).value().is_empty() {
+            self.focus_handle.focus(window, cx);
+        } else {
+            input.update(cx, |input, cx| input.clean(window, cx));
+        }
+        cx.notify();
+    }
+
     pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
         self.save_state();
@@ -1455,6 +1466,12 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &TabStashes, _, cx| this.set_tab(Tab::Stashes, cx)))
             .on_action(cx.listener(|this, _: &TabFiles, _, cx| this.set_tab(Tab::Files, cx)))
             .on_action(cx.listener(|this, _: &TabPatches, _, cx| this.set_tab(Tab::Patches, cx)))
+            .on_action(cx.listener(|this, _: &FocusProjectSearch, window, cx| {
+                this.focus_project_search(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &FocusFileSearch, window, cx| {
+                this.focus_file_search(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
                 this.start_remote(crate::remote_ops::RemoteOp::fetch_all(), window, cx)
@@ -1955,6 +1972,138 @@ mod tests {
         );
         h.keys(cx, "escape");
         assert_eq!(repo.read("a.txt"), "A\n");
+    }
+
+    fn input_text(
+        h: &Harness,
+        cx: &mut TestAppContext,
+        pick: fn(&Osier) -> &Entity<gpui_kit::component::input::InputState>,
+    ) -> String {
+        h.read(cx, |o, cx| pick(o).read(cx).value().to_string())
+    }
+
+    fn focused_is(
+        h: &Harness,
+        cx: &mut TestAppContext,
+        pick: fn(&Osier, &gpui::App) -> gpui::FocusHandle,
+    ) -> bool {
+        let view = h.view.clone();
+        cx.update_window(h.window, |_, window, cx| {
+            let handle = pick(view.read(cx), cx);
+            handle.is_focused(window)
+        })
+        .expect("window")
+    }
+
+    #[gpui::test]
+    fn ui_slash_searches_projects_and_escape_clears(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.keys(cx, "/");
+        h.type_text(cx, "lan");
+        assert_eq!(
+            input_text(&h, cx, |o| &o.sidebar_filter),
+            "lan",
+            "no stray slash"
+        );
+        h.keys(cx, "escape");
+        assert_eq!(
+            input_text(&h, cx, |o| &o.sidebar_filter),
+            "",
+            "escape clears"
+        );
+        assert!(focused_is(&h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        }));
+        h.keys(cx, "escape");
+        assert!(
+            focused_is(&h, cx, |o, _| o.focus_handle.clone()),
+            "second escape leaves the box"
+        );
+        // The shortcut works again afterwards.
+        h.keys(cx, "/");
+        h.type_text(cx, "x");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "x");
+    }
+
+    #[gpui::test]
+    fn ui_question_mark_searches_files(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        for keys in ["?", "shift-/"] {
+            let h = Harness::open(cx, &repo);
+            h.keys(cx, keys);
+            h.read(cx, |o, _| assert_eq!(o.tab, super::Tab::Files, "{keys}"));
+            h.type_text(cx, "a.t");
+            assert_eq!(input_text(&h, cx, |o| &o.files_filter), "a.t", "{keys}");
+            h.keys(cx, "escape");
+            assert_eq!(input_text(&h, cx, |o| &o.files_filter), "");
+        }
+    }
+
+    #[gpui::test]
+    fn ui_plain_keys_type_into_text_fields(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        repo.write("a.txt", "A\n");
+        repo.write("b.txt", "B\n");
+        let h = Harness::open(cx, &repo);
+        let selection = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        h.click(cx, "commit-message");
+        h.keys(cx, "j k space / ?");
+        let text = h.read(cx, |o, cx| o.commit_message_text(cx));
+        assert_eq!(text, "jk /?", "every key typed as text");
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.active_project().unwrap().selection,
+                selection,
+                "j/k did not move"
+            );
+            assert_eq!(o.tab, super::Tab::Changes, "? did not switch tabs");
+        });
+        assert_eq!(
+            repo.git(["diff", "--cached", "--name-only"]).trim(),
+            "",
+            "space did not stage"
+        );
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "");
+    }
+
+    #[gpui::test]
+    fn ui_slash_in_settings_searches_settings(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.keys(cx, "ctrl-,");
+        assert!(h.has_settings(cx));
+        h.keys(cx, "/");
+        let (inside, on_container) = {
+            let view = h.view.clone();
+            cx.update_window(h.window, |_, window, cx| {
+                let f = view.read(cx).settings_focus.clone();
+                (f.contains_focused(window, cx), f.is_focused(window))
+            })
+            .expect("window")
+        };
+        assert!(
+            inside && !on_container,
+            "focus moved into the settings search box"
+        );
+        assert!(!focused_is(&h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        }));
+        h.type_text(cx, "diff");
+        assert!(
+            h.has_settings(cx),
+            "typing in the search box keeps settings open"
+        );
+        assert_eq!(
+            input_text(&h, cx, |o| &o.sidebar_filter),
+            "",
+            "nothing reached the sidebar"
+        );
     }
 
     #[gpui::test]

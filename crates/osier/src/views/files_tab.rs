@@ -180,12 +180,22 @@ impl Osier {
                             }),
                     )
                     .child(
-                        div().w(px(180.)).flex_none().test_id("files-filter").child(
-                            Input::new(&self.files_filter)
-                                .xsmall()
-                                .cleanable(true)
-                                .prefix(Icon::new(Lucide::Search).xsmall()),
-                        ),
+                        div()
+                            .w(px(180.))
+                            .flex_none()
+                            .test_id("files-filter")
+                            .on_action(cx.listener(
+                                |this, _: &gpui_kit::component::input::Escape, window, cx| {
+                                    let input = this.files_filter.clone();
+                                    this.escape_filter(input, window, cx)
+                                },
+                            ))
+                            .child(
+                                Input::new(&self.files_filter)
+                                    .xsmall()
+                                    .cleanable(true)
+                                    .prefix(Icon::new(Lucide::Search).xsmall()),
+                            ),
                     )
                     .child(
                         Button::new("show-ignored")
