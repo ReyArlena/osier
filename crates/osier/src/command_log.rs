@@ -1,7 +1,7 @@
 //! Git command log: every command the app runs, shown in a bottom panel.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use osier_git::{CommandRecord, CommandSink};
 
@@ -41,5 +41,46 @@ impl CommandSink for UiCommandSink {
             r.push(record.clone());
         }
         self.version.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Passes on only commands that failed unexpectedly. Background checks (status of projects
+/// that are not open) run every few minutes across many repositories; logging every success
+/// would bury the user's own commands, but a failure is worth seeing.
+#[derive(Debug)]
+pub struct FailuresOnly(pub Arc<UiCommandSink>);
+
+impl CommandSink for FailuresOnly {
+    fn record(&self, record: &CommandRecord) {
+        if !record.expected {
+            self.0.record(record);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use osier_git::GitRunner;
+
+    use super::{FailuresOnly, UiCommandSink};
+
+    #[test]
+    fn only_unexpected_failures_reach_the_log() {
+        let ui = Arc::new(UiCommandSink::default());
+        let runner = GitRunner::new(Arc::new(FailuresOnly(ui.clone())));
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _ = runner.run(None, ["--version"]);
+        // Exit 128 allowed by the caller: expected, so not logged.
+        let _ = runner.run_allowing(Some(dir.path()), ["rev-parse", "HEAD"], &[0, 128]);
+        assert!(
+            ui.records().is_empty(),
+            "successes and expected exits stay out"
+        );
+        let _ = runner.run(Some(dir.path()), ["status"]);
+        let records = ui.records();
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].expected);
     }
 }

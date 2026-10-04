@@ -211,8 +211,11 @@ impl Osier {
             tracing::warn!(%error, "could not list patches");
             Vec::new()
         });
-        let recent_status =
-            crate::recent_status::RecentStatus::new(settings.projects.recent_status, &paths);
+        let recent_status = crate::recent_status::RecentStatus::new(
+            settings.projects.recent_status,
+            &paths,
+            sink.clone(),
+        );
         let minutes = settings.projects.recent_status_minutes.clamp(1, 60) as f32;
         let recent_interval = cx.new(|_| {
             gpui_kit::component::slider::SliderState::new()
@@ -1799,6 +1802,38 @@ mod tests {
                 Some(true),
                 "refs-only scan keeps the last marker"
             );
+        });
+    }
+
+    #[gpui::test]
+    fn failed_background_checks_reach_the_command_log(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let repo = repo_with_upstream(0, false);
+        let healthy = repo_with_upstream(1, false);
+        // A repository whose .git points nowhere: git fails on it.
+        let broken = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            broken.path().join(".git"),
+            "gitdir: /nonexistent/osier-test\n",
+        )
+        .expect("write .git");
+        let h = Harness::open(cx, &repo);
+        let before = h.read(cx, |o, _| o.sink.records().len());
+        h.act(cx, |osier, _, _| {
+            osier.state.recent.push(healthy.path().to_path_buf());
+            osier.state.recent.push(broken.path().to_path_buf());
+        });
+        set_recent_mode(&h, cx, RecentStatusMode::Check);
+        drain_recent(&h, cx);
+        h.read(cx, |o, _| {
+            let new: Vec<_> = o.sink.records().into_iter().skip(before).collect();
+            assert!(!new.is_empty(), "the broken check is logged");
+            assert!(new.iter().all(|r| !r.expected), "only failures are logged");
+            assert!(
+                new.iter().all(|r| r.cwd.as_deref() == Some(broken.path())),
+                "the healthy repository's checks stay out of the log"
+            );
+            assert!(o.recent_badge(healthy.path()).is_some());
         });
     }
 

@@ -9,8 +9,8 @@
 //! - `check`: plus a full `git status` of every repository every N minutes and when the window
 //!   regains focus.
 //!
-//! Background git runs one process at a time on a background thread, through a runner with no
-//! command-log sink (it would flood the log) and a timeout. The UI thread only moves results
+//! Background git runs one process at a time on a background thread, with a timeout. Only
+//! failed checks reach the command log (`FailuresOnly`): successes would flood it. The UI thread only moves results
 //! into a map. Our own commands do not write to `.git` (`GIT_OPTIONAL_LOCKS=0`), so they never
 //! retrigger the watcher.
 
@@ -108,7 +108,12 @@ pub(crate) fn repo_for_event(roots: &[(PathBuf, PathBuf)], path: &Path) -> Optio
 }
 
 impl RecentStatus {
-    pub fn new(mode: RecentStatusMode, paths: &osier_config::Paths) -> Self {
+    /// `log` receives only failed checks (see `FailuresOnly`).
+    pub fn new(
+        mode: RecentStatusMode,
+        paths: &osier_config::Paths,
+        log: Arc<crate::command_log::UiCommandSink>,
+    ) -> Self {
         let cache = if mode == RecentStatusMode::Never {
             StatusCache::default()
         } else {
@@ -125,7 +130,7 @@ impl RecentStatus {
             queue: VecDeque::new(),
             busy: false,
             last_sweep: None,
-            runner: GitRunner::new(Arc::new(osier_git::NoopSink))
+            runner: GitRunner::new(Arc::new(crate::command_log::FailuresOnly(log)))
                 .with_timeout(Duration::from_secs(20)),
         }
     }
