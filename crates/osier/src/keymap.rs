@@ -270,14 +270,190 @@ pub(crate) fn bindings<'a>(
     out
 }
 
-/// Default bindings for every action.
-pub(crate) fn default_bindings(cx: &App) -> Vec<KeyBinding> {
+/// gpui-kit's own bindings (inputs, menus, dialogs), saved before ours are added so a keymap
+/// reload can clear everything and restore them.
+struct KitBindings(Vec<KeyBinding>);
+impl Global for KitBindings {}
+
+/// The keys each action has right now (defaults plus `keymap.toml`), and problems found.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Keymap {
+    pub keys: std::collections::BTreeMap<&'static str, Vec<String>>,
+    pub problems: Vec<String>,
+}
+impl Global for Keymap {}
+
+impl Keymap {
+    pub fn global(cx: &App) -> &Self {
+        cx.global::<Self>()
+    }
+
+    /// Keys for an action id, empty when unbound or unknown.
+    pub fn keys_for(&self, id: &str) -> &[String] {
+        self.keys.get(id).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
+/// First-time setup: remember gpui-kit's bindings, then apply the defaults.
+pub(crate) fn init(cx: &mut App) {
+    if !cx.has_global::<KitBindings>() {
+        let kit: Vec<KeyBinding> = cx.key_bindings().borrow().bindings().cloned().collect();
+        cx.set_global(KitBindings(kit));
+    }
+    apply(&osier_config::keymap::KeymapFile::default(), cx);
+}
+
+/// Apply defaults with `overrides` on top. Unknown action ids and invalid keys are reported in
+/// `Keymap::problems` and skipped; everything valid still applies.
+pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) {
     let specs = actions();
-    let pairs: Vec<(&ActionSpec, &str)> = specs
+    let mut keymap = Keymap::default();
+    for id in overrides.bindings.keys() {
+        if !specs.iter().any(|s| s.id == id) {
+            keymap.problems.push(format!("unknown action \"{id}\""));
+        }
+    }
+    for spec in &specs {
+        let keys: Vec<String> = match overrides.bindings.get(spec.id) {
+            Some(k) => k
+                .iter()
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect(),
+            None => spec.defaults.iter().map(|k| k.to_string()).collect(),
+        };
+        let mut valid = Vec::new();
+        for k in keys {
+            if !plausible(&k) || bindings([(spec, k.as_str())], cx).is_empty() {
+                keymap
+                    .problems
+                    .push(format!("invalid key \"{k}\" for {}", spec.id));
+            } else {
+                valid.push(k);
+            }
+        }
+        keymap.keys.insert(spec.id, valid);
+    }
+    let ours: Vec<KeyBinding> = {
+        let pairs: Vec<(&ActionSpec, &str)> = specs
+            .iter()
+            .flat_map(|s| keymap.keys_for(s.id).iter().map(move |k| (s, k.as_str())))
+            .collect();
+        bindings(pairs, cx)
+    };
+    let kit = cx
+        .try_global::<KitBindings>()
+        .map(|k| k.0.clone())
+        .unwrap_or_default();
+    cx.clear_key_bindings();
+    cx.bind_keys(kit);
+    cx.bind_keys(ours);
+    cx.set_global(keymap);
+}
+
+/// gpui accepts any key name, so a typo such as `ctrl-shft-p` would load and never fire.
+/// Every stroke must be modifiers followed by one character or a known key name.
+pub(crate) fn plausible(keys: &str) -> bool {
+    const NAMED: &[&str] = &[
+        "escape",
+        "enter",
+        "tab",
+        "space",
+        "backspace",
+        "delete",
+        "insert",
+        "home",
+        "end",
+        "pageup",
+        "pagedown",
+        "up",
+        "down",
+        "left",
+        "right",
+    ];
+    let strokes: Vec<&str> = keys.split_whitespace().collect();
+    !strokes.is_empty()
+        && strokes.iter().all(|stroke| {
+            let mut rest = *stroke;
+            for m in [
+                "ctrl-",
+                "alt-",
+                "shift-",
+                "super-",
+                "cmd-",
+                "platform-",
+                "fn-",
+            ] {
+                while rest.len() > m.len() && rest.to_ascii_lowercase().starts_with(m) {
+                    rest = &rest[m.len()..];
+                }
+            }
+            let key = rest.to_ascii_lowercase();
+            rest.chars().count() == 1
+                || NAMED.contains(&key.as_str())
+                || (key.len() > 1
+                    && key.len() <= 3
+                    && key.starts_with('f')
+                    && key[1..].chars().all(|c| c.is_ascii_digit()))
+        })
+}
+
+/// `ctrl-shift-p` as `Ctrl+Shift+P`, `escape` as `Esc`, sequences joined by spaces. The form
+/// shown in the palette, the Keymap page and the DMS cheatsheet.
+pub(crate) fn pretty(keys: &str) -> String {
+    keys.split_whitespace()
+        .map(pretty_stroke)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn pretty_stroke(stroke: &str) -> String {
+    let mut rest = stroke;
+    let mut parts: Vec<String> = Vec::new();
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let found = [
+            ("ctrl-", "Ctrl"),
+            ("alt-", "Alt"),
+            ("shift-", "Shift"),
+            ("super-", "Super"),
+            ("cmd-", "Super"),
+            ("platform-", "Super"),
+            ("fn-", "Fn"),
+        ]
         .iter()
-        .flat_map(|s| s.defaults.iter().map(move |k| (s, *k)))
-        .collect();
-    bindings(pairs, cx)
+        .find(|(p, _)| lower.starts_with(p) && rest.len() > p.len());
+        match found {
+            Some((p, name)) => {
+                parts.push(name.to_string());
+                rest = &rest[p.len()..];
+            }
+            None => break,
+        }
+    }
+    let key = match rest.to_ascii_lowercase().as_str() {
+        "escape" => "Esc".to_string(),
+        "delete" => "Del".to_string(),
+        "backspace" => "Backspace".to_string(),
+        "enter" => "Enter".to_string(),
+        "space" => "Space".to_string(),
+        "tab" => "Tab".to_string(),
+        "up" => "Up".to_string(),
+        "down" => "Down".to_string(),
+        "left" => "Left".to_string(),
+        "right" => "Right".to_string(),
+        "pageup" => "PgUp".to_string(),
+        "pagedown" => "PgDn".to_string(),
+        "home" => "Home".to_string(),
+        "end" => "End".to_string(),
+        k if k.len() > 1 && k.starts_with('f') && k[1..].chars().all(|c| c.is_ascii_digit()) => {
+            k.to_uppercase()
+        }
+        _ if rest.chars().count() == 1 => rest.to_uppercase(),
+        _ => rest.to_string(),
+    };
+    parts.push(key);
+    parts.join("+")
 }
 
 #[cfg(test)]
@@ -297,6 +473,42 @@ mod tests {
         assert_eq!(context_for(Scope::App, "/"), Some("Osier && !Input"));
         assert_eq!(context_for(Scope::App, "ctrl-r"), None);
         assert_eq!(context_for(Scope::List, "j"), Some("OsierList && !Input"));
+    }
+
+    #[test]
+    fn plausible_keys() {
+        use super::plausible;
+        for ok in [
+            "ctrl-shift-p",
+            "/",
+            "shift-/",
+            "?",
+            "f5",
+            "f12",
+            "ctrl-`",
+            "ctrl--",
+            "space",
+            "ctrl-k ctrl-s",
+            "alt-enter",
+        ] {
+            assert!(plausible(ok), "{ok}");
+        }
+        for bad in ["ctrl-??", "ctrl-shft-p", "", "ctrl-", "f99x", "escpe"] {
+            assert!(!plausible(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn pretty_keys() {
+        use super::pretty;
+        assert_eq!(pretty("ctrl-shift-p"), "Ctrl+Shift+P");
+        assert_eq!(pretty("escape"), "Esc");
+        assert_eq!(pretty("shift-/"), "Shift+/");
+        assert_eq!(pretty("ctrl-`"), "Ctrl+`");
+        assert_eq!(pretty("ctrl--"), "Ctrl+-");
+        assert_eq!(pretty("f5"), "F5");
+        assert_eq!(pretty("j"), "J");
+        assert_eq!(pretty("ctrl-k ctrl-s"), "Ctrl+K Ctrl+S");
     }
 
     #[test]

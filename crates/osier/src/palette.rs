@@ -22,7 +22,8 @@ pub(crate) struct PaletteCommand {
     pub group: &'static str,
     pub label: &'static str,
     pub icon: Lucide,
-    pub keys: Option<&'static str>,
+    /// Registry action id (`keymap.rs`) whose current keys are shown as the hint.
+    pub action: Option<&'static str>,
     /// Hidden when no repository is open.
     pub needs_project: bool,
     pub run: Run,
@@ -32,7 +33,7 @@ fn cmd(
     group: &'static str,
     label: &'static str,
     icon: Lucide,
-    keys: Option<&'static str>,
+    action: Option<&'static str>,
     needs_project: bool,
     run: impl Fn(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
 ) -> PaletteCommand {
@@ -40,7 +41,7 @@ fn cmd(
         group,
         label,
         icon,
-        keys,
+        action,
         needs_project,
         run: Rc::new(run),
     }
@@ -54,7 +55,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Open repository…",
             Lucide::FolderOpen,
-            Some("ctrl-o"),
+            Some("open_repository"),
             false,
             |o, w, cx| o.prompt_open_repository(w, cx),
         ),
@@ -62,7 +63,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Close project",
             Lucide::X,
-            Some("ctrl-w"),
+            Some("close_project"),
             true,
             |o, w, cx| {
                 if let Some(ix) = o.active {
@@ -74,7 +75,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Refresh",
             Lucide::RefreshCw,
-            Some("ctrl-r"),
+            Some("refresh"),
             true,
             |o, _, cx| o.refresh_active(cx),
         ),
@@ -82,7 +83,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Settings…",
             Lucide::Settings,
-            Some("ctrl-,"),
+            Some("open_settings"),
             false,
             |o, w, cx| o.open_settings(w, cx),
         ),
@@ -90,7 +91,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Toggle sidebar",
             Lucide::PanelLeft,
-            Some("ctrl-b"),
+            Some("toggle_sidebar"),
             false,
             |o, _, cx| o.toggle_sidebar(cx),
         ),
@@ -98,7 +99,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Toggle git command log",
             Lucide::SquareTerminal,
-            Some("ctrl-`"),
+            Some("toggle_command_log"),
             false,
             |o, _, cx| o.toggle_command_log(cx),
         ),
@@ -106,7 +107,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Toggle dark / light",
             Lucide::SunMoon,
-            Some("ctrl-shift-t"),
+            Some("toggle_theme"),
             false,
             |o, _, cx| o.toggle_theme(cx),
         ),
@@ -138,7 +139,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Quit",
             Lucide::LogOut,
-            Some("ctrl-q"),
+            Some("quit"),
             false,
             |_, _, cx| cx.quit(),
         ),
@@ -146,7 +147,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Changes tab",
             Lucide::FileDiff,
-            Some("ctrl-1"),
+            Some("tab_changes"),
             true,
             |o, _, cx| o.set_tab(Tab::Changes, cx),
         ),
@@ -154,7 +155,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Log tab",
             Lucide::GitCommitHorizontal,
-            Some("ctrl-2"),
+            Some("tab_log"),
             true,
             |o, _, cx| o.set_tab(Tab::Log, cx),
         ),
@@ -162,7 +163,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Branches tab",
             Lucide::GitBranch,
-            Some("ctrl-3"),
+            Some("tab_branches"),
             true,
             |o, _, cx| o.set_tab(Tab::Branches, cx),
         ),
@@ -170,7 +171,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Stashes tab",
             Lucide::Archive,
-            Some("ctrl-4"),
+            Some("tab_stashes"),
             true,
             |o, _, cx| o.set_tab(Tab::Stashes, cx),
         ),
@@ -178,7 +179,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Files tab",
             Lucide::Folder,
-            Some("ctrl-5"),
+            Some("tab_files"),
             true,
             |o, _, cx| o.set_tab(Tab::Files, cx),
         ),
@@ -186,7 +187,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Tabs",
             "Patches tab",
             Lucide::Package,
-            Some("ctrl-6"),
+            Some("tab_patches"),
             true,
             |o, _, cx| o.set_tab(Tab::Patches, cx),
         ),
@@ -194,7 +195,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Commit staged",
             Lucide::GitCommitHorizontal,
-            Some("ctrl-enter"),
+            Some("commit"),
             true,
             |o, w, cx| o.commit(w, cx),
         ),
@@ -242,7 +243,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Fetch all remotes",
             Lucide::CloudDownload,
-            Some("ctrl-shift-f"),
+            Some("fetch"),
             true,
             |o, w, cx| o.start_remote(RemoteOp::fetch_all(), w, cx),
         ),
@@ -250,7 +251,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Pull",
             Lucide::ArrowDown,
-            Some("ctrl-shift-l"),
+            Some("pull"),
             true,
             |o, w, cx| o.start_remote(RemoteOp::pull_default(), w, cx),
         ),
@@ -258,7 +259,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Push",
             Lucide::ArrowUp,
-            Some("ctrl-shift-p"),
+            Some("push"),
             true,
             |o, w, cx| o.start_remote(RemoteOp::push_default(), w, cx),
         ),
@@ -402,8 +403,13 @@ impl Osier {
                                 }
                             });
                         });
+                    let keymap = crate::keymap::Keymap::global(cx);
                     for c in commands.iter() {
-                        let (label, icon, keys, group) = (c.label, c.icon, c.keys, c.group);
+                        let keys: Option<String> = c
+                            .action
+                            .and_then(|id| keymap.keys_for(id).first().cloned())
+                            .map(|k| crate::keymap::pretty(&k));
+                        let (label, icon, group) = (c.label, c.icon, c.group);
                         let mono = mono.clone();
                         command = command.item(
                             CommandItem::new()
@@ -418,7 +424,7 @@ impl Osier {
                                         .child(Icon::new(icon).xsmall())
                                         .child(div().flex_1().min_w_0().truncate().child(label))
                                         .child(div().text_xs().text_color(muted).child(group))
-                                        .when_some(keys, |this, k| {
+                                        .when_some(keys.clone(), |this, k| {
                                             this.child(
                                                 div()
                                                     .text_xs()
@@ -450,7 +456,13 @@ mod tests {
         for c in &all {
             assert!(!c.group.is_empty() && !c.label.is_empty());
         }
-        let keyed = all.iter().filter(|c| c.keys.is_some()).count();
+        let keyed = all.iter().filter(|c| c.action.is_some()).count();
+        let ids: Vec<&str> = crate::keymap::actions().iter().map(|a| a.id).collect();
+        for c in &all {
+            if let Some(id) = c.action {
+                assert!(ids.contains(&id), "palette points at unknown action {id}");
+            }
+        }
         assert!(keyed >= 15, "{keyed} commands carry a shortcut hint");
     }
 }

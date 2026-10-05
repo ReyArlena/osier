@@ -50,6 +50,10 @@ impl Paths {
         &self.cache_dir
     }
 
+    pub fn keymap_file(&self) -> PathBuf {
+        self.config_dir.join("keymap.toml")
+    }
+
     pub fn settings_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }

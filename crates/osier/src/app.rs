@@ -51,7 +51,7 @@ gpui_kit::actions!(
 );
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys(crate::keymap::default_bindings(cx));
+    crate::keymap::init(cx);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,6 +156,7 @@ pub struct Osier {
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
+    keymap_watch: Option<crate::config_watch::ConfigWatch>,
     /// Badges for projects that are not open (`recent_status.rs`).
     pub(crate) recent_status: crate::recent_status::RecentStatus,
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
@@ -199,6 +200,11 @@ impl Osier {
                 .step(1.)
                 .default_value(minutes)
         });
+        let keymap_watch = if cfg!(test) {
+            None
+        } else {
+            crate::config_watch::ConfigWatch::new(&paths.keymap_file())
+        };
         let config_watch = if cfg!(test) {
             None
         } else {
@@ -313,6 +319,7 @@ impl Osier {
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
             config_watch,
+            keymap_watch,
             recent_status,
             recent_interval,
             compact: window.bounds().size.width < px(1500.),
@@ -426,6 +433,7 @@ impl Osier {
         }
         this.update_title(window);
         this.start_watcher_loop(window, cx);
+        this.load_keymap(cx);
         // Without a focused element the app's key bindings have no dispatch path, so
         // shortcuts would only work after the first click into a list.
         let root_focus = this.focus_handle.clone();
@@ -984,6 +992,9 @@ impl Osier {
                         cx.notify();
                     }
                     this.pump_recent_status(cx);
+                    if this.keymap_watch.as_ref().is_some_and(|w| w.take_dirty()) {
+                        this.reload_keymap(window, cx);
+                    }
                     // The command log panel shows new records as they land.
                     let version = this.sink.version();
                     if this.command_log_visible && version != this.log_version_seen {
@@ -1274,6 +1285,38 @@ impl Osier {
 
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
+        cx.notify();
+    }
+
+    /// Apply `keymap.toml` (startup, or after it changed). Problems are logged and returned.
+    pub(crate) fn load_keymap(&mut self, cx: &mut App) -> Vec<String> {
+        let file = match osier_config::keymap::KeymapFile::load(&self.paths) {
+            Ok(f) => f,
+            Err(error) => {
+                tracing::warn!(%error, "keymap.toml is invalid, keeping the current keys");
+                return vec![format!("keymap.toml: {error}")];
+            }
+        };
+        crate::keymap::apply(&file, cx);
+        let problems = crate::keymap::Keymap::global(cx).problems.clone();
+        for p in &problems {
+            tracing::warn!(problem = %p, "keymap.toml");
+        }
+        problems
+    }
+
+    pub(crate) fn reload_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::WindowExt as _;
+        use gpui_kit::component::notification::Notification;
+        let problems = self.load_keymap(cx);
+        if problems.is_empty() {
+            window.push_notification("Key bindings reloaded from keymap.toml", cx);
+        } else {
+            window.push_notification(
+                Notification::warning("keymap.toml has problems").message(problems.join("\n")),
+                cx,
+            );
+        }
         cx.notify();
     }
 
@@ -2104,6 +2147,57 @@ mod tests {
             "",
             "nothing reached the sidebar"
         );
+    }
+
+    #[gpui::test]
+    fn keymap_overrides_apply_live_and_keep_input_keys(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let file = h.read(cx, |o, _| o.paths.keymap_file());
+        std::fs::create_dir_all(file.parent().expect("dir")).expect("mkdir");
+        std::fs::write(
+            &file,
+            "[bindings]\nfocus_project_search = [\"ctrl-f\"]\ntab_log = []\nrefresh = [\"ctrl-??\"]\nnope = [\"x\"]\n",
+        )
+        .expect("write keymap");
+        let mut reported = Vec::new();
+        h.act(cx, |osier, _, cx| reported = osier.load_keymap(cx));
+        assert!(
+            reported
+                .iter()
+                .any(|p| p.contains("unknown action \"nope\"")),
+            "{reported:?}"
+        );
+        assert!(
+            reported.iter().any(|p| p.contains("ctrl-??")),
+            "{reported:?}"
+        );
+        h.read(cx, |_, cx| {
+            let k = crate::keymap::Keymap::global(cx);
+            assert_eq!(k.keys_for("focus_project_search"), ["ctrl-f"]);
+            assert!(k.keys_for("tab_log").is_empty(), "unbound");
+            assert!(k.keys_for("refresh").is_empty(), "invalid key dropped");
+            assert_eq!(k.keys_for("tab_files"), ["ctrl-5"], "defaults untouched");
+        });
+        // The old default no longer fires; the new key does.
+        h.keys(cx, "/");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "");
+        assert!(!focused_is(&h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        }));
+        h.keys(cx, "ctrl-f");
+        h.type_text(cx, "abc");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "abc");
+        // gpui-kit's own bindings survived the reload: backspace edits, escape clears.
+        h.keys(cx, "backspace");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "ab");
+        h.keys(cx, "escape");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "");
+        h.keys(cx, "ctrl-2");
+        h.read(cx, |o, _| {
+            assert_eq!(o.tab, super::Tab::Changes, "unbound action stays unbound")
+        });
     }
 
     #[gpui::test]
