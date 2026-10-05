@@ -66,7 +66,23 @@ osier --version --verbose
 Open repositories from the sidebar (`ctrl-o`), or let Osier scan directories for them
 (Settings > Projects). Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
 `ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-shift-a` or
-`F1` opens the command palette, `ctrl-,` opens settings.
+`F1` opens the command palette, `ctrl-,` opens settings, `/` searches projects, `?` searches
+files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
+text field.
+
+Every shortcut can be changed in Settings > Keymap or in `~/.config/osier/keymap.toml`, which
+holds only your changes and is reloaded when it changes:
+
+```toml
+[bindings]
+refresh = ["f5"]                      # replaces ctrl-r and f5
+focus_project_search = ["/", "ctrl-f"]
+open_settings = []                    # unbound
+```
+
+If you use Dux Shell (DankMaterialShell), Osier writes its shortcuts to
+`~/.config/dms/cheatsheets/osier.json`, so `dms keybinds show osier` and the DMS keybinds
+overlay list them.
 
 ![Settings sheet](docs/screenshots/settings.png)
 

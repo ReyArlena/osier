@@ -161,6 +161,8 @@ pub struct Osier {
     pub(crate) keymap_applied: osier_config::keymap::KeymapFile,
     /// The action whose new key is being recorded, and the interceptor doing it.
     pub(crate) keymap_recording: Option<(&'static str, Subscription)>,
+    /// Where the DMS cheatsheet goes (`dms_cheatsheet.rs`). `None` in tests unless set.
+    pub(crate) dms_dir: Option<PathBuf>,
     /// Badges for projects that are not open (`recent_status.rs`).
     pub(crate) recent_status: crate::recent_status::RecentStatus,
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
@@ -326,6 +328,11 @@ impl Osier {
             keymap_watch,
             keymap_applied: Default::default(),
             keymap_recording: None,
+            dms_dir: if cfg!(test) {
+                None
+            } else {
+                crate::dms_cheatsheet::dms_dir()
+            },
             recent_status,
             recent_interval,
             compact: window.bounds().size.width < px(1500.),
@@ -1313,6 +1320,13 @@ impl Osier {
     ) -> Vec<String> {
         crate::keymap::apply(&file, cx);
         self.keymap_applied = file;
+        if let Some(dms) = &self.dms_dir {
+            match crate::dms_cheatsheet::write(dms, crate::keymap::Keymap::global(cx)) {
+                Ok(true) => tracing::debug!(dir = %dms.display(), "wrote the DMS cheatsheet"),
+                Ok(false) => {}
+                Err(error) => tracing::warn!(%error, "could not write the DMS cheatsheet"),
+            }
+        }
         let problems = crate::keymap::Keymap::global(cx).problems.clone();
         for p in &problems {
             tracing::warn!(problem = %p, "keymap.toml");
@@ -2411,6 +2425,34 @@ mod tests {
                 ["/", "?"]
             );
             assert!(o.keymap_recording.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn keymap_changes_update_the_dms_cheatsheet(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dms = dir.path().join("dms");
+        std::fs::create_dir(&dms).expect("dms dir");
+        h.act(cx, |o, window, cx| {
+            o.dms_dir = Some(dms.clone());
+            o.set_action_keys("quit", vec!["ctrl-shift-q".into()], window, cx);
+        });
+        let sheet = std::fs::read_to_string(dms.join("cheatsheets/osier.json")).expect("written");
+        assert!(sheet.contains("\"Ctrl+Shift+Q\""), "{sheet}");
+        // An outside edit of keymap.toml is picked up and reaches DMS too.
+        let file = h.read(cx, |o, _| o.paths.keymap_file());
+        std::fs::write(&file, "[bindings]\nquit = [\"ctrl-alt-q\"]\n").expect("edit");
+        h.act(cx, |o, window, cx| o.reload_keymap(window, cx));
+        let sheet = std::fs::read_to_string(dms.join("cheatsheets/osier.json")).expect("written");
+        assert!(sheet.contains("\"Ctrl+Alt+Q\""), "{sheet}");
+        h.read(cx, |_, cx| {
+            assert_eq!(
+                crate::keymap::Keymap::global(cx).keys_for("quit"),
+                ["ctrl-alt-q"]
+            )
         });
     }
 

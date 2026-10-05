@@ -10,6 +10,7 @@ mod changes_ops;
 mod cli;
 mod command_log;
 mod config_watch;
+mod dms_cheatsheet;
 mod edit_pane;
 mod external;
 mod fade;
