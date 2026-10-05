@@ -157,6 +157,10 @@ pub struct Osier {
     pub(crate) settings_focus: FocusHandle,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
     keymap_watch: Option<crate::config_watch::ConfigWatch>,
+    /// The `keymap.toml` contents last applied, to tell our own writes from outside edits.
+    pub(crate) keymap_applied: osier_config::keymap::KeymapFile,
+    /// The action whose new key is being recorded, and the interceptor doing it.
+    pub(crate) keymap_recording: Option<(&'static str, Subscription)>,
     /// Badges for projects that are not open (`recent_status.rs`).
     pub(crate) recent_status: crate::recent_status::RecentStatus,
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
@@ -320,6 +324,8 @@ impl Osier {
             settings_focus: cx.focus_handle().tab_stop(true),
             config_watch,
             keymap_watch,
+            keymap_applied: Default::default(),
+            keymap_recording: None,
             recent_status,
             recent_interval,
             compact: window.bounds().size.width < px(1500.),
@@ -1297,7 +1303,16 @@ impl Osier {
                 return vec![format!("keymap.toml: {error}")];
             }
         };
+        self.apply_keymap_file(file, cx)
+    }
+
+    fn apply_keymap_file(
+        &mut self,
+        file: osier_config::keymap::KeymapFile,
+        cx: &mut App,
+    ) -> Vec<String> {
         crate::keymap::apply(&file, cx);
+        self.keymap_applied = file;
         let problems = crate::keymap::Keymap::global(cx).problems.clone();
         for p in &problems {
             tracing::warn!(problem = %p, "keymap.toml");
@@ -1305,9 +1320,17 @@ impl Osier {
         problems
     }
 
+    /// `keymap.toml` changed on disk. Our own saves land here too; they change nothing.
     pub(crate) fn reload_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use gpui_kit::component::WindowExt as _;
         use gpui_kit::component::notification::Notification;
+        if osier_config::keymap::KeymapFile::load(&self.paths)
+            .ok()
+            .as_ref()
+            == Some(&self.keymap_applied)
+        {
+            return;
+        }
         let problems = self.load_keymap(cx);
         if problems.is_empty() {
             window.push_notification("Key bindings reloaded from keymap.toml", cx);
@@ -1318,6 +1341,128 @@ impl Osier {
             );
         }
         cx.notify();
+    }
+
+    /// Set an action's keys (Settings > Keymap). Matching the defaults removes the override.
+    /// A `keymap.toml` that does not parse is never overwritten.
+    pub(crate) fn set_action_keys(
+        &mut self,
+        id: &'static str,
+        keys: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui_kit::component::WindowExt as _;
+        use gpui_kit::component::notification::Notification;
+        let mut file = match osier_config::keymap::KeymapFile::load(&self.paths) {
+            Ok(f) => f,
+            Err(error) => {
+                window.push_notification(
+                    Notification::error("keymap.toml has an error; fix it first")
+                        .message(error.to_string()),
+                    cx,
+                );
+                return;
+            }
+        };
+        let defaults: Vec<String> = crate::keymap::actions()
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.defaults.iter().map(|k| k.to_string()).collect())
+            .unwrap_or_default();
+        if keys == defaults {
+            file.bindings.remove(id);
+        } else {
+            file.bindings.insert(id.to_string(), keys);
+        }
+        if let Err(error) = file.save(&self.paths) {
+            window.push_notification(
+                Notification::error("Could not save keymap.toml").message(error.to_string()),
+                cx,
+            );
+            return;
+        }
+        self.apply_keymap_file(file, cx);
+        cx.notify();
+    }
+
+    /// Open `keymap.toml` in the editor, creating it with an explanatory header if missing.
+    pub(crate) fn edit_keymap_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let path = self.paths.keymap_file();
+        if !path.exists() {
+            let header = "# Osier key bindings: only your changes to the defaults.\n\
+                # Example:\n# [bindings]\n# refresh = [\"f5\"]\n# open_settings = []   # unbound\n\n[bindings]\n";
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(error) = std::fs::write(&path, header) {
+                tracing::warn!(%error, "could not create keymap.toml");
+            }
+        }
+        self.open_externally(&path, window, cx);
+    }
+
+    /// Reset every binding to the defaults (removes `keymap.toml`).
+    pub(crate) fn reset_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::WindowExt as _;
+        let file = osier_config::keymap::KeymapFile::default();
+        if let Err(error) = file.save(&self.paths) {
+            window.push_notification(
+                gpui_kit::component::notification::Notification::error("Could not reset keymap")
+                    .message(error.to_string()),
+                cx,
+            );
+            return;
+        }
+        self.apply_keymap_file(file, cx);
+        cx.notify();
+    }
+
+    /// Record the next key combination for `id` (the "+" on the Keymap page). The interceptor
+    /// runs before key bindings, so the keys are captured instead of triggering anything.
+    /// Escape cancels.
+    pub(crate) fn start_key_recording(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        let weak = cx.weak_entity();
+        let sub = cx.intercept_keystrokes(move |event, window, cx| {
+            let Some(keys) = crate::keymap::keystroke_string(&event.keystroke) else {
+                return; // a modifier on its own: keep waiting
+            };
+            cx.stop_propagation();
+            let _ = weak.update(cx, |this, cx| this.finish_key_recording(keys, window, cx));
+        });
+        self.keymap_recording = Some((id, sub));
+        cx.notify();
+    }
+
+    fn finish_key_recording(&mut self, keys: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, _sub)) = self.keymap_recording.take() else {
+            return;
+        };
+        cx.notify();
+        if keys == "escape" {
+            return;
+        }
+        let mut current = crate::keymap::Keymap::global(cx).keys_for(id).to_vec();
+        if !current.contains(&keys) {
+            current.push(keys);
+            self.set_action_keys(id, current, window, cx);
+        }
+    }
+
+    pub(crate) fn remove_action_key(
+        &mut self,
+        id: &'static str,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keys: Vec<String> = crate::keymap::Keymap::global(cx)
+            .keys_for(id)
+            .iter()
+            .filter(|k| k.as_str() != key)
+            .cloned()
+            .collect();
+        self.set_action_keys(id, keys, window, cx);
     }
 
     /// `/`: the sidebar's project filter (showing the sidebar if hidden).
@@ -2197,6 +2342,75 @@ mod tests {
         h.keys(cx, "ctrl-2");
         h.read(cx, |o, _| {
             assert_eq!(o.tab, super::Tab::Changes, "unbound action stays unbound")
+        });
+    }
+
+    #[gpui::test]
+    fn ui_keymap_page_records_removes_and_resets(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let keys_for = |h: &Harness, cx: &mut TestAppContext, id: &str| {
+            let id = id.to_string();
+            h.read(cx, move |_, cx| {
+                crate::keymap::Keymap::global(cx).keys_for(&id).to_vec()
+            })
+        };
+        // Find Refresh through the settings search, then record a new key with the +.
+        h.keys(cx, "ctrl-,");
+        h.keys(cx, "/");
+        h.type_text(cx, "Refresh");
+        h.click(cx, "keymap-add:refresh");
+        h.read(cx, |o, _| assert!(o.keymap_recording.is_some()));
+        h.keys(cx, "ctrl-shift-r");
+        assert_eq!(
+            keys_for(&h, cx, "refresh"),
+            ["ctrl-r", "f5", "ctrl-shift-r"]
+        );
+        let file = h.read(cx, |o, _| o.paths.keymap_file());
+        let text = std::fs::read_to_string(&file).expect("keymap.toml written");
+        assert!(text.contains("refresh = ["), "{text}");
+        // Remove one key with its x.
+        h.click(cx, "keymap-remove:refresh:f5");
+        assert_eq!(keys_for(&h, cx, "refresh"), ["ctrl-r", "ctrl-shift-r"]);
+        // Reset brings back the defaults and the file goes away (nothing overridden).
+        h.click(cx, "keymap-reset:refresh");
+        assert_eq!(keys_for(&h, cx, "refresh"), ["ctrl-r", "f5"]);
+        assert!(!file.exists());
+    }
+
+    #[gpui::test]
+    fn recording_captures_keys_instead_of_running_them(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.start_key_recording("tab_log", cx));
+        h.keys(cx, "ctrl-3");
+        h.read(cx, |o, cx| {
+            assert_eq!(o.tab, super::Tab::Changes, "ctrl-3 was captured, not run");
+            let k = crate::keymap::Keymap::global(cx);
+            assert_eq!(k.keys_for("tab_log"), ["ctrl-2", "ctrl-3"]);
+            assert_eq!(
+                crate::keymap::conflicts(k, "tab_log", "ctrl-3"),
+                ["Branches tab"]
+            );
+            assert!(o.keymap_recording.is_none());
+        });
+        // A shifted symbol is stored as the symbol; escape cancels without changes.
+        h.act(cx, |o, _, cx| {
+            o.start_key_recording("focus_project_search", cx)
+        });
+        h.keys(cx, "?");
+        h.act(cx, |o, _, cx| {
+            o.start_key_recording("focus_project_search", cx)
+        });
+        h.keys(cx, "escape");
+        h.read(cx, |o, cx| {
+            assert_eq!(
+                crate::keymap::Keymap::global(cx).keys_for("focus_project_search"),
+                ["/", "?"]
+            );
+            assert!(o.keymap_recording.is_none());
         });
     }
 

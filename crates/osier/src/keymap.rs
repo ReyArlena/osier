@@ -26,10 +26,7 @@ pub(crate) enum Scope {
 pub(crate) struct ActionSpec {
     /// Stable id used in `keymap.toml`.
     pub id: &'static str,
-    // Read by the settings Keymap page and the DMS cheatsheet writer.
-    #[allow(dead_code)]
     pub name: &'static str,
-    #[allow(dead_code)]
     pub category: &'static str,
     pub defaults: &'static [&'static str],
     pub scope: Scope,
@@ -349,6 +346,67 @@ pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) 
     cx.bind_keys(kit);
     cx.bind_keys(ours);
     cx.set_global(keymap);
+}
+
+/// A recorded keystroke in gpui notation (`ctrl-shift-p`, `?`, `f5`). `None` for a modifier
+/// pressed on its own. A shifted symbol keeps its symbol (`?`, not `shift-/`).
+pub(crate) fn keystroke_string(k: &Keystroke) -> Option<String> {
+    let key = k.key.to_ascii_lowercase();
+    if matches!(
+        key.as_str(),
+        "control" | "ctrl" | "shift" | "alt" | "platform" | "super" | "cmd" | "function" | "fn"
+    ) || key.is_empty()
+    {
+        return None;
+    }
+    let m = k.modifiers;
+    let mut s = String::new();
+    if m.control {
+        s.push_str("ctrl-");
+    }
+    if m.alt {
+        s.push_str("alt-");
+    }
+    if m.platform {
+        s.push_str("super-");
+    }
+    if m.function {
+        s.push_str("fn-");
+    }
+    let symbol = key.chars().count() == 1 && !key.chars().all(|c| c.is_ascii_alphanumeric());
+    if m.shift && !symbol {
+        s.push_str("shift-");
+    }
+    s.push_str(&key);
+    Some(s)
+}
+
+/// Other actions sharing `keys` with `id` where both can fire (same window area).
+pub(crate) fn conflicts(keymap: &Keymap, id: &str, keys: &str) -> Vec<&'static str> {
+    let specs = actions();
+    let scope_of = |id: &str| specs.iter().find(|s| s.id == id).map(|s| s.scope);
+    let Some(mine) = scope_of(id) else {
+        return Vec::new();
+    };
+    let overlaps = |a: Scope, b: Scope| {
+        matches!(
+            (a, b),
+            (Scope::App | Scope::List, Scope::App | Scope::List)
+                | (Scope::Settings, Scope::Settings)
+        )
+    };
+    let wanted = keys.to_ascii_lowercase();
+    specs
+        .iter()
+        .filter(|s| s.id != id && overlaps(mine, s.scope))
+        .filter(|s| {
+            keymap
+                .keys_for(s.id)
+                .iter()
+                .any(|k| k.to_ascii_lowercase() == wanted)
+        })
+        .map(|s| s.name)
+        .collect()
 }
 
 /// gpui accepts any key name, so a typo such as `ctrl-shft-p` would load and never fire.

@@ -262,6 +262,7 @@ fn pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<Settin
         editors_page(view),
         accounts_page(view, cx),
         projects_page(view),
+        keymap_page(view),
         about_page(view, cx),
     ]
 }
@@ -1187,4 +1188,158 @@ fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     )
             })),
         )
+}
+
+fn keymap_page(view: &Entity<Osier>) -> SettingPage {
+    use crate::keymap::{Scope, actions};
+    let specs = actions();
+    let mut categories: Vec<&'static str> = Vec::new();
+    for s in &specs {
+        if !categories.contains(&s.category) {
+            categories.push(s.category);
+        }
+    }
+    let v_top = view.clone();
+    let mut page = SettingPage::new("Keymap")
+        .icon(Icon::new(Lucide::Keyboard))
+        .group(
+            SettingGroup::new()
+                .title("Key bindings")
+                .description(
+                    "Click + and press the keys to add a binding, x to remove one. Plain keys (letters, /, space) never fire while typing in a text field.",
+                )
+                .item(SettingItem::render(move |options, _, _| {
+                    let (va, vb) = (v_top.clone(), v_top.clone());
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("keymap-edit-file")
+                                .test_id("keymap-edit-file")
+                                .outline()
+                                .with_size(options.size())
+                                .icon(Lucide::SquarePen)
+                                .label("Edit keymap.toml")
+                                .on_click(move |_, window, cx| {
+                                    va.update(cx, |o, cx| o.edit_keymap_file(window, cx));
+                                }),
+                        )
+                        .child(
+                            Button::new("keymap-reset-all")
+                                .test_id("keymap-reset-all")
+                                .outline()
+                                .with_size(options.size())
+                                .label("Reset all to defaults")
+                                .on_click(move |_, window, cx| {
+                                    vb.update(cx, |o, cx| o.reset_keymap(window, cx));
+                                }),
+                        )
+                })),
+        );
+    for category in categories {
+        let mut group = SettingGroup::new().title(category);
+        for spec in specs.iter().filter(|s| s.category == category) {
+            let (id, scope) = (spec.id, spec.scope);
+            let v = view.clone();
+            let mut item = SettingItem::new(
+                spec.name,
+                SettingField::render(move |options, _, cx| key_row(&v, id, options, cx)),
+            );
+            match scope {
+                Scope::List => item = item.description("In the Changes, Log and other lists"),
+                Scope::Settings => item = item.description("While settings is open"),
+                Scope::App => {}
+            }
+            group = group.item(item);
+        }
+        page = page.group(group);
+    }
+    page
+}
+
+/// One action's keys: removable chips, a recorder, Reset when changed, and conflicts.
+fn key_row(
+    view: &Entity<Osier>,
+    id: &'static str,
+    options: &gpui_kit::component::setting::RenderOptions,
+    cx: &App,
+) -> AnyElement {
+    use crate::keymap::{Keymap, conflicts, pretty};
+    let o = view.read(cx);
+    let keymap = Keymap::global(cx);
+    let keys = keymap.keys_for(id).to_vec();
+    let recording = o.keymap_recording.as_ref().is_some_and(|(r, _)| *r == id);
+    let overridden = o.keymap_applied.bindings.contains_key(id);
+    let clashes: Vec<&'static str> = keys.iter().flat_map(|k| conflicts(keymap, id, k)).collect();
+    let muted = cx.theme().muted_foreground;
+    let mut row = h_flex().gap_1().items_center().flex_wrap().justify_end();
+    if keys.is_empty() && !recording {
+        row = row.child(div().text_sm().text_color(muted).child("Unbound"));
+    }
+    for k in keys {
+        let v = view.clone();
+        let key = k.clone();
+        row = row.child(
+            h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(Tag::secondary().xsmall().child(pretty(&k)))
+                .child(
+                    Button::new(SharedString::from(format!("keymap-remove-{id}-{k}")))
+                        .test_id(format!("keymap-remove:{id}:{k}"))
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::X)
+                        .tooltip("Remove")
+                        .on_click(move |_, window, cx| {
+                            v.update(cx, |o, cx| o.remove_action_key(id, &key, window, cx));
+                        }),
+                ),
+        );
+    }
+    let v = view.clone();
+    row = if recording {
+        row.child(Tag::warning().xsmall().child("Press keys… (Esc cancels)"))
+    } else {
+        row.child(
+            Button::new(SharedString::from(format!("keymap-add-{id}")))
+                .test_id(format!("keymap-add:{id}"))
+                .ghost()
+                .with_size(options.size())
+                .icon(Lucide::Plus)
+                .tooltip("Add a key binding")
+                .on_click(move |_, _, cx| {
+                    v.update(cx, |o, cx| o.start_key_recording(id, cx));
+                }),
+        )
+    };
+    let v = view.clone();
+    v_flex()
+        .items_end()
+        .gap_1()
+        .child(row.when(overridden, |row| {
+            row.child(
+                Button::new(SharedString::from(format!("keymap-reset-{id}")))
+                    .test_id(format!("keymap-reset:{id}"))
+                    .ghost()
+                    .with_size(options.size())
+                    .label("Reset")
+                    .on_click(move |_, window, cx| {
+                        let defaults: Vec<String> = crate::keymap::actions()
+                            .iter()
+                            .find(|a| a.id == id)
+                            .map(|a| a.defaults.iter().map(|k| k.to_string()).collect())
+                            .unwrap_or_default();
+                        v.update(cx, |o, cx| o.set_action_keys(id, defaults, window, cx));
+                    }),
+            )
+        }))
+        .when(!clashes.is_empty(), |this| {
+            this.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().warning)
+                    .child(format!("Also bound to: {}", clashes.join(", "))),
+            )
+        })
+        .into_any_element()
 }
