@@ -1853,6 +1853,19 @@ mod tests {
             cx.run_until_parked();
         }
 
+        /// Right-click the centre of the element with test id `id` (opens context menus).
+        fn right_click(&self, cx: &mut TestAppContext, id: &str) {
+            let bounds = self
+                .bounds(cx, id)
+                .unwrap_or_else(|| panic!("no element with test id {id:?} in the last frame"));
+            let mut v = self.visual(cx);
+            let at = bounds.center();
+            v.simulate_mouse_move(at, None, gpui::Modifiers::none());
+            v.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+            v.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+            cx.run_until_parked();
+        }
+
         /// Keystrokes in gpui notation, space separated: `"ctrl-, escape"`.
         fn keys(&self, cx: &mut TestAppContext, keys: &str) {
             cx.simulate_keystrokes(self.window, keys);
@@ -2454,6 +2467,38 @@ mod tests {
                 ["ctrl-alt-q"]
             )
         });
+    }
+
+    #[gpui::test]
+    fn ui_command_log_rows_copy_from_the_context_menu(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, _, cx| {
+            if !osier.command_log_visible {
+                osier.toggle_command_log(cx);
+            }
+        });
+        let rec = h.read(cx, |o, _| {
+            o.sink.records().last().cloned().expect("a record")
+        });
+        let row = format!("command-row:{}", rec.id);
+
+        h.right_click(cx, &row);
+        h.keys(cx, "down enter");
+        let copied = cx.read_from_clipboard().and_then(|c| c.text());
+        assert_eq!(copied.as_deref(), Some(rec.as_shell().as_str()));
+
+        h.right_click(cx, &row);
+        h.keys(cx, "down down enter");
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|c| c.text())
+            .unwrap_or_default();
+        assert_eq!(copied, crate::views::command_log::command_details(&rec));
+        assert!(copied.starts_with("$ git "), "{copied}");
+        assert!(copied.contains("\nexit: "), "{copied}");
+        assert!(copied.contains("\nstdout: "), "{copied}");
     }
 
     #[gpui::test]

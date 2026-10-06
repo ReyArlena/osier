@@ -2,7 +2,7 @@
 
 mod branches;
 mod changes;
-mod command_log;
+pub(crate) mod command_log;
 mod diff_pane;
 mod files_tab;
 mod log_tab;

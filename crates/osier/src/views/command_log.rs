@@ -1,13 +1,17 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::test_ids::TestId as _;
+use osier_git::runner::CommandRecord;
 
 impl Osier {
     pub(crate) fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -37,6 +41,7 @@ impl Osier {
             list = list.child(
                 v_flex()
                     .id(("cmd", id as usize))
+                    .test_id(format!("command-row:{id}"))
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().list_hover))
                     .when(is_open, |this| this.bg(cx.theme().list_active))
@@ -48,6 +53,28 @@ impl Osier {
                         };
                         cx.notify();
                     }))
+                    .context_menu({
+                        let weak = cx.entity().downgrade();
+                        move |menu, _, _| {
+                            let (w1, w2) = (weak.clone(), weak.clone());
+                            menu.item(PopupMenuItem::new("Copy command").on_click(
+                                move |_, window, cx| {
+                                    let _ = w1.update(cx, |this, cx| {
+                                        this.copy_command_record(id, false, window, cx)
+                                    });
+                                },
+                            ))
+                            .item(
+                                PopupMenuItem::new("Copy details").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w2.update(cx, |this, cx| {
+                                            this.copy_command_record(id, true, window, cx)
+                                        });
+                                    },
+                                ),
+                            )
+                        }
+                    })
                     .child(
                         h_flex()
                             .px_3()
@@ -160,4 +187,48 @@ impl Osier {
             )
             .child(list)
     }
+
+    /// Copy one recorded command: the shell line, or everything the expanded row shows.
+    pub(crate) fn copy_command_record(
+        &mut self,
+        id: u64,
+        details: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(rec) = self.sink.records().into_iter().find(|r| r.id == id) else {
+            return;
+        };
+        let (text, what) = if details {
+            (command_details(&rec), "command details")
+        } else {
+            (rec.as_shell(), "command")
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        window.push_notification(format!("Copied {what}"), cx);
+    }
+}
+
+/// Plain-text form of an expanded log row, for pasting into an issue or a chat.
+pub(crate) fn command_details(rec: &CommandRecord) -> String {
+    let status = match rec.status {
+        Some(code) => code.to_string(),
+        None => "killed".into(),
+    };
+    let mut out = format!("$ {}\n", rec.as_shell());
+    if let Some(cwd) = &rec.cwd {
+        out.push_str(&format!("cwd: {}\n", cwd.display()));
+    }
+    out.push_str(&format!(
+        "exit: {status}\nduration: {} ms\nstdout: {} bytes\n",
+        rec.duration.as_millis(),
+        rec.stdout_len
+    ));
+    let stderr = rec.stderr.trim();
+    if !stderr.is_empty() {
+        out.push_str("stderr:\n");
+        out.push_str(stderr);
+        out.push('\n');
+    }
+    out
 }
