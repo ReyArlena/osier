@@ -2,6 +2,7 @@
 //! to `Osier::settings` through the entity; every write saves `config.toml` and re-applies.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::WindowExt as _;
@@ -9,7 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::diff::DiffMode;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::setting::{
-    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
+    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
     Settings as SettingsView,
 };
 use gpui_kit::component::tag::Tag;
@@ -80,6 +81,54 @@ impl Osier {
     /// wide sheet any toast raised from settings (Scan now, Clear recents) lands off-screen.
     /// Dialogs leave toasts where they are.
     pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings_with(None, window, cx);
+    }
+
+    /// Open settings on `target`'s page, scrolled to its group, and flash the group so the
+    /// eye finds it. For links from elsewhere in the app ("change this in settings").
+    pub(crate) fn open_settings_at(
+        &mut self,
+        target: SettingsTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_highlight = Some((target, Instant::now()));
+        self.settings_scroll_nudge = true;
+        self.open_settings_with(Some(target), window, cx);
+        // Repaint while the highlight fades, then drop it.
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(33))
+                    .await;
+                let done = this
+                    .update_in(cx, |this, window, _| {
+                        this.settings_scroll_nudge = false;
+                        let done = this
+                            .settings_highlight
+                            .is_none_or(|(_, since)| highlight_alpha(since.elapsed()) <= 0.);
+                        if done {
+                            this.settings_highlight = None;
+                        }
+                        window.refresh();
+                        done
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn open_settings_with(
+        &mut self,
+        target: Option<SettingsTarget>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_target = target;
         self.load_gh_accounts(cx);
         self.ssh_status = Some(osier_auth::ssh::status());
         if self.git_version.is_none() {
@@ -123,7 +172,15 @@ impl Osier {
                                 }
                             })
                             .test_id("settings-dialog")
-                            .child(SettingsView::new("osier-settings").pages(pages)),
+                            .child(match target {
+                                Some(t) => SettingsView::new("osier-settings")
+                                    .pages(pages)
+                                    .default_selected_index(SelectIndex {
+                                        page_ix: t.page,
+                                        group_ix: Some(t.group),
+                                    }),
+                                None => SettingsView::new("osier-settings").pages(pages),
+                            }),
                     )
                 })
         });
@@ -254,14 +311,89 @@ impl Osier {
     }
 }
 
-fn pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<SettingPage> {
+/// A settings group to open at: page and group positions as built by `pages`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SettingsTarget {
+    page: usize,
+    group: usize,
+}
+
+impl SettingsTarget {
+    const PROJECTS: usize = 5;
+    /// Projects > Status of projects that are not open.
+    pub(crate) const RECENT_STATUS: Self = Self {
+        page: Self::PROJECTS,
+        group: 1,
+    };
+}
+
+const HIGHLIGHT_HOLD: Duration = Duration::from_millis(900);
+const HIGHLIGHT_FADE: Duration = Duration::from_millis(900);
+
+/// Highlight strength: full while held, then a linear fade to 0.
+fn highlight_alpha(elapsed: Duration) -> f32 {
+    if elapsed <= HIGHLIGHT_HOLD {
+        return 1.;
+    }
+    let fade = (elapsed - HIGHLIGHT_HOLD).as_secs_f32() / HIGHLIGHT_FADE.as_secs_f32();
+    (1. - fade).max(0.)
+}
+
+/// A group that can be flashed by `open_settings_at`. Padding with a matching negative
+/// margin gives the tint room around the text without moving anything.
+fn highlightable(
+    group: SettingGroup,
+    target: SettingsTarget,
+    view: &Entity<Osier>,
+    cx: &App,
+) -> SettingGroup {
+    let alpha = view
+        .read(cx)
+        .settings_highlight
+        .filter(|(t, _)| *t == target)
+        .map_or(0., |(_, since)| highlight_alpha(since.elapsed()));
+    let pad = px(10.);
+    let group = group.p(pad).m(-pad).rounded(cx.theme().radius);
+    if alpha > 0. {
+        group.bg(cx.theme().primary.opacity(0.14 * alpha))
+    } else {
+        group
+    }
+}
+
+fn pages(view: &Entity<Osier>, window: &mut Window, cx: &mut App) -> Vec<SettingPage> {
+    let pages = all_pages(view, window, cx);
+    let (target, nudge) = {
+        let o = view.read(cx);
+        (o.settings_target, o.settings_scroll_nudge)
+    };
+    let Some(target) = target else {
+        return pages;
+    };
+    pages
+        .into_iter()
+        .enumerate()
+        .map(|(ix, page)| {
+            let page = page.default_open(ix == target.page);
+            // gpui-kit scrolls to the selected group only when a page's group list changes,
+            // so the first frame carries an extra empty group and the next one drops it.
+            if nudge && ix == target.page {
+                page.group(SettingGroup::new().item(SettingItem::render(|_, _, _| div())))
+            } else {
+                page
+            }
+        })
+        .collect()
+}
+
+fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<SettingPage> {
     vec![
         appearance_page(view, cx),
         diff_page(view),
         git_page(view),
         editors_page(view),
         accounts_page(view, cx),
-        projects_page(view),
+        projects_page(view, cx),
         keymap_page(view),
         about_page(view, cx),
     ]
@@ -888,7 +1020,7 @@ fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         )
 }
 
-fn projects_page(view: &Entity<Osier>) -> SettingPage {
+fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let v1 = view.clone();
     let v2 = view.clone();
     SettingPage::new("Projects")
@@ -966,7 +1098,7 @@ fn projects_page(view: &Entity<Osier>) -> SettingPage {
                 ),
         )
         .group(
-            SettingGroup::new()
+            highlightable(SettingGroup::new(), SettingsTarget::RECENT_STATUS, view, cx)
                 .title("Status of projects that are not open")
                 .description("Ahead/behind badges and the changes marker on pinned, recent and scanned projects.")
                 .item(

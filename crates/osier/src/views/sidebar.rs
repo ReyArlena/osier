@@ -378,7 +378,11 @@ impl Osier {
                                     MouseButton::Left,
                                     cx.listener(|this, _, window, cx| {
                                         cx.stop_propagation();
-                                        this.open_settings(window, cx);
+                                        this.open_settings_at(
+                                            crate::settings_panel::SettingsTarget::RECENT_STATUS,
+                                            window,
+                                            cx,
+                                        );
                                     }),
                                 )
                                 .child("Open settings"),

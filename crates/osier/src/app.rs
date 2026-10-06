@@ -159,6 +159,13 @@ pub struct Osier {
     pub(crate) git_version: Option<String>,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
+    /// Settings group being flashed after `open_settings_at`, and since when.
+    pub(crate) settings_highlight:
+        Option<(crate::settings_panel::SettingsTarget, std::time::Instant)>,
+    /// Where the open settings dialog was asked to start, if anywhere.
+    pub(crate) settings_target: Option<crate::settings_panel::SettingsTarget>,
+    /// First frame of `open_settings_at`: see `settings_panel::pages`.
+    pub(crate) settings_scroll_nudge: bool,
     pub(crate) config_watch: Option<crate::config_watch::ConfigWatch>,
     keymap_watch: Option<crate::config_watch::ConfigWatch>,
     /// The `keymap.toml` contents last applied, to tell our own writes from outside edits.
@@ -329,6 +336,9 @@ impl Osier {
             git_version: None,
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
+            settings_highlight: None,
+            settings_target: None,
+            settings_scroll_nudge: false,
             config_watch,
             keymap_watch,
             keymap_applied: Default::default(),
@@ -2338,10 +2348,24 @@ mod tests {
             "used terms drop out"
         );
 
-        // The note's link opens settings.
-        h.keys(cx, "escape");
+        // The note's link opens settings on the right page, even after a normal open.
+        h.keys(cx, "escape escape ctrl-,");
+        assert!(h.has_settings(cx));
+        assert!(
+            !shown(&h, cx, "scan-recent-now".into()),
+            "normal open starts elsewhere"
+        );
+        h.keys(cx, "escape /");
         h.click(cx, "filter-open-settings");
         assert!(h.has_settings(cx));
+        assert!(
+            shown(&h, cx, "scan-recent-now".into()),
+            "settings open on the Projects page"
+        );
+        assert_eq!(
+            h.read(cx, |o, _| o.settings_highlight.map(|(t, _)| t)),
+            Some(crate::settings_panel::SettingsTarget::RECENT_STATUS)
+        );
         h.keys(cx, "escape");
         h.keys(cx, "/");
         h.type_text(cx, "is:ahead ");
