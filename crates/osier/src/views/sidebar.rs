@@ -7,7 +7,9 @@ use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem, SidebarMenuItem,
 };
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, ThemeStyled as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -315,16 +317,15 @@ impl Osier {
             ),
             M::Cached | M::Check => None,
         };
-        let mut list = v_flex().py_1();
+        // Same surface and item shape as gpui-kit's popup menus, at the filter box's width.
+        let mut list = v_flex().gap_y_0p5();
         for (term, desc) in items {
             list = list.child(
-                h_flex()
+                v_flex()
                     .id(SharedString::from(format!("filter-suggestion:{term}")))
                     .test_id(format!("filter-suggestion:{term}"))
                     .px_2()
                     .py_1()
-                    .gap_2()
-                    .items_center()
                     .rounded(cx.theme().radius)
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().accent))
@@ -338,45 +339,33 @@ impl Osier {
                     )
                     .child(
                         div()
-                            .flex_none()
-                            .w(px(84.))
                             .font_family(cx.theme().mono_font_family.clone())
-                            .text_xs()
+                            .text_sm()
                             .child(term),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .whitespace_nowrap()
-                            .child(desc),
-                    ),
+                    .child(div().text_xs().text_color(muted).truncate().child(desc)),
             );
         }
         let panel = v_flex()
             .occlude()
             .test_id("filter-suggestions")
-            .min_w(bounds.size.width)
-            .px_1()
-            .bg(cx.theme().popover)
-            .text_color(cx.theme().popover_foreground)
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(cx.theme().radius)
-            .shadow_md()
+            .w(bounds.size.width)
+            .p_1()
+            .popover_style(cx)
             .child(list)
             .when_some(note, |this, note| {
                 this.child(
                     v_flex()
+                        .mt_1()
                         .px_2()
-                        .py_1p5()
+                        .pt_1p5()
+                        .pb_1()
                         .gap_1()
                         .border_t_1()
                         .border_color(cx.theme().border)
                         .text_xs()
                         .text_color(muted)
                         .whitespace_normal()
-                        .max_w(bounds.size.width.max(px(240.)))
                         .child(note)
                         .child(
                             div()
