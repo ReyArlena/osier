@@ -27,6 +27,7 @@ mod recent_status;
 mod remote_ops;
 mod runtime_info;
 mod settings_panel;
+mod sidebar_query;
 mod test_ids;
 mod themes;
 mod viewer;

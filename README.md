@@ -70,6 +70,11 @@ Open repositories from the sidebar (`ctrl-o`), or let Osier scan directories for
 files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
 text field.
 
+The project filter also takes `is:changed` (uncommitted changes), `is:ahead` (unpushed
+commits) and `is:behind` (new commits on the remote), alone or with a name: `is:ahead api`.
+Clicking the filter lists them. Projects that are not open only match when Settings >
+Projects > Show status is on.
+
 Every shortcut can be changed in Settings > Keymap or in `~/.config/osier/keymap.toml`, which
 holds only your changes and is reloaded when it changes:
 

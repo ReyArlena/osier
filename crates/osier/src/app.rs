@@ -17,6 +17,8 @@ use osier_git::{GitRunner, Repository};
 
 use crate::command_log::UiCommandSink;
 use crate::project::{Area, Project, Selection, load_snapshot};
+use crate::sidebar_query::{self, Query, RowStatus};
+use osier_config::settings::RecentStatusMode;
 
 gpui_kit::actions!(
     osier,
@@ -143,6 +145,8 @@ pub struct Osier {
     pub(crate) scanned: Vec<PathBuf>,
     /// Sidebar filter box.
     pub(crate) sidebar_filter: Entity<gpui_kit::component::input::InputState>,
+    /// Where the filter box was painted, to anchor the dropdown.
+    pub(crate) sidebar_filter_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     /// Projects whose account choice was "this time only" (not written to state on save).
     pub(crate) session_only_accounts: std::collections::BTreeSet<String>,
     /// The patch clipboard (`<state>/patches`), newest first.
@@ -316,6 +320,7 @@ impl Osier {
             gh_accounts: Vec::new(),
             scanned: Vec::new(),
             sidebar_filter,
+            sidebar_filter_bounds: Default::default(),
             session_only_accounts: Default::default(),
             patches,
             patch_selected: None,
@@ -492,32 +497,53 @@ impl Osier {
         self.sidebar_filter.read(cx).value().trim().to_lowercase()
     }
 
-    /// Does `path` match the sidebar filter (name or any path segment)?
-    pub(crate) fn matches_filter(path: &Path, filter: &str) -> bool {
-        filter.is_empty() || path.to_string_lossy().to_lowercase().contains(filter)
+    pub(crate) fn sidebar_query(&self, cx: &App) -> Query {
+        Query::parse(&self.sidebar_filter_text(cx))
+    }
+
+    /// State of an open project for `is:` filters; `None` until its first snapshot.
+    pub(crate) fn open_row_status(project: &Project) -> Option<RowStatus> {
+        project.snapshot.as_ref().map(|s| RowStatus {
+            dirty: Some(!s.status.entries.is_empty()),
+            ahead: s.status.branch.ahead,
+            behind: s.status.branch.behind,
+        })
+    }
+
+    /// State of a project that is not open, from the recent-status badges. Never known when
+    /// recent status is off, so `is:` filters only cover open projects then.
+    pub(crate) fn other_row_status(&self, path: &Path) -> Option<RowStatus> {
+        if self.settings.projects.recent_status == RecentStatusMode::Never {
+            return None;
+        }
+        self.recent_badge(path).map(|b| RowStatus {
+            dirty: b.dirty,
+            ahead: b.ahead,
+            behind: b.behind,
+        })
     }
 
     /// Recents and scanned repositories that are not open, filtered, with their origin.
     /// Pinned repositories that are not open, filtered like the rest of the sidebar.
     pub(crate) fn pinned_entries(&self, cx: &App) -> Vec<PathBuf> {
-        let filter = self.sidebar_filter_text(cx);
+        let query = self.sidebar_query(cx);
         self.state
             .pinned
             .iter()
             .filter(|p| !self.projects.iter().any(|o| &o.path == *p))
-            .filter(|p| Self::matches_filter(p, &filter))
+            .filter(|p| query.matches(p, self.other_row_status(p)))
             .cloned()
             .collect()
     }
 
     pub(crate) fn recent_entries(&self, cx: &App) -> Vec<(PathBuf, Option<PathBuf>)> {
-        let filter = self.sidebar_filter_text(cx);
+        let query = self.sidebar_query(cx);
         let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
         for p in self.state.recent_not_open() {
             if self.state.is_pinned(p) {
                 continue;
             }
-            if Self::matches_filter(p, &filter) {
+            if query.matches(p, self.other_row_status(p)) {
                 let provider =
                     osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
                 out.push((p.clone(), provider));
@@ -527,7 +553,7 @@ impl Osier {
             if !self.state.open_projects.contains(p)
                 && !self.state.is_pinned(p)
                 && !out.iter().any(|(q, _)| q == p)
-                && Self::matches_filter(p, &filter)
+                && query.matches(p, self.other_row_status(p))
             {
                 let provider =
                     osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
@@ -539,14 +565,23 @@ impl Osier {
 
     /// Enter in the filter box: activate the first open match, else open the first recent.
     pub(crate) fn open_first_filtered(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let filter = self.sidebar_filter_text(cx);
-        if filter.is_empty() {
+        let text = self.sidebar_filter.read(cx).value().to_string();
+        // A half-typed qualifier (`is:a`): Enter completes it instead of opening something.
+        if !text.ends_with(char::is_whitespace)
+            && let Some((term, _)) = sidebar_query::suggestions(&text).first()
+            && !text.split_whitespace().last().unwrap_or("").is_empty()
+        {
+            self.pick_filter_suggestion(term, window, cx);
+            return;
+        }
+        let query = Query::parse(&text);
+        if query.is_empty() {
             return;
         }
         if let Some(ix) = self
             .projects
             .iter()
-            .position(|p| Self::matches_filter(&p.path, &filter))
+            .position(|p| query.matches(&p.path, Self::open_row_status(p)))
         {
             self.activate(ix, window, cx);
             return;
@@ -554,6 +589,22 @@ impl Osier {
         if let Some((path, _)) = self.recent_entries(cx).into_iter().next() {
             self.open_project_notify(&path, window, cx);
         }
+    }
+
+    /// Put a suggested qualifier into the sidebar filter in place of the word being typed.
+    pub(crate) fn pick_filter_suggestion(
+        &mut self,
+        term: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.sidebar_filter.read(cx).value().to_string();
+        let next = sidebar_query::insert(&text, term);
+        self.sidebar_filter.update(cx, |input, cx| {
+            input.set_value(next, window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
     }
 
     /// Move an open project up or down in the sidebar.
@@ -1701,7 +1752,7 @@ impl Render for Osier {
                     h_flex()
                         .size_full()
                         .when(self.sidebar_visible, |this| {
-                            this.child(self.render_sidebar(cx))
+                            this.child(self.render_sidebar(window, cx))
                         })
                         .child(
                             v_flex()
@@ -2240,6 +2291,83 @@ mod tests {
         h.keys(cx, "/");
         h.type_text(cx, "x");
         assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "x");
+    }
+
+    #[gpui::test]
+    fn ui_filter_suggestions_insert_is_terms_and_filter_by_state(cx: &mut TestAppContext) {
+        use osier_config::settings::RecentStatusMode;
+        let name = |t: &TempRepo| {
+            t.path()
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned()
+        };
+        let ahead = repo_with_upstream(1, false);
+        let clean = repo_with_upstream(0, false);
+        let recent_ahead = repo_with_upstream(2, false);
+        let h = Harness::open(cx, &ahead);
+        h.act(cx, |osier, _, cx| {
+            osier.open_project(clean.path(), false, cx).expect("open");
+            osier.state.recent.push(recent_ahead.path().to_path_buf());
+        });
+        let shown = |h: &Harness, cx: &mut TestAppContext, id: String| h.bounds(cx, &id).is_some();
+
+        // Focus shows every qualifier, plus the note while recent status is off.
+        h.keys(cx, "/");
+        assert!(shown(&h, cx, "filter-suggestions".into()));
+        for term in ["is:changed", "is:ahead", "is:behind"] {
+            assert!(shown(&h, cx, format!("filter-suggestion:{term}")), "{term}");
+        }
+        assert!(shown(&h, cx, "filter-open-settings".into()));
+
+        // Clicking a suggestion inserts it, keeps focus, and filters open projects by state.
+        h.click(cx, "filter-suggestion:is:ahead");
+        assert_eq!(input_text(&h, cx, |o| &o.sidebar_filter), "is:ahead ");
+        assert!(focused_is(&h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        }));
+        assert!(shown(&h, cx, format!("sidebar-open:{}", name(&ahead))));
+        assert!(!shown(&h, cx, format!("sidebar-open:{}", name(&clean))));
+        assert!(
+            !shown(&h, cx, format!("sidebar-recent:{}", name(&recent_ahead))),
+            "recent projects are unknown while recent status is off"
+        );
+        assert!(
+            !shown(&h, cx, "filter-suggestion:is:ahead".into()),
+            "used terms drop out"
+        );
+
+        // The note's link opens settings.
+        h.keys(cx, "escape");
+        h.click(cx, "filter-open-settings");
+        assert!(h.has_settings(cx));
+        h.keys(cx, "escape");
+        h.keys(cx, "/");
+        h.type_text(cx, "is:ahead ");
+
+        // With status checks on, recent projects match by their badges and the note goes.
+        set_recent_mode(&h, cx, RecentStatusMode::Check);
+        drain_recent(&h, cx);
+        assert!(shown(
+            &h,
+            cx,
+            format!("sidebar-recent:{}", name(&recent_ahead))
+        ));
+        assert!(!shown(&h, cx, "filter-open-settings".into()));
+
+        // Enter completes a half-typed qualifier; is:behind matches nothing here.
+        h.type_text(cx, "is:b");
+        h.keys(cx, "enter");
+        assert_eq!(
+            input_text(&h, cx, |o| &o.sidebar_filter),
+            "is:ahead is:behind "
+        );
+        assert!(!shown(&h, cx, format!("sidebar-open:{}", name(&ahead))));
+
+        // Leaving the box hides the dropdown.
+        h.keys(cx, "escape escape");
+        assert!(!shown(&h, cx, "filter-suggestions".into()));
     }
 
     #[gpui::test]

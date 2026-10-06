@@ -30,6 +30,8 @@ All notable changes to Osier are documented here. The format follows
 - Command palette, git command log panel, operation history, project sidebar with scan
   directories, filter, recents, pins and drag reordering.
 - Right-click a git command log row to copy the command or its full details.
+- Project filter qualifiers `is:changed`, `is:ahead` and `is:behind`, with a suggestion
+  dropdown under the filter box.
 - Sidebar badges: ahead/behind arrows and an uncommitted-changes marker (icon colour or
   dot), optionally also for projects that are not open (cached, watched or checked on an
   interval).

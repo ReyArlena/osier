@@ -282,16 +282,147 @@ impl Osier {
         (item, by_dot.then_some(color))
     }
 
-    pub(crate) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The `is:` suggestion dropdown under the focused filter box, painted above the sidebar.
+    fn render_filter_suggestions(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use osier_config::settings::RecentStatusMode as M;
+        if !self
+            .sidebar_filter
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+        {
+            return None;
+        }
+        let text = self.sidebar_filter.read(cx).value().to_string();
+        let items = crate::sidebar_query::suggestions(&text);
+        if items.is_empty() {
+            return None;
+        }
+        let bounds = self.sidebar_filter_bounds.get();
+        let muted = cx.theme().muted_foreground;
+        let note = match self.settings.projects.recent_status {
+            M::Never => Some(
+                "Dynamic searches only apply to open projects. Update Projects > Show status \
+                 in settings to cover recent projects.",
+            ),
+            M::Watch => Some(
+                "is:changed only applies to open projects while Projects > Show status \
+                 watches ahead/behind only.",
+            ),
+            M::Cached | M::Check => None,
+        };
+        let mut list = v_flex().py_1();
+        for (term, desc) in items {
+            list = list.child(
+                h_flex()
+                    .id(SharedString::from(format!("filter-suggestion:{term}")))
+                    .test_id(format!("filter-suggestion:{term}"))
+                    .px_2()
+                    .py_1()
+                    .gap_2()
+                    .items_center()
+                    .rounded(cx.theme().radius)
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().accent))
+                    // Mouse down, so the pick lands before the input loses focus.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.pick_filter_suggestion(term, window, cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(84.))
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_xs()
+                            .child(term),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .whitespace_nowrap()
+                            .child(desc),
+                    ),
+            );
+        }
+        let panel = v_flex()
+            .occlude()
+            .test_id("filter-suggestions")
+            .min_w(bounds.size.width)
+            .px_1()
+            .bg(cx.theme().popover)
+            .text_color(cx.theme().popover_foreground)
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded(cx.theme().radius)
+            .shadow_md()
+            .child(list)
+            .when_some(note, |this, note| {
+                this.child(
+                    v_flex()
+                        .px_2()
+                        .py_1p5()
+                        .gap_1()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .text_xs()
+                        .text_color(muted)
+                        .whitespace_normal()
+                        .max_w(bounds.size.width.max(px(240.)))
+                        .child(note)
+                        .child(
+                            div()
+                                .id("filter-open-settings")
+                                .test_id("filter-open-settings")
+                                .text_color(cx.theme().link)
+                                .cursor_pointer()
+                                .hover(|this| this.underline())
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.open_settings(window, cx);
+                                    }),
+                                )
+                                .child("Open settings"),
+                        ),
+                )
+            });
+        Some(
+            deferred(
+                anchored()
+                    .position(point(bounds.left(), bounds.bottom() + px(4.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(panel),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
+    }
+
+    pub(crate) fn render_sidebar(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let weak = cx.entity().downgrade();
         let filter = self.sidebar_filter_text(cx);
+        let query = self.sidebar_query(cx);
         let project_count = self.projects.len();
 
         let mut open = ReorderMenu::new();
         let mut open_rows: Vec<(usize, SharedString)> = Vec::new();
         let mut shown_open = 0;
         for (ix, project) in self.projects.iter().enumerate() {
-            if !Self::matches_filter(&project.path, &filter) {
+            if !query.matches(&project.path, Self::open_row_status(project)) {
                 continue;
             }
             shown_open += 1;
@@ -546,6 +677,7 @@ impl Osier {
                         .child(
                             div()
                                 .test_id("sidebar-filter")
+                                .relative()
                                 .on_action(cx.listener(
                                     |this, _: &gpui_kit::component::input::Escape, window, cx| {
                                         let input = this.sidebar_filter.clone();
@@ -556,7 +688,18 @@ impl Osier {
                             Input::new(&self.sidebar_filter)
                                 .small()
                                 .cleanable(true)
-                                .prefix(Icon::new(Lucide::Search).xsmall())),
+                                .prefix(Icon::new(Lucide::Search).xsmall()))
+                                .child({
+                                    let cell = self.sidebar_filter_bounds.clone();
+                                    canvas(move |b, _, _| cell.set(b), |_, _, _, _| {})
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .size_full()
+                                })
+                                .when_some(self.render_filter_suggestions(window, cx), |this, d| {
+                                    this.child(d)
+                                }),
                         ),
                 ),
             )
