@@ -349,7 +349,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "Open",
-            "Reveal in file manager",
+            "Open in file manager",
             Lucide::FolderOpen,
             None,
             true,

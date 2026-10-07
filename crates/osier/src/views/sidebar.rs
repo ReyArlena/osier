@@ -439,6 +439,9 @@ impl Osier {
             let by_icon = dirty && !by_dot;
             let fade = RowFade::new(cx);
             let is_active = self.active == Some(ix);
+            let on_github = project.snapshot.as_ref().is_some_and(|s| {
+                crate::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref()).is_some()
+            });
             let item = SidebarMenuItem::new(project.name.clone())
                 .icon(
                     Icon::new(Lucide::FolderGit2)
@@ -481,12 +484,22 @@ impl Osier {
                             this.open_terminal(window, cx);
                         },
                     )))
-                    .item(PopupMenuItem::new("Reveal in file manager").on_click(act(
+                    .item(PopupMenuItem::new("Open in file manager").on_click(act(
                         |this, ix, window, cx| {
                             this.activate(ix, window, cx);
                             this.reveal_in_file_manager(None, window, cx);
                         },
                     )))
+                    .when(on_github, |menu| {
+                        let (w, p) = (w.clone(), p.clone());
+                        menu.item(PopupMenuItem::new("Open on GitHub").on_click(
+                            move |_, window, cx| {
+                                let _ = w.update(cx, |this, cx| {
+                                    this.open_project_on_github(&p, window, cx)
+                                });
+                            },
+                        ))
+                    })
                     .separator()
                     .item(
                         PopupMenuItem::new("Move up")
@@ -564,9 +577,17 @@ impl Osier {
                 .context_menu(move |menu, _, _| {
                     let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
                     let (p1, p2) = (menu_path.clone(), menu_path.clone());
+                    let (w3, p3) = (menu_weak.clone(), menu_path.clone());
                     menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
                         let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
                     }))
+                    .item(
+                        PopupMenuItem::new("Open on GitHub").on_click(move |_, window, cx| {
+                            let _ = w3.update(cx, |this, cx| {
+                                this.open_project_on_github(&p3, window, cx)
+                            });
+                        }),
+                    )
                     .item(
                         PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
                             let p = p2.to_string_lossy().into_owned();
@@ -607,19 +628,22 @@ impl Osier {
                 .context_menu(move |menu, _, _| {
                     let (w1, w2, w3) = (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
                     let (p1, p2, p3) = (menu_path.clone(), menu_path.clone(), menu_path.clone());
+                    let (w4, p4) = (menu_weak.clone(), menu_path.clone());
                     menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
                         let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
                     }))
                     .item(
-                        PopupMenuItem::new(if from_scan {
-                            "Remove from recents (from a scan directory)"
-                        } else {
-                            "Remove from recents"
-                        })
-                        .on_click(move |_, window, cx| {
-                            let _ = w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
+                        PopupMenuItem::new("Open on GitHub").on_click(move |_, window, cx| {
+                            let _ = w4.update(cx, |this, cx| {
+                                this.open_project_on_github(&p4, window, cx)
+                            });
                         }),
                     )
+                    .item(PopupMenuItem::new("Remove from recents").on_click(
+                        move |_, window, cx| {
+                            let _ = w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
+                        },
+                    ))
                     .item(
                         PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
                             let p = p2.to_string_lossy().into_owned();

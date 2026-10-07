@@ -66,6 +66,7 @@ impl Osier {
         let colors = lane_colors(cx);
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
         let owner = cx.entity().downgrade();
+        let on_github = self.active_github_url().is_some();
         let mono = cx.theme().mono_font_family.clone();
         let muted = cx.theme().muted_foreground;
         let count = commits.len();
@@ -435,12 +436,25 @@ impl Osier {
                                                                 }),
                                                             ));
                                                         }
-                                                        menu.separator().item(item(
-                                                            "Copy hash",
-                                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                                t.copy_to_clipboard(h, w, cx)
-                                                            }),
-                                                        ))
+                                                        menu.separator()
+                                                            .item(item(
+                                                                "Copy hash",
+                                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                                    t.copy_to_clipboard(h, w, cx)
+                                                                }),
+                                                            ))
+                                                            .when(on_github, |menu| {
+                                                                menu.item(item(
+                                                                    "Open on GitHub",
+                                                                    std::rc::Rc::new(
+                                                                        |t, h, w, cx| {
+                                                                            t.open_commit_on_github(
+                                                                                h, w, cx,
+                                                                            )
+                                                                        },
+                                                                    ),
+                                                                ))
+                                                            })
                                                     }),
                                             ),
                                     )

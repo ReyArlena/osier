@@ -2395,6 +2395,73 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_changes_tab_shows_the_number_of_changes(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let clean = Harness::open(cx, &repo);
+        assert!(
+            clean.bounds(cx, "tab-changes-count").is_none(),
+            "no badge when clean"
+        );
+
+        let dirty = TempRepo::new();
+        dirty.commit_file("a.txt", "a\n", "first");
+        dirty.write("a.txt", "b\n");
+        dirty.write("new.txt", "x\n");
+        let h = Harness::open(cx, &dirty);
+        assert!(h.bounds(cx, "tab-changes-count").is_some());
+        h.read(cx, |o, _| {
+            let n = o
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .map(|s| s.status.entries.len());
+            assert_eq!(n, Some(2));
+        });
+    }
+
+    #[gpui::test]
+    fn open_on_github_uses_the_github_remote(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.git(["remote", "add", "origin", "git@github.com:octo/repo.git"]);
+        let other = TempRepo::new();
+        other.commit_file("b.txt", "b\n", "first");
+        other.git([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/octo/other.git",
+        ]);
+        let h = Harness::open(cx, &repo);
+
+        let hash = h.read(cx, |o, _| {
+            o.active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .expect("snapshot")
+                .commits[0]
+                .hash
+                .clone()
+        });
+        h.act(cx, |o, window, cx| {
+            o.open_commit_on_github(hash.clone(), window, cx)
+        });
+        assert_eq!(
+            cx.opened_url(),
+            Some(format!("https://github.com/octo/repo/commit/{hash}"))
+        );
+
+        // A project that is not open reads its remotes first.
+        let path = other.path().to_path_buf();
+        h.act(cx, |o, window, cx| {
+            o.open_project_on_github(&path, window, cx)
+        });
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("https://github.com/octo/other")
+        );
+    }
+
+    #[gpui::test]
     fn ui_question_mark_searches_files(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");

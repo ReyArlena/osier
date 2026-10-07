@@ -15,6 +15,7 @@ mod edit_pane;
 mod external;
 mod fade;
 mod format;
+mod github;
 mod graph;
 mod hunk_ops;
 mod keymap;

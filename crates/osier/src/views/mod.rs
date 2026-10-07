@@ -14,6 +14,7 @@ mod title_bar;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tab::{Tab as KitTab, TabBar};
+use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
@@ -31,6 +32,10 @@ impl Osier {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let active_ix = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let changes = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map_or(0, |s| s.status.entries.len());
         v_flex()
             .id("center")
             .size_full()
@@ -68,6 +73,13 @@ impl Osier {
                         KitTab::new()
                             .label(t.label())
                             .test_id(format!("tab-{}", t.label().to_lowercase()))
+                            .when(*t == Tab::Changes && changes > 0, |tab| {
+                                tab.suffix(
+                                    div().test_id("tab-changes-count").child(
+                                        Tag::secondary().xsmall().child(changes.to_string()),
+                                    ),
+                                )
+                            })
                     })),
             )
             .child(div().flex_1().min_h_0().child(match self.tab {

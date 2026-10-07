@@ -326,7 +326,7 @@ impl Osier {
                                     },
                                 ))
                             })
-                            .item(PopupMenuItem::new("Reveal in file manager").on_click(
+                            .item(PopupMenuItem::new("Open in file manager").on_click(
                                 move |_, window, cx| {
                                     let _ = w2.update(cx, |this, cx| {
                                         this.reveal_in_file_manager(Some(p2.clone()), window, cx)
