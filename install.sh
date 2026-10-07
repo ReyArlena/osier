@@ -72,9 +72,17 @@ install_files() {
   src="$1"
   mkdir -p "$BIN_DIR"
   install -m 755 "$src/osier" "$BIN_DIR/osier"
+  install_desktop "$src"
+}
+
+# Desktop entry, AppStream metadata and icons. Exec points at the installed binary, so the
+# launcher works even when the desktop session's PATH lacks $BIN_DIR.
+install_desktop() {
+  src="$1"
   if [ -f "$src/$APP_ID.desktop" ]; then
     mkdir -p "$DATA_DIR/applications" "$DATA_DIR/metainfo"
-    install -m 644 "$src/$APP_ID.desktop" "$DATA_DIR/applications/$APP_ID.desktop"
+    sed "s|^Exec=osier |Exec=$BIN_DIR/osier |" "$src/$APP_ID.desktop" > "$DATA_DIR/applications/$APP_ID.desktop"
+    chmod 644 "$DATA_DIR/applications/$APP_ID.desktop"
     [ -f "$src/$APP_ID.metainfo.xml" ] && install -m 644 "$src/$APP_ID.metainfo.xml" "$DATA_DIR/metainfo/$APP_ID.metainfo.xml"
     for dir in "$src"/icons/hicolor/*; do
       size="$(basename "$dir")"
@@ -119,7 +127,7 @@ install_from_source() {
   ref="${OSIER_VERSION:-main}"
   git clone --quiet --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$work/src"
   cargo install --locked --path "$work/src/crates/osier" --root "$PREFIX"
-  install_files "$work/src/packaging" 2>/dev/null || true
+  install_desktop "$work/src/packaging"
   say "Installed osier to $BIN_DIR/osier"
 }
 

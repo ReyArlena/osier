@@ -39,3 +39,8 @@ All notable changes to Osier are documented here. The format follows
   interval).
 - Packaging: install script, desktop entry and icon, GitHub Actions CI and release
   workflows, Flatpak manifest draft and AUR PKGBUILDs.
+
+### Fixed
+
+- install.sh: source builds now install the desktop entry and icons, and the entry
+  launches the installed binary by its full path.
