@@ -75,7 +75,7 @@ impl Osier {
                             .test_id(format!("tab-{}", t.label().to_lowercase()))
                             .when(*t == Tab::Changes && changes > 0, |tab| {
                                 tab.suffix(
-                                    div().test_id("tab-changes-count").child(
+                                    div().test_id("tab-changes-count").pl_0p5().pr_1().child(
                                         Tag::secondary().xsmall().child(changes.to_string()),
                                     ),
                                 )
