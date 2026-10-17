@@ -74,9 +74,16 @@ impl Osier {
                             .test_id(format!("tab-{}", t.label().to_lowercase()))
                             .when(*t == Tab::Changes && changes > 0, |tab| {
                                 tab.suffix(
-                                    div().test_id("tab-changes-count").pl_0p5().pr_1().child(
-                                        Tag::secondary().xsmall().child(changes.to_string()),
-                                    ),
+                                    div()
+                                        .test_id("tab-changes-count")
+                                        // The label keeps its own 12px padding (plus the
+                                        // tab's 4px gap): pull the badge in to sit 6px from
+                                        // the text, and match text-only tabs at the edge.
+                                        .ml(px(-10.))
+                                        .pr(px(14.))
+                                        .child(
+                                            Tag::secondary().xsmall().child(changes.to_string()),
+                                        ),
                                 )
                             })
                     })),
