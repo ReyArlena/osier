@@ -32,6 +32,9 @@ impl Osier {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let active_ix = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        // Measured on the previous frame; the canvas below re-renders when it changes.
+        let tab_edges = tab_strip_edges(&self.tab_scroll);
+        let tabs_overflow = tab_edges.overflow;
         let changes = self
             .active_project()
             .and_then(|p| p.snapshot.as_ref())
@@ -61,7 +64,9 @@ impl Osier {
             .child(
                 TabBar::new("main-tabs")
                     .w_full()
-                    .menu(true)
+                    // The tab list menu only when the tabs do not all fit.
+                    .menu(tabs_overflow)
+                    .track_scroll(&self.tab_scroll)
                     .selected_index(active_ix)
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         if let Some(tab) = Tab::ALL.get(*ix) {
@@ -88,6 +93,49 @@ impl Osier {
                             })
                     })),
             )
+            .child({
+                let handle = self.tab_scroll.clone();
+                let view = cx.entity().downgrade();
+                canvas(
+                    move |_, window, cx| {
+                        if tab_strip_edges(&handle) != tab_edges {
+                            let view = view.clone();
+                            window.defer(cx, move |_, cx| {
+                                let _ = view.update(cx, |_, cx| cx.notify());
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_0()
+            })
+            // Tabs cut off by the strip's edges fade out instead of running into the menu
+            // button. Anchored in window coordinates at the visible strip's edges; they take
+            // no clicks.
+            .when(tab_edges.more_left || tab_edges.more_right, |this| {
+                let strip = self.tab_scroll.bounds();
+                let bg = cx.theme().tab_bar;
+                let w = px(crate::fade::FADE_WIDTH);
+                // Stop short of the bar's bottom border.
+                let h = (strip.size.height - px(1.)).max(px(0.));
+                this.when(tab_edges.more_right, |this| {
+                    this.child(
+                        anchored()
+                            .position(point(strip.right() - w, strip.top()))
+                            .child(div().w(w).h(h).bg(crate::fade::fade_fill(bg))),
+                    )
+                })
+                .when(tab_edges.more_left, |this| {
+                    this.child(anchored().position(strip.origin).child(div().w(w).h(h).bg(
+                        linear_gradient(
+                            90.,
+                            linear_color_stop(bg, 0.),
+                            linear_color_stop(bg.opacity(0.), 1.),
+                        ),
+                    )))
+                })
+            })
             .child(div().flex_1().min_h_0().child(match self.tab {
                 Tab::Changes => self.render_changes(cx).into_any_element(),
                 Tab::Log => self.render_log(window, cx).into_any_element(),
@@ -186,5 +234,26 @@ impl Osier {
                     .text_color(cx.theme().muted_foreground)
                     .child(hint.to_string()),
             )
+    }
+}
+
+/// What the tab strip looked like on the last frame: whether its tabs overflow, and whether
+/// some are hidden past either edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TabEdges {
+    overflow: bool,
+    more_left: bool,
+    more_right: bool,
+}
+
+fn tab_strip_edges(handle: &ScrollHandle) -> TabEdges {
+    let max = handle.max_offset().x;
+    // Scroll offsets are negative: -max is fully scrolled to the end.
+    let offset = handle.offset().x;
+    let overflow = max > px(0.5);
+    TabEdges {
+        overflow,
+        more_left: overflow && offset < px(-0.5),
+        more_right: overflow && offset + max > px(0.5),
     }
 }

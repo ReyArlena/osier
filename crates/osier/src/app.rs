@@ -159,6 +159,8 @@ pub struct Osier {
     pub(crate) git_version: Option<String>,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
+    /// Scroll state of the main tab strip, to tell when the tabs overflow.
+    pub(crate) tab_scroll: ScrollHandle,
     /// Settings group being flashed after `open_settings_at`, and since when.
     pub(crate) settings_highlight:
         Option<(crate::settings_panel::SettingsTarget, std::time::Instant)>,
@@ -336,6 +338,7 @@ impl Osier {
             git_version: None,
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
+            tab_scroll: ScrollHandle::new(),
             settings_highlight: None,
             settings_target: None,
             settings_scroll_nudge: false,
@@ -2754,6 +2757,21 @@ mod tests {
         h.type_text(cx, "Log tab");
         h.keys(cx, "enter");
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
+    }
+
+    #[gpui::test]
+    fn tab_overflow_is_measured_and_settles(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        // The test layout's centre panel is about 440px: six tabs do not fit, so the strip
+        // scrolls and the menu shows. Redrawing settles (a render loop would never park).
+        h.act(cx, |_, _, cx| cx.notify());
+        h.act(cx, |_, _, cx| cx.notify());
+        h.read(cx, |o, _| {
+            assert!(o.tab_scroll.bounds().size.width > gpui::px(0.));
+            assert!(o.tab_scroll.max_offset().x > gpui::px(0.5));
+        });
     }
 
     #[gpui::test]

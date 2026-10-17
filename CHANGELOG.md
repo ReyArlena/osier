@@ -40,6 +40,8 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- The tab list menu only appears when the tabs do not fit, and cut-off tabs fade out at the
+  edges.
 - File watching skips ignored folders (build output) and `.git/objects`, which cuts
   inotify watches by orders of magnitude on projects with build directories. Ignored files
   are still watched while the Files tab shows them.
