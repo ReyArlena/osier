@@ -45,6 +45,8 @@ pub(crate) struct RepoWatch {
     shared: Arc<Shared>,
     rx: mpsc::Receiver<notify::Event>,
     resync_due: Option<Instant>,
+    #[cfg(test)]
+    tx: mpsc::Sender<notify::Event>,
 }
 
 impl std::fmt::Debug for RepoWatch {
@@ -86,15 +88,27 @@ impl RepoWatch {
     /// Start watching. `repo` should log only failures: resyncs run `git ls-files` often.
     pub(crate) fn start(repo: Repository) -> Option<Self> {
         let (tx, rx) = mpsc::channel();
+        #[cfg(test)]
+        let test_tx = tx.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res
+            match res {
                 // Reads (our own git commands included) are not changes.
-                && matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                )
-            {
-                let _ = tx.send(event);
+                Ok(event)
+                    if event.need_rescan()
+                        || matches!(
+                            event.kind,
+                            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                        ) =>
+                {
+                    let _ = tx.send(event);
+                }
+                Ok(_) => {}
+                // An error from the backend may mean lost events: treat it as a rescan.
+                Err(_) => {
+                    let mut event = notify::Event::new(EventKind::Other);
+                    event = event.set_flag(notify::event::Flag::Rescan);
+                    let _ = tx.send(event);
+                }
             }
         });
         let watcher = match watcher {
@@ -127,6 +141,8 @@ impl RepoWatch {
             shared,
             rx,
             resync_due: None,
+            #[cfg(test)]
+            tx: test_tx,
         };
         watch.spawn_resync();
         Some(watch)
@@ -155,6 +171,13 @@ impl RepoWatch {
                 return true;
             };
             for event in &events {
+                // The kernel's event queue overflowed (or the backend failed): events were
+                // lost, so look at everything again.
+                if event.need_rescan() {
+                    refresh = true;
+                    resync = true;
+                    continue;
+                }
                 for path in &event.paths {
                     match classify(&self.shared.root, &state, all, event.kind, path) {
                         Class::Noise => {}
@@ -222,6 +245,12 @@ impl RepoWatch {
         }
     }
 
+    /// Test hook: feed an event as if the backend had sent it.
+    #[cfg(test)]
+    pub(crate) fn inject(&self, event: notify::Event) {
+        let _ = self.tx.send(event);
+    }
+
     /// Test hook: the directories currently watched and how.
     #[cfg(test)]
     pub(crate) fn watched(&self) -> BTreeMap<PathBuf, RecursiveMode> {
@@ -278,7 +307,12 @@ fn classify(root: &Path, state: &State, all: bool, kind: EventKind, path: &Path)
         }
         // The index changes which directories hold tracked files; info/exclude and new
         // submodule git dirs change the watch set directly.
-        if rel == Path::new("index") || rel.starts_with("info") || rel.starts_with("modules") {
+        // `config` can change `core.excludesFile` or add submodules.
+        if rel == Path::new("index")
+            || rel == Path::new("config")
+            || rel.starts_with("info")
+            || rel.starts_with("modules")
+        {
             return Class::Resync;
         }
         return Class::Refresh;
@@ -610,6 +644,21 @@ mod tests {
         // A new branch made from the main checkout shows up in the worktree's project.
         t.git(["branch", "from-main"]);
         assert!(refreshes(&mut w, Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn lost_events_rescan_everything() {
+        let t = repo();
+        let mut w = RepoWatch::start(t.repo()).expect("watcher");
+        quiesce(&mut w);
+        // A folder the watcher never heard about, as after a queue overflow.
+        std::fs::create_dir_all(t.path().join("src/missed")).expect("mkdir");
+        let event =
+            notify::Event::new(notify::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        w.inject(event);
+        assert!(w.poll(), "a rescan refreshes at once");
+        quiesce(&mut w);
+        assert!(w.watched().contains_key(&t.path().join("src/missed")));
     }
 
     #[test]
