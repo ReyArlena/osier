@@ -2806,14 +2806,14 @@ mod tests {
     }
 
     #[gpui::test]
-    fn tooltip_delay_defaults_to_250ms_and_applies_live(cx: &mut TestAppContext) {
+    fn tooltip_delay_defaults_to_at_once_and_applies_live(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "first");
         let h = Harness::open(cx, &repo);
         let delay = |cx: &mut TestAppContext| {
             cx.update(|cx| gpui_kit::base::TooltipDefaults::global(cx).show_delay())
         };
-        assert_eq!(delay(cx), std::time::Duration::from_millis(250));
+        assert_eq!(delay(cx), std::time::Duration::from_millis(0));
         h.act(cx, |o, _, cx| {
             o.settings.appearance.tooltip_delay_ms = 600;
             o.apply_tooltip_delay(cx);

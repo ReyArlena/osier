@@ -40,7 +40,7 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
-- Tooltip delay setting (Settings > Appearance > Tooltips), 250 ms by default (was 500).
+- Tooltip delay setting (Settings > Appearance > Tooltips), shown at once by default (was 500 ms).
 - The tab list menu only appears when the tabs do not fit, and cut-off tabs fade out at the
   edges.
 - File watching skips ignored folders (build output) and `.git/objects`, which cuts

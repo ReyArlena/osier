@@ -63,7 +63,7 @@ impl Default for Appearance {
             font_size: None,
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
-            tooltip_delay_ms: 250,
+            tooltip_delay_ms: 0,
         }
     }
 }

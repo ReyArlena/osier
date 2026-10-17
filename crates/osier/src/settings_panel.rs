@@ -551,7 +551,7 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 }))
                 .description(
                     "How long the pointer rests on a button or control before its tooltip \
-                     appears. Default 250 ms.",
+                     appears. Default: at once.",
                 ),
         )
         .group(
