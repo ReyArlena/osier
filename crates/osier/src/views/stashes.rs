@@ -1,5 +1,6 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex,
@@ -75,6 +76,28 @@ impl Osier {
         for s in &snapshot.stashes {
             let index = s.index;
             let message = s.message.clone();
+            let weak = cx.entity().downgrade();
+            let menu_message = message.clone();
+            let menu =
+                move |menu: gpui_kit::component::menu::PopupMenu,
+                      _: &mut Window,
+                      _: &mut Context<gpui_kit::component::menu::PopupMenu>| {
+                    let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+                    let m = menu_message.clone();
+                    menu.item(PopupMenuItem::new("Apply").on_click(move |_, window, cx| {
+                        let _ =
+                            w1.update(cx, |this, cx| this.stash_apply(index, false, window, cx));
+                    }))
+                    .item(PopupMenuItem::new("Pop").on_click(move |_, window, cx| {
+                        let _ = w2.update(cx, |this, cx| this.stash_apply(index, true, window, cx));
+                    }))
+                    .separator()
+                    .item(PopupMenuItem::new("Drop…").on_click(move |_, window, cx| {
+                        let _ = w3.update(cx, |this, cx| {
+                            this.confirm_stash_drop(index, m.clone(), window, cx)
+                        });
+                    }))
+                };
             list = list.child(
                 h_flex()
                     .id(("stash", s.index))
@@ -136,7 +159,8 @@ impl Osier {
                                         this.confirm_stash_drop(index, message.clone(), window, cx)
                                     })),
                             ),
-                    ),
+                    )
+                    .context_menu(menu),
             );
         }
         v_flex()

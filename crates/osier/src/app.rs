@@ -2733,6 +2733,47 @@ mod tests {
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Patches));
         h.keys(cx, "ctrl-1");
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Changes));
+        h.keys(cx, "ctrl-p");
+        h.type_text(cx, "Log tab");
+        h.keys(cx, "enter");
+        h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
+    }
+
+    #[gpui::test]
+    fn ui_right_click_opens_the_row_menu_and_buttons_follow_the_setting(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        repo.git(["branch", "feature"]);
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-branches");
+        let button = "branch-menu:feature";
+        // The buttons live in the row's hover group, so hover the row before looking.
+        let visible = |h: &Harness, cx: &mut TestAppContext| {
+            let row = h.bounds(cx, "branch-row:feature").expect("row");
+            h.visual(cx)
+                .simulate_mouse_move(row.center(), None, gpui::Modifiers::none());
+            cx.run_until_parked();
+            h.bounds(cx, button)
+                .is_some_and(|b| b.size.width > gpui::px(0.))
+        };
+        assert!(!visible(&h, cx), "menu buttons are off by default");
+
+        // Right-click, first entry: Checkout (the hover button's action).
+        h.right_click(cx, "branch-row:feature");
+        h.keys(cx, "down enter");
+        h.read(cx, |o, _| {
+            let head = o
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .and_then(|s| s.status.branch.head.clone());
+            assert_eq!(head.as_deref(), Some("feature"));
+        });
+
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.row_menu_buttons = true;
+            cx.notify();
+        });
+        assert!(visible(&h, cx), "the setting shows them");
     }
 
     #[gpui::test]

@@ -1,4 +1,4 @@
-//! The command palette (ctrl-shift-a or F1): every action reachable by typing its name.
+//! The command palette (ctrl-p or F1): every action reachable by typing its name.
 //!
 //! Commands run through their own closures rather than dispatched actions, so the dialog
 //! layer never has to route key events back to the main view.

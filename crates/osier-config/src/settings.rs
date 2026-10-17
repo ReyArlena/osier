@@ -35,6 +35,9 @@ pub struct Appearance {
     pub font_size: Option<f32>,
     /// How the sidebar marks a project with uncommitted changes.
     pub changes_indicator: ChangesIndicator,
+    /// Show a `...` menu button at the end of list rows. Right-click opens the same menu
+    /// either way.
+    pub row_menu_buttons: bool,
 }
 
 /// `icon` tints the project's folder icon, `dot` draws a dot before its name.
@@ -57,6 +60,7 @@ impl Default for Appearance {
             mono_font: None,
             font_size: None,
             changes_indicator: ChangesIndicator::Icon,
+            row_menu_buttons: false,
         }
     }
 }

@@ -78,7 +78,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             "command_palette",
             "Command palette",
             "General",
-            ["ctrl-shift-a", "f1"],
+            ["ctrl-p", "f1"],
             App,
             OpenCommandPalette
         ),

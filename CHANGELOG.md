@@ -34,6 +34,12 @@ All notable changes to Osier are documented here. The format follows
   dropdown under the filter box.
 - The Changes tab shows how many files have changes.
 - Open on GitHub in the project and commit context menus.
+- Right-click any commit, reflog entry, branch, tag, remote, worktree, stash or patch row for
+  its menu. The `...` row buttons are hidden by default (Settings > Appearance > Lists).
+
+### Changed
+
+- The command palette opens with `ctrl-p` (and still `F1`).
 - Sidebar badges: ahead/behind arrows and an uncommitted-changes marker (icon colour or
   dot), optionally also for projects that are not open (cached, watched or checked on an
   interval).

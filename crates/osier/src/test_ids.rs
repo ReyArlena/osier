@@ -13,7 +13,7 @@
 //! - Changes rows `change-row:<area>:<path>` and their checkbox `change-stage:<area>:<path>`
 //!   (`<area>` is `conflicts`, `staged`, `unstaged` or `untracked`)
 //! - Log rows `log-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
-//!   Stashes `stash-row:<index>`, Patches `patch-row:<id>`, command log `command-row:<record id>`
+//!   branch menu buttons `branch-menu:<name>`, Stashes `stash-row:<index>`, Patches `patch-row:<id>`, command log `command-row:<record id>`
 //! - inputs by their container: `commit-message`, `files-filter`, `sidebar-filter`
 //! - the filter dropdown `filter-suggestions`, its rows `filter-suggestion:<term>` and the
 //!   settings link `filter-open-settings`

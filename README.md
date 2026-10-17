@@ -65,7 +65,7 @@ osier --version --verbose
 
 Open repositories from the sidebar (`ctrl-o`), or let Osier scan directories for them
 (Settings > Projects). Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
-`ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-shift-a` or
+`ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-p` or
 `F1` opens the command palette, `ctrl-,` opens settings, `/` searches projects, `?` searches
 files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
 text field.
@@ -106,6 +106,7 @@ dux_shell_sync = false        # follow Dux Shell colours when its cache exists
 # mono_font = "JetBrains Mono"
 # font_size = 14.0
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
+row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 
 [editor]
 # command = "zed {file}:{line}"   # {path} = repository, {file}, {line}; empty = xdg-open

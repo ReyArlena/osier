@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
@@ -29,6 +29,7 @@ impl Osier {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let menu_buttons = self.settings.appearance.row_menu_buttons;
         let Some(project) = self.active_project() else {
             return self
                 .empty_state(
@@ -161,6 +162,149 @@ impl Osier {
                                 } else {
                                     (row_bg, row_hover)
                                 };
+                                let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
+                                    let h = hash.clone();
+                                    let o = menu_owner.clone();
+                                    let item = |label: &str, f: CommitHandler| {
+                                        let h = h.clone();
+                                        let o = o.clone();
+                                        PopupMenuItem::new(label.to_string()).on_click(
+                                            move |_, window, cx| {
+                                                let h = h.clone();
+                                                let f = f.clone();
+                                                let _ =
+                                                    o.update(cx, |this, cx| f(this, h, window, cx));
+                                            },
+                                        )
+                                    };
+                                    let mut menu = menu
+                                        .item(item(
+                                            "Checkout (detached)",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.checkout_commit(h, w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "New branch here…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.prompt_new_branch(Some(h), w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Tag here…",
+                                            std::rc::Rc::new(|t, h, w, cx| t.prompt_tag(h, w, cx)),
+                                        ))
+                                        .item(item(
+                                            "Copy as patch",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.copy_patch(
+                                                    PatchSource::Commits { hashes: vec![h] },
+                                                    w,
+                                                    cx,
+                                                )
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Save to Patches…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                let name = t
+                                                    .commit_subject(&h)
+                                                    .unwrap_or_else(|| h.clone());
+                                                t.save_patch_prompt(
+                                                    PatchSource::Commits { hashes: vec![h] },
+                                                    name,
+                                                    w,
+                                                    cx,
+                                                )
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Export patch file…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                let name =
+                                                    format!("{}.patch", &h[..h.len().min(7)]);
+                                                t.export_patch(
+                                                    PatchSource::Commits { hashes: vec![h] },
+                                                    name,
+                                                    w,
+                                                    cx,
+                                                )
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Compare with selected commit",
+                                            std::rc::Rc::new(|t, h, _, cx| {
+                                                t.compare_with_hash(h, cx)
+                                            }),
+                                        ))
+                                        .separator()
+                                        .item(item(
+                                            "Reset current branch here (soft)",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.confirm_reset(h, ResetMode::Soft, w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Reset current branch here (mixed)",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.confirm_reset(h, ResetMode::Mixed, w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Reset current branch here (hard)",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.confirm_reset(h, ResetMode::Hard, w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Revert commit…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.confirm_revert(h, w, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Cherry-pick onto current branch…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.confirm_cherry_pick(h, w, cx)
+                                            }),
+                                        ))
+                                        .separator()
+                                        .item(item(
+                                            "Compare with working tree",
+                                            std::rc::Rc::new(|t, h, _, cx| {
+                                                t.select_compare(h, "HEAD".into(), false, cx)
+                                            }),
+                                        ))
+                                        .item(item(
+                                            "Interactive rebase from here…",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.open_interactive_rebase(h, w, cx)
+                                            }),
+                                        ));
+                                    if is_head {
+                                        menu = menu.item(item(
+                                            "Undo last commit…",
+                                            std::rc::Rc::new(|t, _, w, cx| {
+                                                t.confirm_undo_commit(w, cx)
+                                            }),
+                                        ));
+                                    }
+                                    menu.separator()
+                                        .item(item(
+                                            "Copy hash",
+                                            std::rc::Rc::new(|t, h, w, cx| {
+                                                t.copy_to_clipboard(h, w, cx)
+                                            }),
+                                        ))
+                                        .when(on_github, |menu| {
+                                            menu.item(item(
+                                                "Open on GitHub",
+                                                std::rc::Rc::new(|t, h, w, cx| {
+                                                    t.open_commit_on_github(h, w, cx)
+                                                }),
+                                            ))
+                                        })
+                                });
                                 ListItem::new(("commit", ix))
                                     .test_id(format!("log-row:{ix}"))
                                     .group("log-row")
@@ -264,200 +408,14 @@ impl Osier {
                                             )
                                             .child(
                                                 Button::new(("commit-menu", ix))
+                                                    .when(!menu_buttons, |b| b.hidden())
                                                     .ghost()
                                                     .xsmall()
                                                     .icon(Lucide::Ellipsis)
-                                                    .dropdown_menu(move |menu, _, _| {
-                                                        let h = hash.clone();
-                                                        let o = menu_owner.clone();
-                                                        let item =
-                                                            |label: &str, f: CommitHandler| {
-                                                                let h = h.clone();
-                                                                let o = o.clone();
-                                                                PopupMenuItem::new(
-                                                                    label.to_string(),
-                                                                )
-                                                                .on_click(move |_, window, cx| {
-                                                                    let h = h.clone();
-                                                                    let f = f.clone();
-                                                                    let _ =
-                                                                        o.update(cx, |this, cx| {
-                                                                            f(this, h, window, cx)
-                                                                        });
-                                                                })
-                                                            };
-                                                        let mut menu = menu
-                                                            .item(item(
-                                                                "Checkout (detached)",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.checkout_commit(h, w, cx)
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "New branch here…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.prompt_new_branch(
-                                                                        Some(h),
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Tag here…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.prompt_tag(h, w, cx)
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Copy as patch",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.copy_patch(
-                                                                        PatchSource::Commits {
-                                                                            hashes: vec![h],
-                                                                        },
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Save to Patches…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    let name = t
-                                                                        .commit_subject(&h)
-                                                                        .unwrap_or_else(|| {
-                                                                            h.clone()
-                                                                        });
-                                                                    t.save_patch_prompt(
-                                                                        PatchSource::Commits {
-                                                                            hashes: vec![h],
-                                                                        },
-                                                                        name,
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Export patch file…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    let name = format!(
-                                                                        "{}.patch",
-                                                                        &h[..h.len().min(7)]
-                                                                    );
-                                                                    t.export_patch(
-                                                                        PatchSource::Commits {
-                                                                            hashes: vec![h],
-                                                                        },
-                                                                        name,
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Compare with selected commit",
-                                                                std::rc::Rc::new(|t, h, _, cx| {
-                                                                    t.compare_with_hash(h, cx)
-                                                                }),
-                                                            ))
-                                                            .separator()
-                                                            .item(item(
-                                                                "Reset current branch here (soft)",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.confirm_reset(
-                                                                        h,
-                                                                        ResetMode::Soft,
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Reset current branch here (mixed)",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.confirm_reset(
-                                                                        h,
-                                                                        ResetMode::Mixed,
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Reset current branch here (hard)",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.confirm_reset(
-                                                                        h,
-                                                                        ResetMode::Hard,
-                                                                        w,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Revert commit…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.confirm_revert(h, w, cx)
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Cherry-pick onto current branch…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.confirm_cherry_pick(h, w, cx)
-                                                                }),
-                                                            ))
-                                                            .separator()
-                                                            .item(item(
-                                                                "Compare with working tree",
-                                                                std::rc::Rc::new(|t, h, _, cx| {
-                                                                    t.select_compare(
-                                                                        h,
-                                                                        "HEAD".into(),
-                                                                        false,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                            ))
-                                                            .item(item(
-                                                                "Interactive rebase from here…",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.open_interactive_rebase(
-                                                                        h, w, cx,
-                                                                    )
-                                                                }),
-                                                            ));
-                                                        if is_head {
-                                                            menu = menu.item(item(
-                                                                "Undo last commit…",
-                                                                std::rc::Rc::new(|t, _, w, cx| {
-                                                                    t.confirm_undo_commit(w, cx)
-                                                                }),
-                                                            ));
-                                                        }
-                                                        menu.separator()
-                                                            .item(item(
-                                                                "Copy hash",
-                                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                                    t.copy_to_clipboard(h, w, cx)
-                                                                }),
-                                                            ))
-                                                            .when(on_github, |menu| {
-                                                                menu.item(item(
-                                                                    "Open on GitHub",
-                                                                    std::rc::Rc::new(
-                                                                        |t, h, w, cx| {
-                                                                            t.open_commit_on_github(
-                                                                                h, w, cx,
-                                                                            )
-                                                                        },
-                                                                    ),
-                                                                ))
-                                                            })
-                                                    }),
+                                                    .dropdown_menu(row_menu.build()),
                                             ),
                                     )
+                                    .context_menu(row_menu.build())
                                     .into_any_element()
                             })
                             .collect()
@@ -470,6 +428,7 @@ impl Osier {
     }
 
     fn render_reflog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let menu_buttons = self.settings.appearance.row_menu_buttons;
         use gpui_kit::component::scroll::ScrollableElement as _;
         let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
             return div().into_any_element();
@@ -485,6 +444,40 @@ impl Osier {
         for (ix, e) in snapshot.reflog.iter().enumerate() {
             let hash = e.hash.clone();
             let o = owner.clone();
+            let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
+                let (h1, h2, h3, h4) = (hash.clone(), hash.clone(), hash.clone(), hash.clone());
+                let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
+                menu.item(PopupMenuItem::new("Check out (detached)").on_click(
+                    move |_, window, cx| {
+                        let _ =
+                            o1.update(cx, |this, cx| this.checkout_commit(h1.clone(), window, cx));
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new("New branch here…").on_click(move |_, window, cx| {
+                        let _ = o2.update(cx, |this, cx| {
+                            this.prompt_new_branch(Some(h2.clone()), window, cx)
+                        });
+                    }),
+                )
+                .item(
+                    PopupMenuItem::new("Reset current branch here (hard)…").on_click(
+                        move |_, window, cx| {
+                            let _ = o3.update(cx, |this, cx| {
+                                this.confirm_reset(h3.clone(), ResetMode::Hard, window, cx)
+                            });
+                        },
+                    ),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("Copy hash").on_click(move |_, window, cx| {
+                        let _ = o4.update(cx, |this, cx| {
+                            this.copy_to_clipboard(h4.clone(), window, cx)
+                        });
+                    }),
+                )
+            });
             list = list.child(
                 h_flex()
                     .id(("reflog", ix))
@@ -526,52 +519,13 @@ impl Osier {
                     )
                     .child(
                         Button::new(("reflog-menu", ix))
+                            .when(!menu_buttons, |b| b.hidden())
                             .ghost()
                             .xsmall()
                             .icon(Lucide::Ellipsis)
-                            .dropdown_menu(move |menu, _, _| {
-                                let (h1, h2, h3, h4) =
-                                    (hash.clone(), hash.clone(), hash.clone(), hash.clone());
-                                let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
-                                menu.item(PopupMenuItem::new("Check out (detached)").on_click(
-                                    move |_, window, cx| {
-                                        let _ = o1.update(cx, |this, cx| {
-                                            this.checkout_commit(h1.clone(), window, cx)
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("New branch here…").on_click(
-                                    move |_, window, cx| {
-                                        let _ = o2.update(cx, |this, cx| {
-                                            this.prompt_new_branch(Some(h2.clone()), window, cx)
-                                        });
-                                    },
-                                ))
-                                .item(
-                                    PopupMenuItem::new("Reset current branch here (hard)…")
-                                        .on_click(move |_, window, cx| {
-                                            let _ = o3.update(cx, |this, cx| {
-                                                this.confirm_reset(
-                                                    h3.clone(),
-                                                    ResetMode::Hard,
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        }),
-                                )
-                                .separator()
-                                .item(
-                                    PopupMenuItem::new("Copy hash").on_click(
-                                        move |_, window, cx| {
-                                            let _ = o4.update(cx, |this, cx| {
-                                                this.copy_to_clipboard(h4.clone(), window, cx)
-                                            });
-                                        },
-                                    ),
-                                )
-                            }),
-                    ),
+                            .dropdown_menu(row_menu.build()),
+                    )
+                    .context_menu(row_menu.build()),
             );
         }
         v_flex()

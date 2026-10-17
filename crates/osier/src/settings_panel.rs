@@ -512,6 +512,25 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
             ),
         )
         .group(
+            SettingGroup::new().title("Lists").item(
+                SettingItem::new(
+                    "Show menu buttons on rows",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.row_menu_buttons),
+                        set(view, |o, v: bool, _| {
+                            o.settings.appearance.row_menu_buttons = v
+                        }),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "Add a ... button to the end of commit, branch, tag, remote, worktree and \
+                     patch rows. Right-clicking a row opens the same menu whether this is on or \
+                     off.",
+                ),
+            ),
+        )
+        .group(
             SettingGroup::new()
                 .title("Fonts")
                 .description("Leave empty to use the theme's fonts.")
