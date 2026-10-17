@@ -78,6 +78,14 @@ impl Repository {
         })
     }
 
+    /// The same repository driven by another runner (e.g. one that logs only failures).
+    pub fn with_runner(&self, runner: GitRunner) -> Self {
+        Self {
+            runner,
+            ..self.clone()
+        }
+    }
+
     pub fn runner(&self) -> &GitRunner {
         &self.runner
     }

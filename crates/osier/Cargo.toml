@@ -37,7 +37,6 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 notify = "8"
-ignore = "0.4"
 # Zed's reqwest-based HttpClient for the gpui snapshot gpui-kit pins; same version, same crate graph.
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
 osier-git.workspace = true

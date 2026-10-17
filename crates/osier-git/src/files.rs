@@ -28,6 +28,55 @@ pub fn ignored(repo: &Repository) -> Result<Vec<String>> {
     Ok(split(&out.stdout))
 }
 
+/// Ignored paths as git sees them, for the file watcher: whole ignored directories (git
+/// collapses a directory only when nothing inside it is tracked) and single ignored files in
+/// directories that are not ignored as a whole. Paths are relative to the working tree,
+/// directories without their trailing `/`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IgnoredLayout {
+    pub dirs: Vec<String>,
+    pub files: Vec<String>,
+}
+
+pub fn ignored_layout(repo: &Repository) -> Result<IgnoredLayout> {
+    let out = repo.git([
+        "ls-files",
+        "-z",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "--no-empty-directory",
+    ])?;
+    let mut layout = IgnoredLayout::default();
+    for entry in split(&out.stdout) {
+        match entry.strip_suffix('/') {
+            Some(dir) => layout.dirs.push(dir.to_string()),
+            None => layout.files.push(entry),
+        }
+    }
+    Ok(layout)
+}
+
+/// The user's global excludes file (`core.excludesFile`), or git's default location
+/// (`$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`) when it is not set.
+pub fn excludes_file(repo: &Repository) -> Result<Option<std::path::PathBuf>> {
+    let out = repo.runner().run_allowing(
+        Some(repo.workdir()),
+        ["config", "--path", "--get", "core.excludesFile"],
+        &[0, 1],
+    )?;
+    let set = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !set.is_empty() {
+        return Ok(Some(std::path::PathBuf::from(set)));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    Ok(base.map(|b| b.join("git/ignore")))
+}
+
 fn split(bytes: &[u8]) -> Vec<String> {
     bytes
         .split(|b| *b == 0)
@@ -94,6 +143,36 @@ mod tests {
         assert!(show_at(&repo, "HEAD", "notes.txt").unwrap().is_none());
         assert!(looks_binary(b"ab\0cd"));
         assert!(!looks_binary(b"plain text"));
+    }
+
+    #[test]
+    fn ignored_layout_collapses_only_directories_without_tracked_files() {
+        let t = TempRepo::new();
+        t.commit_file(".gitignore", "target/\n*.log\nvendor/\n", "ignore");
+        t.write("target/a/b/x", "x\n");
+        t.write("vendor/x", "tracked\n");
+        t.write("vendor/y", "y\n");
+        t.write("vendor/sub/z", "z\n");
+        t.write("debug.log", "l\n");
+        t.write("src/m.rs", "m\n");
+        t.git(["add", "-f", "vendor/x"]);
+        t.git(["commit", "-q", "-m", "vendored"]);
+        let layout = ignored_layout(&t.repo()).unwrap();
+        assert_eq!(layout.dirs, ["target", "vendor/sub"]);
+        assert_eq!(layout.files, ["debug.log", "vendor/y"]);
+    }
+
+    #[test]
+    fn excludes_file_reads_config_or_falls_back() {
+        let t = TempRepo::new();
+        t.commit_file("a", "a\n", "first");
+        let default = excludes_file(&t.repo()).unwrap();
+        assert!(default.is_some_and(|p| p.ends_with("git/ignore")));
+        t.git(["config", "core.excludesFile", "/tmp/osier-excludes"]);
+        assert_eq!(
+            excludes_file(&t.repo()).unwrap(),
+            Some(std::path::PathBuf::from("/tmp/osier-excludes"))
+        );
     }
 }
 

@@ -26,6 +26,7 @@ mod project;
 mod rebase_dialog;
 mod recent_status;
 mod remote_ops;
+mod repo_watch;
 mod row_menu;
 mod runtime_info;
 mod settings_panel;

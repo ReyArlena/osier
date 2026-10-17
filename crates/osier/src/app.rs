@@ -796,7 +796,18 @@ impl Osier {
             }
             return Ok(ix);
         }
-        match Project::open(self.runner.clone(), path, self.settings.git.log_page_size) {
+        let watch_runner =
+            self.runner
+                .clone()
+                .with_sink(Arc::new(crate::command_log::FailuresOnly(
+                    self.sink.clone(),
+                )));
+        match Project::open(
+            self.runner.clone(),
+            watch_runner,
+            path,
+            self.settings.git.log_page_size,
+        ) {
             Ok(project) => {
                 let workdir = project.path.clone();
                 self.projects.push(project);
@@ -1046,6 +1057,12 @@ impl Osier {
                     .timer(Duration::from_millis(400))
                     .await;
                 let alive = this.update_in(cx, |this, window, cx| {
+                    // Live updates for ignored files only while the Files tab lists them.
+                    let watch_all = this.tab == Tab::Files && this.show_ignored;
+                    let active = this.active;
+                    for (ix, p) in this.projects.iter_mut().enumerate() {
+                        p.set_watch_all(watch_all && active == Some(ix));
+                    }
                     let due: Vec<usize> = this
                         .projects
                         .iter_mut()

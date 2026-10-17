@@ -172,6 +172,12 @@ impl GitRunner {
         self
     }
 
+    /// Same settings, different command sink (e.g. one that records only failures).
+    pub fn with_sink(mut self, sink: Arc<dyn CommandSink>) -> Self {
+        self.sink = sink;
+        self
+    }
+
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self

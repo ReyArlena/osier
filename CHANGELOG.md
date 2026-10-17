@@ -40,6 +40,9 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- File watching skips ignored folders (build output) and `.git/objects`, which cuts
+  inotify watches by orders of magnitude on projects with build directories. Ignored files
+  are still watched while the Files tab shows them.
 - Sidebar badges: ahead/behind arrows and an uncommitted-changes marker (icon colour or
   dot), optionally also for projects that are not open (cached, watched or checked on an
   interval).

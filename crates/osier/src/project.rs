@@ -1,12 +1,9 @@
 //! One open repository: loaded data, selection and background refresh.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::Task;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use notify::{RecursiveMode, Watcher};
 use osier_git::config::Identity;
 use osier_git::graph::GraphRow;
 use osier_git::log::{Commit, LogOptions};
@@ -94,14 +91,19 @@ pub struct Project {
     /// When set, the Log shows this file's history (`log --follow`).
     pub log_path: Option<String>,
     pub task: Task<()>,
-    watcher: Option<notify::RecommendedWatcher>,
-    events: Option<mpsc::Receiver<()>>,
+    watch: Option<crate::repo_watch::RepoWatch>,
     dirty_since: Option<Instant>,
     last_refresh: Instant,
 }
 
 impl Project {
-    pub fn open(runner: GitRunner, path: &Path, log_page_size: usize) -> Result<Self, String> {
+    /// `watch_runner` drives the file watcher's own git calls; it should log only failures.
+    pub fn open(
+        runner: GitRunner,
+        watch_runner: GitRunner,
+        path: &Path,
+        log_page_size: usize,
+    ) -> Result<Self, String> {
         let repo = Repository::discover(runner, path).map_err(|e| e.to_string())?;
         let path = repo.workdir().to_path_buf();
         let name = repo.name();
@@ -119,79 +121,22 @@ impl Project {
             log_page_size,
             log_path: None,
             task: Task::ready(()),
-            watcher: None,
-            events: None,
+            watch: None,
             dirty_since: None,
             last_refresh: Instant::now(),
         };
-        project.start_watcher();
+        project.watch = crate::repo_watch::RepoWatch::start(project.repo.with_runner(watch_runner));
         Ok(project)
-    }
-
-    fn start_watcher(&mut self) {
-        let (tx, rx) = mpsc::channel::<()>();
-        let git_dir = self.repo.git_dir().to_path_buf();
-        let ignore = build_gitignore(&self.path, &git_dir);
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
-                // Reads (our own git commands included) are not changes. Only content and
-                // structure changes matter.
-                let relevant = matches!(
-                    event.kind,
-                    notify::EventKind::Create(_)
-                        | notify::EventKind::Modify(_)
-                        | notify::EventKind::Remove(_)
-                );
-                // Lock files and editor temp files are noise. `.git/index` is kept: it is how
-                // `git add` from a terminal shows up.
-                // Ignored paths (build output, logs) never change git's view of the tree.
-                // Paths inside `.git` are always relevant (index, HEAD, refs).
-                let noise = event.paths.iter().all(|p| {
-                    let name = p
-                        .file_name()
-                        .map(|n| n.to_string_lossy())
-                        .unwrap_or_default();
-                    if name.ends_with(".lock") || name.ends_with('~') || name.ends_with(".swp") {
-                        return true;
-                    }
-                    if p.starts_with(&git_dir) {
-                        return false;
-                    }
-                    ignore
-                        .as_ref()
-                        .is_some_and(|g| g.matched_path_or_any_parents(p, p.is_dir()).is_ignore())
-                });
-                if relevant && !noise {
-                    tracing::trace!(kind = ?event.kind, paths = ?event.paths, "fs event");
-                    let _ = tx.send(());
-                }
-            }
-        });
-        match watcher {
-            Ok(mut w) => {
-                if let Err(e) = w.watch(&self.path, RecursiveMode::Recursive) {
-                    tracing::warn!(error = %e, path = %self.path.display(), "watch failed");
-                }
-                let git_dir = self.repo.git_dir().to_path_buf();
-                if git_dir.starts_with(&self.path) {
-                    // Already covered by the recursive watch.
-                } else if let Err(e) = w.watch(&git_dir, RecursiveMode::Recursive) {
-                    tracing::warn!(error = %e, "watch of git dir failed");
-                }
-                self.watcher = Some(w);
-                self.events = Some(rx);
-            }
-            Err(e) => tracing::warn!(error = %e, "file watcher unavailable"),
-        }
     }
 
     /// Drain watcher events. Returns true when a refresh is due (debounced).
     pub fn poll_watcher(&mut self) -> bool {
-        let mut saw = false;
-        if let Some(rx) = &self.events {
-            while rx.try_recv().is_ok() {
-                saw = true;
-            }
+        let mut saw = self.watch.as_mut().is_some_and(|w| w.poll());
+        // No watcher, or the watch limit was hit: refresh on a timer instead.
+        if self.watch.as_ref().is_none_or(|w| w.degraded())
+            && self.last_refresh.elapsed() >= Duration::from_secs(10)
+        {
+            saw = true;
         }
         if saw {
             self.dirty_since.get_or_insert_with(Instant::now);
@@ -205,34 +150,19 @@ impl Project {
         }
     }
 
+    /// Watch the whole tree, ignored files included (Files tab with "Show ignored" on).
+    pub fn set_watch_all(&mut self, all: bool) {
+        if let Some(w) = self.watch.as_mut() {
+            w.set_watch_all(all);
+        }
+    }
+
     pub fn mark_refreshed(&mut self) {
         self.last_refresh = Instant::now();
     }
 
     pub fn commit_at(&self, ix: usize) -> Option<&Commit> {
         self.snapshot.as_ref()?.commits.get(ix)
-    }
-}
-
-/// Matcher for the root `.gitignore` and `.git/info/exclude`. Nested ignore files are not
-/// read; a change under one of those just costs an extra refresh.
-fn build_gitignore(root: &Path, git_dir: &Path) -> Option<Gitignore> {
-    let mut b = GitignoreBuilder::new(root);
-    for file in [root.join(".gitignore"), git_dir.join("info/exclude")] {
-        if file.is_file() {
-            // A malformed line is reported but does not disable the rest.
-            if let Some(e) = b.add(&file) {
-                tracing::debug!(error = %e, file = %file.display(), "ignore file");
-            }
-        }
-    }
-    match b.build() {
-        Ok(g) if !g.is_empty() => Some(g),
-        Ok(_) => None,
-        Err(e) => {
-            tracing::debug!(error = %e, "gitignore matcher");
-            None
-        }
     }
 }
 
