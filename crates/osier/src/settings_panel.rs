@@ -218,6 +218,13 @@ impl Osier {
                 let minutes = self.settings.projects.recent_status_minutes.clamp(1, 60) as f32;
                 self.recent_interval
                     .update(cx, |s, cx| s.set_value(minutes, window, cx));
+                let tooltip_ms = self
+                    .settings
+                    .appearance
+                    .tooltip_delay_ms
+                    .min(crate::app::TOOLTIP_DELAY_MAX_MS) as f32;
+                self.tooltip_delay
+                    .update(cx, |s, cx| s.set_value(tooltip_ms, window, cx));
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
@@ -510,6 +517,42 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 )
                 .description("How a project with uncommitted changes is marked in the sidebar."),
             ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Tooltips")
+                .item(SettingItem::render({
+                    let v = view.clone();
+                    move |options, _, cx| {
+                        let o = v.read(cx);
+                        let ms = o
+                            .settings
+                            .appearance
+                            .tooltip_delay_ms
+                            .min(crate::app::TOOLTIP_DELAY_MAX_MS);
+                        let slider = o.tooltip_delay.clone();
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .child(div().text_sm().flex_none().child("Show after"))
+                            .child(
+                                div().flex_1().child(
+                                    gpui_kit::component::slider::Slider::new(&slider)
+                                        .disabled(options.is_disabled()),
+                                ),
+                            )
+                            .child(div().text_sm().w(px(64.)).flex_none().child(if ms == 0 {
+                                "at once".to_string()
+                            } else {
+                                format!("{ms} ms")
+                            }))
+                    }
+                }))
+                .description(
+                    "How long the pointer rests on a button or control before its tooltip \
+                     appears. Default 250 ms.",
+                ),
         )
         .group(
             SettingGroup::new().title("Lists").item(

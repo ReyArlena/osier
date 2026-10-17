@@ -88,6 +88,9 @@ impl Tab {
     }
 }
 
+/// Longest tooltip delay the settings slider offers, in milliseconds.
+pub(crate) const TOOLTIP_DELAY_MAX_MS: u32 = 1000;
+
 pub struct Osier {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) paths: Paths,
@@ -180,6 +183,7 @@ pub struct Osier {
     pub(crate) recent_status: crate::recent_status::RecentStatus,
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
     pub(crate) recent_interval: Entity<gpui_kit::component::slider::SliderState>,
+    pub(crate) tooltip_delay: Entity<gpui_kit::component::slider::SliderState>,
     /// Narrow window: title-bar buttons drop their labels.
     pub(crate) compact: bool,
     /// Command log opened by the dev env var: do not persist that as a preference.
@@ -218,6 +222,17 @@ impl Osier {
                 .max(60.)
                 .step(1.)
                 .default_value(minutes)
+        });
+        let tooltip_ms = settings
+            .appearance
+            .tooltip_delay_ms
+            .min(TOOLTIP_DELAY_MAX_MS) as f32;
+        let tooltip_delay = cx.new(|_| {
+            gpui_kit::component::slider::SliderState::new()
+                .min(0.)
+                .max(TOOLTIP_DELAY_MAX_MS as f32)
+                .step(50.)
+                .default_value(tooltip_ms)
         });
         let keymap_watch = if cfg!(test) {
             None
@@ -353,6 +368,7 @@ impl Osier {
             },
             recent_status,
             recent_interval,
+            tooltip_delay,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
             _subscriptions: vec![
@@ -385,6 +401,23 @@ impl Osier {
                     this.recent_status_on_focus();
                 }
             }));
+        let slider = this.tooltip_delay.clone();
+        this._subscriptions.push(cx.subscribe(
+            &slider,
+            |this, _, ev: &gpui_kit::component::slider::SliderEvent, cx| {
+                use gpui_kit::component::slider::SliderEvent;
+                let (v, save) = match ev {
+                    SliderEvent::Change(v) => (v, false),
+                    SliderEvent::Release(v) => (v, true),
+                };
+                this.settings.appearance.tooltip_delay_ms = v.start().round() as u32;
+                this.apply_tooltip_delay(cx);
+                if save {
+                    this.save_settings();
+                }
+                cx.notify();
+            },
+        ));
         let slider = this.recent_interval.clone();
         this._subscriptions.push(cx.subscribe(
             &slider,
@@ -643,7 +676,20 @@ impl Osier {
 
     // ----- appearance -----
 
+    /// Install the tooltip delay for every tooltip in the app (takes effect at once).
+    pub(crate) fn apply_tooltip_delay(&self, cx: &mut App) {
+        let ms = self
+            .settings
+            .appearance
+            .tooltip_delay_ms
+            .min(TOOLTIP_DELAY_MAX_MS);
+        gpui_kit::base::TooltipDefaults::global(cx)
+            .with_show_delay(Duration::from_millis(u64::from(ms)))
+            .install(cx);
+    }
+
     pub(crate) fn apply_appearance(&mut self, cx: &mut App) {
+        self.apply_tooltip_delay(cx);
         use crate::themes::{DUX_DARK, DUX_LIGHT, ThemeStore};
         let a = &self.settings.appearance;
         let store = ThemeStore::global(cx);
@@ -2757,6 +2803,31 @@ mod tests {
         h.type_text(cx, "Log tab");
         h.keys(cx, "enter");
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
+    }
+
+    #[gpui::test]
+    fn tooltip_delay_defaults_to_250ms_and_applies_live(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        let delay = |cx: &mut TestAppContext| {
+            cx.update(|cx| gpui_kit::base::TooltipDefaults::global(cx).show_delay())
+        };
+        assert_eq!(delay(cx), std::time::Duration::from_millis(250));
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.tooltip_delay_ms = 600;
+            o.apply_tooltip_delay(cx);
+        });
+        assert_eq!(delay(cx), std::time::Duration::from_millis(600));
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.tooltip_delay_ms = 99_999;
+            o.apply_tooltip_delay(cx);
+        });
+        assert_eq!(
+            delay(cx),
+            std::time::Duration::from_millis(u64::from(super::TOOLTIP_DELAY_MAX_MS)),
+            "hand-edited config is clamped"
+        );
     }
 
     #[gpui::test]

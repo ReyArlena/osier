@@ -38,6 +38,8 @@ pub struct Appearance {
     /// Show a `...` menu button at the end of list rows. Right-click opens the same menu
     /// either way.
     pub row_menu_buttons: bool,
+    /// How long the pointer rests on something before its tooltip shows, in milliseconds.
+    pub tooltip_delay_ms: u32,
 }
 
 /// `icon` tints the project's folder icon, `dot` draws a dot before its name.
@@ -61,6 +63,7 @@ impl Default for Appearance {
             font_size: None,
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
+            tooltip_delay_ms: 250,
         }
     }
 }

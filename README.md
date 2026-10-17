@@ -107,6 +107,7 @@ dux_shell_sync = false        # follow Dux Shell colours when its cache exists
 # font_size = 14.0
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
+tooltip_delay_ms = 250        # how long to hover before a tooltip shows (0 to 1000)
 
 [editor]
 # command = "zed {file}:{line}"   # {path} = repository, {file}, {line}; empty = xdg-open
