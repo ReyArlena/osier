@@ -87,6 +87,10 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new(ok_label.clone())
+                        .variant(ButtonVariant::Primary),
+                )
                 .on_ok(move |_, window, cx| {
                     let text = input.read(cx).value().to_string();
                     let _ = weak.update(cx, |this, cx| on_ok(this, text, window, cx));

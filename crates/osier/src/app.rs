@@ -2910,6 +2910,19 @@ mod tests {
         assert!(h.has_settings(cx));
         h.keys(cx, "escape");
         assert!(!h.has_settings(cx));
+        // The Cancel button does the same.
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "keep.txt".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        h.click(cx, "dialog-cancel");
+        assert!(!h.has_settings(cx), "Cancel closes the dialog");
         assert!(tracked("keep.txt"));
         assert!(
             !std::fs::read_to_string(repo.path().join(".gitignore"))
@@ -2929,7 +2942,8 @@ mod tests {
             )
         });
         h.click(cx, "tracked-dialog-check");
-        h.keys(cx, "enter");
+        h.click(cx, "dialog-ok");
+        assert!(!h.has_settings(cx), "the OK button confirms");
         assert!(tracked("keep.txt"), "still tracked");
         assert!(
             std::fs::read_to_string(repo.path().join(".gitignore"))
@@ -2951,6 +2965,62 @@ mod tests {
         let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
         assert_eq!(gitignore, "/notes.tmp\n");
         assert!(!status_has(&h, cx, "notes.tmp"));
+    }
+
+    #[gpui::test]
+    fn ui_confirm_dialogs_have_working_buttons(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0));
+        let open =
+            |h: &Harness, cx: &mut TestAppContext, hits: std::rc::Rc<std::cell::Cell<i32>>| {
+                h.act(cx, move |o, w, cx| {
+                    o.confirm(
+                        "Title",
+                        "Body",
+                        "Do it",
+                        false,
+                        move |_, _, _| hits.set(hits.get() + 1),
+                        w,
+                        cx,
+                    )
+                });
+            };
+        open(&h, cx, hits.clone());
+        assert!(h.bounds(cx, "dialog-ok").is_some() && h.bounds(cx, "dialog-cancel").is_some());
+        h.click(cx, "dialog-cancel");
+        assert!(!h.has_settings(cx));
+        assert_eq!(hits.get(), 0);
+        open(&h, cx, hits.clone());
+        h.click(cx, "dialog-ok");
+        assert!(!h.has_settings(cx));
+        assert_eq!(hits.get(), 1);
+    }
+
+    #[gpui::test]
+    fn ui_clicking_the_option_words_toggles_the_checkbox(cx: &mut TestAppContext) {
+        use crate::ignore_ops::RowState;
+        let repo = TempRepo::new();
+        repo.commit_file("notes.txt", "n\n", "tracked");
+        let h = Harness::open(cx, &repo);
+        let row = RowState {
+            is_dir: false,
+            tracked: true,
+        };
+        h.act(cx, |o, w, cx| {
+            o.untrack_prompt("notes.txt".into(), row, w, cx)
+        });
+        h.click(cx, "tracked-dialog-option");
+        h.click(cx, "dialog-ok");
+        assert!(
+            repo.git(["ls-files", "--", "notes.txt"]).trim().is_empty(),
+            "untracked"
+        );
+        assert!(
+            !repo.path().join(".gitignore").exists(),
+            "the unticked option did not add a pattern"
+        );
     }
 
     #[gpui::test]

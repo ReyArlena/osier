@@ -151,6 +151,15 @@ impl Osier {
                         })
                         .show_cancel(true),
                 )
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new(ok_label.clone()).variant(
+                        if danger {
+                            ButtonVariant::Danger
+                        } else {
+                            ButtonVariant::Primary
+                        },
+                    ),
+                )
                 .on_ok(move |_, window, cx| {
                     let _ = weak.update(cx, |this, cx| on_ok(this, window, cx));
                     true

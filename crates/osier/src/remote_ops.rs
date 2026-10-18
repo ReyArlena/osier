@@ -429,6 +429,7 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
+.footer(crate::dialog_buttons::DialogButtons::new("Pull").variant(ButtonVariant::Primary))
                 .on_ok(move |_, window, cx| {
                     let strategy = if choice.get() == 1 { PullStrategy::Rebase } else { PullStrategy::Merge };
                     let mut options = options.clone();
@@ -485,6 +486,7 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
+.footer(crate::dialog_buttons::DialogButtons::new("Continue").variant(ButtonVariant::Primary))
                 .on_ok(move |_, window, cx| {
                     let force = choice.get() == 1;
                     let options = options.clone();
@@ -666,6 +668,7 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
+.footer(crate::dialog_buttons::DialogButtons::new("Use account").variant(ButtonVariant::Primary))
                 .on_ok(move |_, window, cx| {
                     let login = candidates.get(choice.get()).cloned().unwrap_or_default();
                     let always = always.get();

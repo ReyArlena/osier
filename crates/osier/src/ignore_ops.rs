@@ -14,7 +14,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Sizable as _, WindowExt as _, v_flex};
+use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::ops::ignore::{self, IgnoreFile};
@@ -192,6 +192,12 @@ impl Osier {
              on your disk, but when the commit is pulled into another clone, git deletes it \
              there."
         );
+        // What the checkbox runs, shown as a command. Folders untrack every file inside.
+        let rm_command = if row.is_dir {
+            format!("git rm --cached -r {path}")
+        } else {
+            format!("git rm --cached {path}")
+        };
         let (title, body, check_label, ok_label, extra) = match &mode {
             Mode::Ignore(Some((file, pattern))) => (
                 format!("Add {path} to {}", file.label()),
@@ -201,7 +207,7 @@ impl Osier {
                      in this repository? (The {what} will not be deleted.)",
                     file.label()
                 ),
-                Some(format!("Stop tracking: git rm --cached {path}")),
+                Some(("Run", rm_command.clone(), "")),
                 format!("Add to {}", file.label()),
                 Some(pattern.clone()),
             ),
@@ -218,8 +224,13 @@ impl Osier {
             Mode::Untrack(step) => (
                 format!("Untrack {path}"),
                 format!("Git stops tracking {path}. The {what} will not be deleted."),
-                step.as_ref()
-                    .map(|_| format!("Also add {path} to .gitignore so it is not added again")),
+                step.as_ref().map(|(_, p)| {
+                    (
+                        "Also add",
+                        p.clone(),
+                        "to .gitignore so it is not added again",
+                    )
+                }),
                 "Untrack".to_string(),
                 step.as_ref().map(|(_, p)| p.clone()),
             ),
@@ -250,17 +261,36 @@ impl Osier {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(warning.clone()),
                         )
-                        .when_some(check_label.clone(), |this, label| {
+                        .when_some(check_label.clone(), |this, (before, code, after)| {
+                            // The checkbox plus its words, with the command or pattern as
+                            // inline code. Clicking the words toggles it too.
+                            let c3 = c1.clone();
                             this.child(
-                                Checkbox::new("tracked-dialog-check")
-                                    .test_id("tracked-dialog-check")
-                                    .small()
-                                    .label(label)
-                                    .checked(c1.get())
-                                    .on_click(move |v, window, _| {
-                                        c1.set(*v);
+                                h_flex()
+                                    .id("tracked-dialog-option")
+                                    .test_id("tracked-dialog-option")
+                                    .gap_2()
+                                    .items_center()
+                                    .flex_wrap()
+                                    .cursor_pointer()
+                                    .on_click(move |_, window, _| {
+                                        c3.set(!c3.get());
                                         window.refresh();
-                                    }),
+                                    })
+                                    .child(
+                                        Checkbox::new("tracked-dialog-check")
+                                            .test_id("tracked-dialog-check")
+                                            .small()
+                                            .checked(c1.get())
+                                            .on_click(move |v, window, cx| {
+                                                c1.set(*v);
+                                                cx.stop_propagation();
+                                                window.refresh();
+                                            }),
+                                    )
+                                    .child(before)
+                                    .child(crate::inline_code::inline_code(code, cx))
+                                    .when(!after.is_empty(), |this| this.child(after)),
                             )
                         }),
                 )
@@ -269,6 +299,10 @@ impl Osier {
                         .ok_text(ok_label.clone())
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
+                )
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new(ok_label.clone())
+                        .variant(ButtonVariant::Primary),
                 )
                 .on_ok(move |_, window, cx| {
                     let checked = c2.get();

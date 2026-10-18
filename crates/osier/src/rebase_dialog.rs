@@ -203,6 +203,7 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
+.footer(crate::dialog_buttons::DialogButtons::new("Rebase").variant(ButtonVariant::Primary))
                 .on_ok(move |_, window, cx| {
                     let list = items.borrow().clone();
                     let base = base.clone();

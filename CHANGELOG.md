@@ -57,5 +57,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Confirmation dialogs now have OK and Cancel buttons (they only answered to Enter and
+  Escape before).
 - install.sh: source builds now install the desktop entry and icons, and the entry
   launches the installed binary by its full path.
