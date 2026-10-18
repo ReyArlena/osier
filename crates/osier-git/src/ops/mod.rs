@@ -8,6 +8,7 @@
 pub mod branch;
 pub mod commit;
 pub mod discard;
+pub mod ignore;
 pub mod integrate;
 pub mod patch;
 pub mod patches;

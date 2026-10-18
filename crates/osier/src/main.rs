@@ -18,6 +18,7 @@ mod format;
 mod github;
 mod graph;
 mod hunk_ops;
+mod ignore_ops;
 mod keymap;
 mod ops;
 mod palette;

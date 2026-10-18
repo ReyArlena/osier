@@ -40,6 +40,9 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- Add to .gitignore, ignore only on this machine (`.git/info/exclude`) and Untrack from the
+  Files and Changes context menus. Tracked paths get a confirmation that offers to stop
+  tracking them (`git rm --cached`, the file stays on disk).
 - Tooltip delay setting (Settings > Appearance > Tooltips), shown at once by default (was 500 ms).
 - The tab list menu only appears when the tabs do not fit, and cut-off tabs fade out at the
   edges.

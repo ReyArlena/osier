@@ -121,6 +121,36 @@ impl Osier {
                 dirty_dirs.insert(acc.clone());
             }
         }
+        // Tracked files and the folders holding them, for "Untrack" in the context menu.
+        // `files` lists tracked plus untracked; status names the untracked (whole untracked
+        // folders end in `/`).
+        let untracked_dirs: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.is_untracked() && e.path.ends_with('/'))
+            .map(|e| e.path.as_str())
+            .collect();
+        let untracked_files: std::collections::HashSet<&str> = entries
+            .iter()
+            .filter(|e| e.is_untracked() && !e.path.ends_with('/'))
+            .map(|e| e.path.as_str())
+            .collect();
+        let mut tracked: std::collections::HashSet<String> = Default::default();
+        for f in &files {
+            if untracked_files.contains(f.as_str())
+                || untracked_dirs.iter().any(|d| f.starts_with(d))
+            {
+                continue;
+            }
+            let mut acc = String::new();
+            for part in f.split('/') {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(part);
+                tracked.insert(acc.clone());
+            }
+        }
+        let tracked = std::rc::Rc::new(tracked);
         let mut paths = files;
         if self.show_ignored
             && let Ok(ignored) = osier_git::files::ignored(&repo)
@@ -282,64 +312,79 @@ impl Osier {
                     })
                     .context_menu({
                         let weak = weak.clone();
+                        let tracked = tracked.clone();
                         move |_ix, entry, menu, _window, _cx| {
                             let path = entry.item().id.to_string();
                             let is_folder = entry.is_folder();
+                            let row = crate::ignore_ops::RowState {
+                                is_dir: is_folder,
+                                tracked: tracked.contains(&path),
+                            };
+                            let (w9, p9) = (weak.clone(), path.clone());
                             let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                             let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
                             let (w4, w5, w6) = (weak.clone(), weak.clone(), weak.clone());
                             let (p4, p5, p6) = (path.clone(), path.clone(), path.clone());
-                            menu.when(!is_folder, |m| {
-                                m.item(PopupMenuItem::new("View at HEAD").on_click(
-                                    move |_, _, cx| {
-                                        let _ = w6.update(cx, |this, cx| {
-                                            this.select_work_file(
-                                                p6.clone(),
-                                                Some("HEAD".into()),
-                                                cx,
-                                            )
+                            let menu = menu
+                                .when(!is_folder, |m| {
+                                    m.item(PopupMenuItem::new("View at HEAD").on_click(
+                                        move |_, _, cx| {
+                                            let _ = w6.update(cx, |this, cx| {
+                                                this.select_work_file(
+                                                    p6.clone(),
+                                                    Some("HEAD".into()),
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
+                                        let _ = w4.update(cx, |this, cx| {
+                                            this.show_blame(p4.clone(), None, cx)
                                         });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
-                                    let _ = w4.update(cx, |this, cx| {
-                                        this.show_blame(p4.clone(), None, cx)
-                                    });
-                                }))
-                                .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
-                                    let _ = w5.update(cx, |this, cx| {
-                                        this.show_file_history(p5.clone(), cx)
-                                    });
-                                }))
-                                .separator()
-                            })
-                            .when(!is_folder, |m| {
-                                m.item(PopupMenuItem::new("Open in editor").on_click(
+                                    }))
+                                    .item(PopupMenuItem::new("History").on_click(
+                                        move |_, _, cx| {
+                                            let _ = w5.update(cx, |this, cx| {
+                                                this.show_file_history(p5.clone(), cx)
+                                            });
+                                        },
+                                    ))
+                                    .separator()
+                                })
+                                .when(!is_folder, |m| {
+                                    m.item(PopupMenuItem::new("Open in editor").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w1.update(cx, |this, cx| {
+                                                this.open_in_editor(
+                                                    Some((p1.clone(), None)),
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                })
+                                .item(PopupMenuItem::new("Open in file manager").on_click(
                                     move |_, window, cx| {
-                                        let _ = w1.update(cx, |this, cx| {
-                                            this.open_in_editor(
-                                                Some((p1.clone(), None)),
+                                        let _ = w2.update(cx, |this, cx| {
+                                            this.reveal_in_file_manager(
+                                                Some(p2.clone()),
                                                 window,
                                                 cx,
                                             )
                                         });
                                     },
                                 ))
-                            })
-                            .item(PopupMenuItem::new("Open in file manager").on_click(
-                                move |_, window, cx| {
-                                    let _ = w2.update(cx, |this, cx| {
-                                        this.reveal_in_file_manager(Some(p2.clone()), window, cx)
-                                    });
-                                },
-                            ))
-                            .item(
-                                PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
-                                    let _ = w3.update(cx, |this, cx| {
-                                        this.copy_to_clipboard(p3.clone(), window, cx)
-                                    });
-                                }),
-                            )
+                                .item(PopupMenuItem::new("Copy path").on_click(
+                                    move |_, window, cx| {
+                                        let _ = w3.update(cx, |this, cx| {
+                                            this.copy_to_clipboard(p3.clone(), window, cx)
+                                        });
+                                    },
+                                ))
+                                .separator();
+                            Osier::ignore_menu(menu, w9, p9, row)
                         }
                     })
                     .size_full(),

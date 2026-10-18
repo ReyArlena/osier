@@ -2805,6 +2805,180 @@ mod tests {
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
     }
 
+    fn status_has(h: &Harness, cx: &mut TestAppContext, line: &str) -> bool {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .is_some_and(|s| s.status.entries.iter().any(|e| e.path == line))
+        })
+    }
+
+    #[gpui::test]
+    fn ignoring_an_untracked_file_takes_effect_at_once_and_twice_is_a_no_op(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::ignore_ops::{PatternKind, RowState};
+        use osier_git::ops::ignore::IgnoreFile;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("debug.log", "x\n");
+        let h = Harness::open(cx, &repo);
+        assert!(status_has(&h, cx, "debug.log"));
+        let row = RowState {
+            is_dir: false,
+            tracked: false,
+        };
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "debug.log".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        let gitignore =
+            || std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
+        assert_eq!(gitignore(), "/debug.log\n");
+        assert!(
+            !status_has(&h, cx, "debug.log"),
+            "gone from Changes straight away"
+        );
+        assert!(!h.has_settings(cx), "no dialog for an untracked file");
+
+        // Again: already ignored, nothing written, no dialog.
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "debug.log".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        assert_eq!(gitignore(), "/debug.log\n");
+        assert!(!h.has_settings(cx));
+    }
+
+    #[gpui::test]
+    fn ignoring_a_tracked_file_asks_and_untracks_by_default(cx: &mut TestAppContext) {
+        use crate::ignore_ops::{PatternKind, RowState};
+        use osier_git::ops::ignore::IgnoreFile;
+        let repo = TempRepo::new();
+        repo.commit_file("config/local.php", "secret\n", "tracked");
+        repo.commit_file("keep.txt", "k\n", "tracked too");
+        let h = Harness::open(cx, &repo);
+        let row = RowState {
+            is_dir: false,
+            tracked: true,
+        };
+        let tracked = |path: &str| !repo.git(["ls-files", "--", path]).trim().is_empty();
+
+        // Enter accepts with the checkbox on: ignored and untracked, the file stays.
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "config/local.php".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        assert!(h.has_settings(cx), "a dialog for a tracked file");
+        assert!(h.bounds(cx, "tracked-dialog-check").is_some());
+        h.keys(cx, "enter");
+        assert!(!h.has_settings(cx));
+        assert!(!tracked("config/local.php"));
+        assert!(repo.path().join("config/local.php").exists());
+        let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap();
+        assert!(gitignore.contains("/config/local.php"));
+
+        // Escape cancels.
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "keep.txt".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        assert!(h.has_settings(cx));
+        h.keys(cx, "escape");
+        assert!(!h.has_settings(cx));
+        assert!(tracked("keep.txt"));
+        assert!(
+            !std::fs::read_to_string(repo.path().join(".gitignore"))
+                .unwrap()
+                .contains("keep.txt")
+        );
+
+        // Unchecking the box only adds the pattern.
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "keep.txt".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        h.click(cx, "tracked-dialog-check");
+        h.keys(cx, "enter");
+        assert!(tracked("keep.txt"), "still tracked");
+        assert!(
+            std::fs::read_to_string(repo.path().join(".gitignore"))
+                .unwrap()
+                .contains("/keep.txt")
+        );
+    }
+
+    #[gpui::test]
+    fn ui_add_to_gitignore_from_the_changes_menu(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("notes.tmp", "x\n");
+        let h = Harness::open(cx, &repo);
+        h.right_click(cx, "change-row:untracked:notes.tmp");
+        // Open in editor, Open in file manager, Copy path, Blame, History, Copy as patch,
+        // Save to Patches, Shelve, then Add to .gitignore.
+        h.keys(cx, "down down down down down down down down down enter");
+        let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
+        assert_eq!(gitignore, "/notes.tmp\n");
+        assert!(!status_has(&h, cx, "notes.tmp"));
+    }
+
+    #[gpui::test]
+    fn untrack_offers_to_ignore_too(cx: &mut TestAppContext) {
+        use crate::ignore_ops::RowState;
+        let repo = TempRepo::new();
+        repo.commit_file("build/out.bin", "b\n", "tracked build output");
+        let h = Harness::open(cx, &repo);
+        let row = RowState {
+            is_dir: true,
+            tracked: true,
+        };
+        h.act(cx, |o, w, cx| o.untrack_prompt("build".into(), row, w, cx));
+        assert!(h.has_settings(cx));
+        h.keys(cx, "enter");
+        assert!(
+            repo.git(["ls-files", "--", "build"]).trim().is_empty(),
+            "folder untracked"
+        );
+        assert!(repo.path().join("build/out.bin").exists());
+        let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap();
+        assert_eq!(gitignore, "/build/\n");
+        assert!(
+            status_has(&h, cx, "build/out.bin"),
+            "the staged removal shows at once"
+        );
+    }
+
     #[gpui::test]
     fn tooltip_delay_defaults_to_at_once_and_applies_live(cx: &mut TestAppContext) {
         let repo = TempRepo::new();

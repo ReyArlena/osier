@@ -150,76 +150,95 @@ impl Osier {
                             let weak = cx.entity().downgrade();
                             let p = path.clone();
                             move |menu, _, _| {
+                                let w9 = weak.clone();
+                                let p9 = p.clone();
                                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                                 let (p1, p2, p3) = (p.clone(), p.clone(), p.clone());
                                 let (w4, w5, w6) = (weak.clone(), weak.clone(), weak.clone());
                                 let (p4, p5, p6) = (p.clone(), p.clone(), p.clone());
                                 let (w7, w8) = (weak.clone(), weak.clone());
                                 let (p7, p8) = (p.clone(), p.clone());
-                                menu.item(PopupMenuItem::new("Open in editor").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w1.update(cx, |this, cx| {
-                                            this.open_in_editor(
-                                                Some((p1.clone(), None)),
-                                                window,
-                                                cx,
-                                            )
+                                let menu = menu
+                                    .item(PopupMenuItem::new("Open in editor").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w1.update(cx, |this, cx| {
+                                                this.open_in_editor(
+                                                    Some((p1.clone(), None)),
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Open in file manager").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w2.update(cx, |this, cx| {
+                                                this.reveal_in_file_manager(
+                                                    Some(p2.clone()),
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Copy path").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w3.update(cx, |this, cx| {
+                                                this.copy_to_clipboard(p3.clone(), window, cx)
+                                            });
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
+                                        let _ = w7.update(cx, |this, cx| {
+                                            this.show_blame(p7.clone(), None, cx)
                                         });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Open in file manager").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w2.update(cx, |this, cx| {
-                                            this.reveal_in_file_manager(
-                                                Some(p2.clone()),
-                                                window,
-                                                cx,
-                                            )
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Copy path").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w3.update(cx, |this, cx| {
-                                            this.copy_to_clipboard(p3.clone(), window, cx)
-                                        });
-                                    },
-                                ))
-                                .separator()
-                                .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
-                                    let _ = w7.update(cx, |this, cx| {
-                                        this.show_blame(p7.clone(), None, cx)
-                                    });
-                                }))
-                                .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
-                                    let _ = w8.update(cx, |this, cx| {
-                                        this.show_file_history(p8.clone(), cx)
-                                    });
-                                }))
-                                .separator()
-                                .item(PopupMenuItem::new("Copy as patch").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w4.update(cx, |this, cx| {
-                                            let s = Osier::file_source(&p4, area);
-                                            this.copy_patch(s, window, cx)
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Save to Patches…").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w5.update(cx, |this, cx| {
-                                            let s = Osier::file_source(&p5, area);
-                                            this.save_patch_prompt(s, p5.clone(), window, cx)
-                                        });
-                                    },
-                                ))
-                                .item(
-                                    PopupMenuItem::new("Shelve…").on_click(move |_, window, cx| {
-                                        let _ = w6.update(cx, |this, cx| {
-                                            this.shelve_prompt(vec![(p6.clone(), area)], window, cx)
-                                        });
-                                    }),
-                                )
+                                    }))
+                                    .item(PopupMenuItem::new("History").on_click(
+                                        move |_, _, cx| {
+                                            let _ = w8.update(cx, |this, cx| {
+                                                this.show_file_history(p8.clone(), cx)
+                                            });
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(PopupMenuItem::new("Copy as patch").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w4.update(cx, |this, cx| {
+                                                let s = Osier::file_source(&p4, area);
+                                                this.copy_patch(s, window, cx)
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Save to Patches…").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w5.update(cx, |this, cx| {
+                                                let s = Osier::file_source(&p5, area);
+                                                this.save_patch_prompt(s, p5.clone(), window, cx)
+                                            });
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("Shelve…").on_click(
+                                        move |_, window, cx| {
+                                            let _ = w6.update(cx, |this, cx| {
+                                                this.shelve_prompt(
+                                                    vec![(p6.clone(), area)],
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ));
+                                if area == Area::Conflicted {
+                                    return menu;
+                                }
+                                let row = crate::ignore_ops::RowState {
+                                    // Untracked folders are listed whole, as `dir/`.
+                                    is_dir: p9.ends_with('/'),
+                                    tracked: area != Area::Untracked,
+                                };
+                                let path = p9.trim_end_matches('/').to_string();
+                                Osier::ignore_menu(menu.separator(), w9, path, row)
                             }
                         })
                         .child(
