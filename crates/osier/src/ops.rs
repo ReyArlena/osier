@@ -57,6 +57,45 @@ impl Osier {
     ) where
         F: FnOnce(&Repository) -> osier_git::Result<()> + Send + 'static,
     {
+        self.run_op_inner(
+            summary,
+            move |repo| op(repo).map(|()| None),
+            then,
+            window,
+            cx,
+        );
+    }
+
+    /// Like [`run_op`](Self::run_op), but the operation reports its own success message (shown
+    /// and recorded instead of `summary`), e.g. where a line was written.
+    pub(crate) fn run_op_reporting<F>(
+        &mut self,
+        summary: impl Into<String>,
+        op: F,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        F: FnOnce(&Repository) -> osier_git::Result<String> + Send + 'static,
+    {
+        self.run_op_inner(
+            summary,
+            move |repo| op(repo).map(Some),
+            |_, _, _| {},
+            window,
+            cx,
+        );
+    }
+
+    fn run_op_inner<F>(
+        &mut self,
+        summary: impl Into<String>,
+        op: F,
+        then: impl FnOnce(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        F: FnOnce(&Repository) -> osier_git::Result<Option<String>> + Send + 'static,
+    {
         let Some(project) = self.active_project() else {
             return;
         };
@@ -69,11 +108,15 @@ impl Osier {
             let result = cx.background_spawn(async move { op(&repo2) }).await;
             let head_after = repo.head_oid().ok().flatten();
             let _ = this.update_in(cx, |this, window, cx| {
+                let summary = match &result {
+                    Ok(Some(message)) => message.clone(),
+                    _ => summary.clone(),
+                };
                 let mut entry = HistoryEntry::now(&path, summary.clone());
                 entry.head_before = head_before;
                 entry.head_after = head_after;
                 match &result {
-                    Ok(()) => {
+                    Ok(_) => {
                         window.push_notification(Notification::success(summary.clone()), cx);
                     }
                     Err(error) => {

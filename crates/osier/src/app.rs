@@ -2863,6 +2863,41 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ignoring_places_the_pattern_with_related_lines(cx: &mut TestAppContext) {
+        use crate::ignore_ops::{PatternKind, RowState};
+        use osier_git::ops::ignore::IgnoreFile;
+        let repo = TempRepo::new();
+        repo.commit_file(
+            ".gitignore",
+            "# local binaries\nlocal-bin/.local/bin/zed\nlocal-bin/.local/bin/btop\n\n# other\n*.log\n",
+            "ignore",
+        );
+        repo.write("local-bin/.local/bin/new-app", "x\n");
+        let h = Harness::open(cx, &repo);
+        let row = RowState {
+            is_dir: false,
+            tracked: false,
+        };
+        h.act(cx, |o, w, cx| {
+            o.ignore_path(
+                "local-bin/.local/bin/new-app".into(),
+                row,
+                PatternKind::Exact,
+                IgnoreFile::Gitignore,
+                w,
+                cx,
+            )
+        });
+        let text = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap();
+        assert_eq!(
+            text,
+            "# local binaries\nlocal-bin/.local/bin/zed\nlocal-bin/.local/bin/btop\n\
+             local-bin/.local/bin/new-app\n\n# other\n*.log\n"
+        );
+        assert!(!status_has(&h, cx, "local-bin/.local/bin/new-app"));
+    }
+
+    #[gpui::test]
     fn ignoring_a_tracked_file_asks_and_untracks_by_default(cx: &mut TestAppContext) {
         use crate::ignore_ops::{PatternKind, RowState};
         use osier_git::ops::ignore::IgnoreFile;

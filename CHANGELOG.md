@@ -40,6 +40,8 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- New .gitignore lines go next to related lines (same folders, or other `*.ext` patterns)
+  instead of the end, unless a later rule would override them.
 - Add to .gitignore, ignore only on this machine (`.git/info/exclude`) and Untrack from the
   Files and Changes context menus. Tracked paths get a confirmation that offers to stop
   tracking them (`git rm --cached`, the file stays on disk).

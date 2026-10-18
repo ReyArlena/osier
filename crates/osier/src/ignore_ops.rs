@@ -130,9 +130,12 @@ impl Osier {
                 ),
                 Ok((false, false)) => {
                     let summary = format!("Ignored {pattern} in {}", file.label());
-                    this.run_op(
+                    this.run_op_reporting(
                         summary,
-                        move |repo| ignore::add_pattern(repo, file, &pattern).map(|_| ()),
+                        move |repo| {
+                            let added = ignore::add_pattern(repo, file, &pattern, &path)?;
+                            Ok(format!("Ignored {}", where_added(&added, file)))
+                        },
                         window,
                         cx,
                     );
@@ -338,16 +341,28 @@ impl Osier {
             (None, true) => format!("Stopped tracking {path}"),
             (None, false) => return,
         };
-        self.run_op(
-            summary,
+        self.run_op_reporting(
+            summary.clone(),
             move |repo| {
-                if let Some(p) = &pattern {
-                    ignore::add_pattern(repo, file, p)?;
-                }
+                let added = match &pattern {
+                    Some(p) => Some(ignore::add_pattern(repo, file, p, &path)?),
+                    None => None,
+                };
                 if untrack {
                     ignore::untrack(repo, &path)?;
                 }
-                Ok(())
+                Ok(match (added, untrack) {
+                    (Some(a), true) => {
+                        format!(
+                            "Ignored {} and stopped tracking {path}",
+                            where_added(&a, file)
+                        )
+                    }
+                    (Some(a), false) => {
+                        format!("Ignored {} (still tracked)", where_added(&a, file))
+                    }
+                    (None, _) => summary,
+                })
             },
             window,
             cx,
@@ -360,4 +375,17 @@ impl Osier {
 enum Mode {
     Ignore(Option<(IgnoreFile, String)>),
     Untrack(Option<(IgnoreFile, String)>),
+}
+
+/// "/x in .gitignore (line 42, next to y)" for a notification.
+fn where_added(added: &ignore::Added, file: IgnoreFile) -> String {
+    let mut out = format!("{} in {} (line {}", added.pattern, file.label(), added.line);
+    if let Some(near) = &added.near {
+        out.push_str(&format!(", next to {near}"));
+    }
+    if !added.changed {
+        out.push_str(", already there");
+    }
+    out.push(')');
+    out
 }
