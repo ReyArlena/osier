@@ -83,7 +83,20 @@ holds only your changes and is reloaded when it changes:
 refresh = ["f5"]                      # replaces ctrl-r and f5
 focus_project_search = ["/", "ctrl-f"]
 open_settings = []                    # unbound
+prefix_key = ["ctrl-h"]               # a leader key (unset by default)
+focus_file_search = ["prefix ?"]      # only after the prefix: ctrl-h, then ?
+tab_log = ["prefix? l"]               # either: l alone, or ctrl-h then l
+row_add_to_gitignore = ["i"]          # context menu entry on the selected row
 ```
+
+**Prefix key.** Press it, then a binding's key. While it waits the status bar shows "Prefix
+key pressed"; Escape, a click, an unbound key or the timeout (5 seconds by default) cancel it.
+Each key is set to No prefix, Prefix only or Either with three buttons on the Keymap page, and
+keys after the prefix also work while typing in a text field.
+
+**Context menus.** Every right-click entry (Add to .gitignore, Delete / Drop, Cherry-pick, ...)
+can have a key that runs it on the selected row of Changes, Files, Log or Patches. These keys
+start unbound and cannot share a key with any other binding.
 
 If you use Dux Shell (DankMaterialShell), Osier writes its shortcuts to
 `~/.config/dms/cheatsheets/osier.json`, so `dms keybinds show osier` and the DMS keybinds
@@ -108,6 +121,9 @@ dux_shell_sync = false        # follow Dux Shell colours when its cache exists
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
+
+[keys]
+prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key
 
 [editor]
 # command = "zed {file}:{line}"   # {path} = repository, {file}, {line}; empty = xdg-open

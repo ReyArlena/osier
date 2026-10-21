@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use crate::keymap::{Keymap, Scope, actions, pretty};
+use crate::keymap::{Keymap, Scope, actions, pretty_key, split_mode};
 
 /// `<config>/dms`, whether or not it exists.
 pub(crate) fn dms_dir() -> Option<PathBuf> {
@@ -36,8 +36,21 @@ pub(crate) fn document(keymap: &Keymap) -> String {
             continue;
         };
         let mut shown: Vec<String> = Vec::new();
-        for k in keys {
-            let key = pretty(k);
+        // DMS draws `+`-separated chips and cannot show sequences: a prefixed key is a
+        // `Prefix` chip plus the key; "either" keys get both entries.
+        let forms = keys.iter().flat_map(|k| {
+            let (mode, key) = split_mode(k);
+            let plain = pretty_key(key);
+            let mut out = Vec::new();
+            if mode.plain() || spec.id == crate::keymap::PREFIX_KEY {
+                out.push(plain.clone());
+            }
+            if mode.prefixed() && spec.id != crate::keymap::PREFIX_KEY {
+                out.push(format!("Prefix+{plain}"));
+            }
+            out
+        });
+        for key in forms {
             if shown.contains(&key) {
                 continue;
             }
@@ -46,6 +59,7 @@ pub(crate) fn document(keymap: &Keymap) -> String {
             let subcat = match spec.scope {
                 Scope::App => None,
                 Scope::List => Some("In lists"),
+                Scope::Row => Some("Selected row"),
                 Scope::Settings => Some("In settings"),
             };
             if let (Some(sub), Value::Object(o)) = (subcat, &mut entry) {

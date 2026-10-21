@@ -21,7 +21,60 @@ pub(crate) enum Scope {
     List,
     /// The settings dialog: context `OsierSettings`.
     Settings,
+    /// A context-menu action on the selected row of a centre list (Changes, Files, Log,
+    /// Patches). Same context as `List`; its keys may not clash with any other binding.
+    Row,
 }
+
+/// How a key relates to the prefix (leader) key. Stored in `keymap.toml` as a leading token:
+/// `"/"` (no prefix), `"prefix /"` (prefix only), `"prefix? /"` (either).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyMode {
+    /// Fires on the key alone.
+    Plain,
+    /// Fires only after the prefix key.
+    Prefix,
+    /// Fires on the key alone or after the prefix key.
+    Either,
+}
+
+impl KeyMode {
+    pub(crate) const ALL: [KeyMode; 3] = [KeyMode::Plain, KeyMode::Prefix, KeyMode::Either];
+
+    /// The key alone fires it.
+    pub(crate) fn plain(self) -> bool {
+        self != KeyMode::Prefix
+    }
+
+    /// The key after the prefix fires it.
+    pub(crate) fn prefixed(self) -> bool {
+        self != KeyMode::Plain
+    }
+}
+
+/// `"prefix /"` as `(Prefix, "/")`.
+pub(crate) fn split_mode(keys: &str) -> (KeyMode, &str) {
+    let t = keys.trim();
+    if let Some(rest) = t.strip_prefix("prefix? ") {
+        (KeyMode::Either, rest.trim())
+    } else if let Some(rest) = t.strip_prefix("prefix ") {
+        (KeyMode::Prefix, rest.trim())
+    } else {
+        (KeyMode::Plain, t)
+    }
+}
+
+/// The stored form of `key` with `mode`.
+pub(crate) fn with_mode(mode: KeyMode, key: &str) -> String {
+    match mode {
+        KeyMode::Plain => key.to_string(),
+        KeyMode::Prefix => format!("prefix {key}"),
+        KeyMode::Either => format!("prefix? {key}"),
+    }
+}
+
+/// Id of the prefix (leader) key's own action.
+pub(crate) const PREFIX_KEY: &str = "prefix_key";
 
 pub(crate) struct ActionSpec {
     /// Stable id used in `keymap.toml`.
@@ -30,6 +83,8 @@ pub(crate) struct ActionSpec {
     pub category: &'static str,
     pub defaults: &'static [&'static str],
     pub scope: Scope,
+    /// Where it applies, shown under the name on the Keymap page ("" for none).
+    pub detail: &'static str,
     pub make: fn() -> Box<dyn Action>,
 }
 
@@ -41,6 +96,7 @@ macro_rules! spec {
             category: $cat,
             defaults: &[$($key),*],
             scope: Scope::$scope,
+            detail: "",
             make: || Box::new($action),
         }
     };
@@ -48,7 +104,8 @@ macro_rules! spec {
 
 /// The registry, in display order.
 pub(crate) fn actions() -> Vec<ActionSpec> {
-    vec![
+    let mut all = vec![
+        spec!("prefix_key", "Prefix key", "Prefix", [], App, PrefixKey),
         spec!("quit", "Quit", "General", ["ctrl-q"], App, Quit),
         spec!(
             "refresh",
@@ -215,7 +272,9 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         spec!("fetch", "Fetch", "Remote", ["ctrl-shift-f"], App, Fetch),
         spec!("pull", "Pull", "Remote", ["ctrl-shift-l"], App, Pull),
         spec!("push", "Push", "Remote", ["ctrl-shift-p"], App, Push),
-    ]
+    ];
+    all.extend(crate::row_actions::specs());
+    all
 }
 
 /// A keystroke that cannot type into a text field: a modifier chord or a function key.
@@ -236,8 +295,8 @@ pub(crate) fn context_for(scope: Scope, keys: &str) -> Option<&'static str> {
     match (scope, anywhere) {
         (Scope::App, true) => None,
         (Scope::App, false) => Some("Osier && !Input"),
-        (Scope::List, true) => Some("OsierList"),
-        (Scope::List, false) => Some("OsierList && !Input"),
+        (Scope::List | Scope::Row, true) => Some("OsierList"),
+        (Scope::List | Scope::Row, false) => Some("OsierList && !Input"),
         (Scope::Settings, true) => Some("OsierSettings"),
         (Scope::Settings, false) => Some("OsierSettings && !Input"),
     }
@@ -275,7 +334,10 @@ impl Global for KitBindings {}
 /// The keys each action has right now (defaults plus `keymap.toml`), and problems found.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Keymap {
+    /// Stored forms, mode token included (`"prefix /"`).
     pub keys: std::collections::BTreeMap<&'static str, Vec<String>>,
+    /// Keys that fire after the prefix key, with their action ids.
+    pub prefixed: Vec<(String, &'static str)>,
     pub problems: Vec<String>,
 }
 impl Global for Keymap {}
@@ -321,11 +383,21 @@ pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) 
         };
         let mut valid = Vec::new();
         for k in keys {
-            if !plausible(&k) || bindings([(spec, k.as_str())], cx).is_empty() {
+            let (mode, key) = split_mode(&k);
+            // The prefix key itself is always a plain key.
+            let k = if spec.id == PREFIX_KEY {
+                key.to_string()
+            } else {
+                k.clone()
+            };
+            if !plausible(key) || bindings([(spec, key)], cx).is_empty() {
                 keymap
                     .problems
                     .push(format!("invalid key \"{k}\" for {}", spec.id));
             } else {
+                if mode.prefixed() && spec.id != PREFIX_KEY {
+                    keymap.prefixed.push((key.to_ascii_lowercase(), spec.id));
+                }
                 valid.push(k);
             }
         }
@@ -334,7 +406,12 @@ pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) 
     let ours: Vec<KeyBinding> = {
         let pairs: Vec<(&ActionSpec, &str)> = specs
             .iter()
-            .flat_map(|s| keymap.keys_for(s.id).iter().map(move |k| (s, k.as_str())))
+            .flat_map(|s| {
+                keymap.keys_for(s.id).iter().filter_map(move |k| {
+                    let (mode, key) = split_mode(k);
+                    (mode.plain() || s.id == PREFIX_KEY).then_some((s, key))
+                })
+            })
             .collect();
         bindings(pairs, cx)
     };
@@ -381,31 +458,56 @@ pub(crate) fn keystroke_string(k: &Keystroke) -> Option<String> {
     Some(s)
 }
 
-/// Other actions sharing `keys` with `id` where both can fire (same window area).
+/// Other actions sharing `keys` (stored form, mode included) with `id` where both can fire:
+/// overlapping window areas and a shared namespace (alone, or after the prefix). The prefix
+/// key counts as a plain key.
 pub(crate) fn conflicts(keymap: &Keymap, id: &str, keys: &str) -> Vec<&'static str> {
+    conflicting(keymap, id, keys)
+        .into_iter()
+        .map(|s| s.name)
+        .collect()
+}
+
+/// Like [`conflicts`], but only the clashes Osier refuses: any involving a context-menu
+/// action or the prefix key. (Clashes between other actions are allowed with a warning.)
+pub(crate) fn refused(keymap: &Keymap, id: &str, keys: &str) -> Vec<&'static str> {
     let specs = actions();
-    let scope_of = |id: &str| specs.iter().find(|s| s.id == id).map(|s| s.scope);
-    let Some(mine) = scope_of(id) else {
+    let strict = |s: &ActionSpec| s.scope == Scope::Row || s.id == PREFIX_KEY;
+    let mine_strict = specs.iter().find(|s| s.id == id).is_some_and(strict);
+    conflicting(keymap, id, keys)
+        .into_iter()
+        .filter(|s| mine_strict || strict(s))
+        .map(|s| s.name)
+        .collect()
+}
+
+fn conflicting(keymap: &Keymap, id: &str, keys: &str) -> Vec<ActionSpec> {
+    let specs = actions();
+    let mode_of = |id: &str, k: &str| {
+        if id == PREFIX_KEY {
+            (KeyMode::Plain, split_mode(k).1.to_ascii_lowercase())
+        } else {
+            let (m, key) = split_mode(k);
+            (m, key.to_ascii_lowercase())
+        }
+    };
+    let Some(mine) = specs.iter().find(|s| s.id == id).map(|s| s.scope) else {
         return Vec::new();
     };
     let overlaps = |a: Scope, b: Scope| {
-        matches!(
-            (a, b),
-            (Scope::App | Scope::List, Scope::App | Scope::List)
-                | (Scope::Settings, Scope::Settings)
-        )
+        let main = |s| matches!(s, Scope::App | Scope::List | Scope::Row);
+        (main(a) && main(b)) || (a == Scope::Settings && b == Scope::Settings)
     };
-    let wanted = keys.to_ascii_lowercase();
+    let (mode, key) = mode_of(id, keys);
     specs
-        .iter()
+        .into_iter()
         .filter(|s| s.id != id && overlaps(mine, s.scope))
         .filter(|s| {
-            keymap
-                .keys_for(s.id)
-                .iter()
-                .any(|k| k.to_ascii_lowercase() == wanted)
+            keymap.keys_for(s.id).iter().any(|k| {
+                let (m2, k2) = mode_of(s.id, k);
+                k2 == key && ((mode.plain() && m2.plain()) || (mode.prefixed() && m2.prefixed()))
+            })
         })
-        .map(|s| s.name)
         .collect()
 }
 
@@ -429,7 +531,7 @@ pub(crate) fn plausible(keys: &str) -> bool {
         "left",
         "right",
     ];
-    let strokes: Vec<&str> = keys.split_whitespace().collect();
+    let strokes: Vec<&str> = split_mode(keys).1.split_whitespace().collect();
     !strokes.is_empty()
         && strokes.iter().all(|stroke| {
             let mut rest = *stroke;
@@ -459,7 +561,18 @@ pub(crate) fn plausible(keys: &str) -> bool {
 /// `ctrl-shift-p` as `Ctrl+Shift+P`, `escape` as `Esc`, sequences joined by spaces. The form
 /// shown in the palette, the Keymap page and the DMS cheatsheet.
 pub(crate) fn pretty(keys: &str) -> String {
-    keys.split_whitespace()
+    let (mode, key) = split_mode(keys);
+    let plain = pretty_key(key);
+    match mode {
+        KeyMode::Plain => plain,
+        KeyMode::Prefix => format!("Prefix {plain}"),
+        KeyMode::Either => format!("{plain} or Prefix {plain}"),
+    }
+}
+
+/// The key itself, without its prefix mode.
+pub(crate) fn pretty_key(key: &str) -> String {
+    key.split_whitespace()
         .map(pretty_stroke)
         .collect::<Vec<_>>()
         .join(" ")
@@ -567,6 +680,20 @@ mod tests {
         assert_eq!(pretty("f5"), "F5");
         assert_eq!(pretty("j"), "J");
         assert_eq!(pretty("ctrl-k ctrl-s"), "Ctrl+K Ctrl+S");
+        assert_eq!(pretty("prefix /"), "Prefix /");
+        assert_eq!(pretty("prefix? i"), "I or Prefix I");
+    }
+
+    #[test]
+    fn key_modes_round_trip() {
+        use super::{KeyMode, split_mode, with_mode};
+        for mode in KeyMode::ALL {
+            let stored = with_mode(mode, "ctrl-x");
+            assert_eq!(split_mode(&stored), (mode, "ctrl-x"));
+        }
+        assert!(super::plausible("prefix /"));
+        assert!(super::plausible("prefix? ctrl-k"));
+        assert!(!super::plausible("prefix ctrl-shft-x"));
     }
 
     #[test]
@@ -576,6 +703,11 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len());
-        assert!(all.iter().all(|a| !a.defaults.is_empty()));
+        // Context-menu actions and the prefix key start unbound; everything else has keys.
+        assert!(
+            all.iter()
+                .filter(|a| a.scope != Scope::Row && a.id != super::PREFIX_KEY)
+                .all(|a| !a.defaults.is_empty())
+        );
     }
 }

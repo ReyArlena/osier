@@ -24,6 +24,7 @@ pub struct KeymapFile {
 
 const HEADER: &str = "# Osier key bindings: only your changes to the defaults.\n\
 # Keys use gpui notation: ctrl-shift-p, alt-enter, f5, /, space. An empty list unbinds.\n\
+# \"prefix /\" fires only after the prefix key (prefix_key), \"prefix? /\" with or without it.\n\
 # Edited in Settings > Keymap or by hand; Osier reloads this file when it changes.\n\n";
 
 impl KeymapFile {

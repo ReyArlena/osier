@@ -66,6 +66,16 @@ impl Osier {
                     .gap_2()
                     .text_xs()
                     .items_center()
+                    .when(self.prefix_waiting(), |this| {
+                        this.child(
+                            h_flex()
+                                .test_id("prefix-badge")
+                                .gap_1()
+                                .items_center()
+                                .child(Tag::primary().xsmall().child("Prefix key pressed"))
+                                .child(div().text_color(muted).child("Esc cancels")),
+                        )
+                    })
                     .when_some(in_progress, |this, op| {
                         this.child(Tag::warning().xsmall().child(op))
                     })

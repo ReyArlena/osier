@@ -16,9 +16,27 @@ pub struct Settings {
     pub git: Git,
     pub auth: Auth,
     pub viewer: Viewer,
+    pub keys: Keys,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// Keyboard behaviour that is not a binding (bindings live in `keymap.toml`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Keys {
+    /// How long the prefix key waits for the next key, in seconds. 0 waits until a key,
+    /// Escape or a click.
+    pub prefix_timeout_secs: u32,
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Self {
+            prefix_timeout_secs: 5,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

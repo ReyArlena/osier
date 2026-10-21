@@ -49,6 +49,7 @@ gpui_kit::actions!(
         Fetch,
         Pull,
         Push,
+        PrefixKey,
     ]
 );
 
@@ -87,6 +88,9 @@ impl Tab {
         }
     }
 }
+
+/// Longest prefix key timeout the settings slider offers, in seconds.
+pub(crate) const PREFIX_TIMEOUT_MAX_SECS: u32 = 30;
 
 /// Longest tooltip delay the settings slider offers, in milliseconds.
 pub(crate) const TOOLTIP_DELAY_MAX_MS: u32 = 1000;
@@ -162,6 +166,9 @@ pub struct Osier {
     pub(crate) git_version: Option<String>,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
+    /// Waiting for the key after the prefix key (see `prefix.rs`).
+    pub(crate) prefix_pending: Option<Subscription>,
+    pub(crate) prefix_generation: u64,
     /// Scroll state of the main tab strip, to tell when the tabs overflow.
     pub(crate) tab_scroll: ScrollHandle,
     /// Settings group being flashed after `open_settings_at`, and since when.
@@ -184,6 +191,7 @@ pub struct Osier {
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
     pub(crate) recent_interval: Entity<gpui_kit::component::slider::SliderState>,
     pub(crate) tooltip_delay: Entity<gpui_kit::component::slider::SliderState>,
+    pub(crate) prefix_timeout: Entity<gpui_kit::component::slider::SliderState>,
     /// Narrow window: title-bar buttons drop their labels.
     pub(crate) compact: bool,
     /// Command log opened by the dev env var: do not persist that as a preference.
@@ -233,6 +241,17 @@ impl Osier {
                 .max(TOOLTIP_DELAY_MAX_MS as f32)
                 .step(50.)
                 .default_value(tooltip_ms)
+        });
+        let prefix_secs = settings
+            .keys
+            .prefix_timeout_secs
+            .min(PREFIX_TIMEOUT_MAX_SECS) as f32;
+        let prefix_timeout = cx.new(|_| {
+            gpui_kit::component::slider::SliderState::new()
+                .min(0.)
+                .max(PREFIX_TIMEOUT_MAX_SECS as f32)
+                .step(1.)
+                .default_value(prefix_secs)
         });
         let keymap_watch = if cfg!(test) {
             None
@@ -353,6 +372,8 @@ impl Osier {
             git_version: None,
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
+            prefix_pending: None,
+            prefix_generation: 0,
             tab_scroll: ScrollHandle::new(),
             settings_highlight: None,
             settings_target: None,
@@ -369,6 +390,7 @@ impl Osier {
             recent_status,
             recent_interval,
             tooltip_delay,
+            prefix_timeout,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
             _subscriptions: vec![
@@ -401,6 +423,22 @@ impl Osier {
                     this.recent_status_on_focus();
                 }
             }));
+        let slider = this.prefix_timeout.clone();
+        this._subscriptions.push(cx.subscribe(
+            &slider,
+            |this, _, ev: &gpui_kit::component::slider::SliderEvent, cx| {
+                use gpui_kit::component::slider::SliderEvent;
+                let (v, save) = match ev {
+                    SliderEvent::Change(v) => (v, false),
+                    SliderEvent::Release(v) => (v, true),
+                };
+                this.settings.keys.prefix_timeout_secs = v.start().round() as u32;
+                if save {
+                    this.save_settings();
+                }
+                cx.notify();
+            },
+        ));
         let slider = this.tooltip_delay.clone();
         this._subscriptions.push(cx.subscribe(
             &slider,
@@ -1583,11 +1621,68 @@ impl Osier {
         if keys == "escape" {
             return;
         }
-        let mut current = crate::keymap::Keymap::global(cx).keys_for(id).to_vec();
+        let keymap = crate::keymap::Keymap::global(cx);
+        let refused = crate::keymap::refused(keymap, id, &keys);
+        if !refused.is_empty() {
+            self.refuse_key(&keys, &refused, window, cx);
+            return;
+        }
+        let mut current = keymap.keys_for(id).to_vec();
         if !current.contains(&keys) {
             current.push(keys);
             self.set_action_keys(id, current, window, cx);
         }
+    }
+
+    /// A key that would clash with another binding where Osier does not allow it.
+    fn refuse_key(
+        &mut self,
+        keys: &str,
+        others: &[&str],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui_kit::component::WindowExt as _;
+        use gpui_kit::component::notification::Notification;
+        window.push_notification(
+            Notification::warning(format!(
+                "{} is already used by {}",
+                crate::keymap::pretty(keys),
+                others.join(", ")
+            ))
+            .message(
+                "Context-menu keys and the prefix key cannot share a key with another binding.",
+            ),
+            cx,
+        );
+    }
+
+    /// Switch one key of an action between no prefix, prefix only and either.
+    pub(crate) fn set_key_mode(
+        &mut self,
+        id: &'static str,
+        key: &str,
+        mode: crate::keymap::KeyMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::{Keymap, refused, split_mode, with_mode};
+        let keymap = Keymap::global(cx);
+        let new = with_mode(mode, split_mode(key).1);
+        if new == key {
+            return;
+        }
+        let clash = refused(keymap, id, &new);
+        if !clash.is_empty() {
+            self.refuse_key(&new, &clash, window, cx);
+            return;
+        }
+        let keys: Vec<String> = keymap
+            .keys_for(id)
+            .iter()
+            .map(|k| if k == key { new.clone() } else { k.clone() })
+            .collect();
+        self.set_action_keys(id, keys, window, cx);
     }
 
     pub(crate) fn remove_action_key(
@@ -1817,6 +1912,14 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &DiscardSelected, window, cx| {
                 this.discard_selected(window, cx)
             }))
+            .on_action(cx.listener(|this, _: &PrefixKey, window, cx| this.start_prefix(window, cx)))
+            .on_action(
+                cx.listener(|this, a: &crate::row_actions::RowAction, window, cx| {
+                    this.run_row_action(a.kind, window, cx)
+                }),
+            )
+            // Any click cancels a waiting prefix key.
+            .capture_any_mouse_down(cx.listener(|this, _, _, cx| this.cancel_prefix(cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_selection(-1, cx)))
             .size_full()
@@ -2692,6 +2795,72 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_keymap_mode_buttons_and_refused_clashes(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let keys_for = |h: &Harness, cx: &mut TestAppContext, id: &str| {
+            let id = id.to_string();
+            h.read(cx, move |_, cx| {
+                crate::keymap::Keymap::global(cx).keys_for(&id).to_vec()
+            })
+        };
+        h.keys(cx, "ctrl-,");
+        h.keys(cx, "/");
+        h.type_text(cx, "Search projects");
+        // The three buttons switch the key's mode.
+        h.click(cx, "keymode:focus_project_search:/:prefix");
+        assert_eq!(keys_for(&h, cx, "focus_project_search"), ["prefix /"]);
+        h.click(cx, "keymode:focus_project_search:prefix /:either");
+        assert_eq!(keys_for(&h, cx, "focus_project_search"), ["prefix? /"]);
+        h.click(cx, "keymode:focus_project_search:prefix? /:plain");
+        assert_eq!(keys_for(&h, cx, "focus_project_search"), ["/"]);
+
+        // A context-menu key may not take a key another binding uses.
+        h.act(cx, |o, _, cx| {
+            o.start_key_recording("row_add_to_gitignore", cx)
+        });
+        h.keys(cx, "/");
+        assert!(
+            keys_for(&h, cx, "row_add_to_gitignore").is_empty(),
+            "refused"
+        );
+        h.act(cx, |o, _, cx| {
+            o.start_key_recording("row_add_to_gitignore", cx)
+        });
+        h.keys(cx, "i");
+        assert_eq!(keys_for(&h, cx, "row_add_to_gitignore"), ["i"]);
+        // ...and a global cannot take it afterwards either.
+        h.act(cx, |o, _, cx| o.start_key_recording("refresh", cx));
+        h.keys(cx, "i");
+        assert_eq!(keys_for(&h, cx, "refresh"), ["ctrl-r", "f5"]);
+        // Prefixed keys live in their own namespace: `prefix i` is fine for a global.
+        h.act(cx, |o, w, cx| {
+            o.set_key_mode(
+                "row_add_to_gitignore",
+                "i",
+                crate::keymap::KeyMode::Prefix,
+                w,
+                cx,
+            )
+        });
+        h.act(cx, |o, _, cx| o.start_key_recording("refresh", cx));
+        h.keys(cx, "i");
+        assert_eq!(keys_for(&h, cx, "refresh"), ["ctrl-r", "f5", "i"]);
+        // Switching the menu key back to plain would clash now: refused.
+        h.act(cx, |o, w, cx| {
+            o.set_key_mode(
+                "row_add_to_gitignore",
+                "prefix i",
+                crate::keymap::KeyMode::Plain,
+                w,
+                cx,
+            )
+        });
+        assert_eq!(keys_for(&h, cx, "row_add_to_gitignore"), ["prefix i"]);
+    }
+
+    #[gpui::test]
     fn recording_captures_keys_instead_of_running_them(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");
@@ -3082,6 +3251,117 @@ mod tests {
             status_has(&h, cx, "build/out.bin"),
             "the staged removal shows at once"
         );
+    }
+
+    fn bind(cx: &mut TestAppContext, pairs: &[(&str, &[&str])]) {
+        let mut file = osier_config::keymap::KeymapFile::default();
+        for (id, keys) in pairs {
+            file.bindings
+                .insert(id.to_string(), keys.iter().map(|k| k.to_string()).collect());
+        }
+        cx.update(|cx| crate::keymap::apply(&file, cx));
+    }
+
+    fn filter_focused(h: &Harness, cx: &mut TestAppContext) -> bool {
+        focused_is(h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        })
+    }
+
+    #[gpui::test]
+    fn ui_prefix_key_waits_shows_a_badge_and_runs_the_next_key(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        bind(
+            cx,
+            &[
+                ("prefix_key", &["ctrl-h"]),
+                ("focus_project_search", &["prefix /"]),
+                ("focus_file_search", &["prefix? ?"]),
+            ],
+        );
+        let badge = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "prefix-badge").is_some();
+
+        // Prefix only: `/` alone does nothing, prefix then `/` searches.
+        h.keys(cx, "/");
+        assert!(
+            !filter_focused(&h, cx),
+            "prefix-only key ignored on its own"
+        );
+        h.keys(cx, "ctrl-h");
+        assert!(badge(&h, cx), "badge while waiting");
+        h.keys(cx, "/");
+        assert!(!badge(&h, cx));
+        assert!(filter_focused(&h, cx));
+
+        // While typing in a text field: the prefixed key runs instead of typing.
+        h.keys(cx, "ctrl-h ?");
+        assert_eq!(
+            input_text(&h, cx, |o| &o.sidebar_filter),
+            "",
+            "nothing typed"
+        );
+        h.read(cx, |o, _| assert_eq!(o.tab, super::Tab::Files));
+
+        // Either: works alone too (from outside a text field).
+        h.act(cx, |o, w, cx| {
+            o.set_tab(super::Tab::Changes, cx);
+            o.focus_handle.focus(w, cx);
+        });
+        h.keys(cx, "?");
+        h.read(cx, |o, _| assert_eq!(o.tab, super::Tab::Files));
+    }
+
+    #[gpui::test]
+    fn ui_prefix_cancels_on_escape_click_unknown_key_and_timeout(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        bind(
+            cx,
+            &[
+                ("prefix_key", &["ctrl-h"]),
+                ("focus_project_search", &["prefix /"]),
+            ],
+        );
+        let waiting = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |o, _| o.prefix_waiting());
+
+        h.keys(cx, "ctrl-h escape");
+        assert!(!waiting(&h, cx), "escape");
+        h.keys(cx, "/");
+        assert!(!filter_focused(&h, cx), "the prefix was really cancelled");
+
+        h.keys(cx, "ctrl-h");
+        h.click(cx, "tab-log");
+        assert!(!waiting(&h, cx), "click");
+
+        h.keys(cx, "ctrl-h z");
+        assert!(!waiting(&h, cx), "unbound key");
+
+        h.keys(cx, "ctrl-h");
+        assert!(waiting(&h, cx));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(4));
+        cx.run_until_parked();
+        assert!(waiting(&h, cx), "still waiting at 4 s");
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+        assert!(!waiting(&h, cx), "timed out after 5 s");
+    }
+
+    #[gpui::test]
+    fn ui_context_menu_keys_fire_on_the_selected_row(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("notes.tmp", "x\n");
+        let h = Harness::open(cx, &repo);
+        bind(cx, &[("row_add_to_gitignore", &["i"])]);
+        h.click(cx, "change-row:untracked:notes.tmp");
+        h.keys(cx, "i");
+        let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
+        assert_eq!(gitignore, "/notes.tmp\n");
     }
 
     #[gpui::test]

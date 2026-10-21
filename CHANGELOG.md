@@ -40,6 +40,11 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- Prefix (leader) key: bind one key, then set each binding to No prefix, Prefix only or
+  Either. A status bar badge shows while it waits; Escape, a click, an unbound key or the
+  timeout (5 seconds, Settings > Keymap) cancel it. Works in text fields.
+- Keys for context-menu entries, run on the selected row of Changes, Files, Log or Patches
+  (Settings > Keymap > Context menus). They cannot share a key with another binding.
 - New .gitignore lines go next to related lines (same folders, or other `*.ext` patterns)
   instead of the end, unless a later rule would override them.
 - Add to .gitignore, ignore only on this machine (`.git/info/exclude`) and Untrack from the
