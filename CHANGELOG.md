@@ -39,6 +39,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- New application icon.
 - The command palette opens with `ctrl-p` (and still `F1`).
 - New installs follow the desktop's light/dark preference (System mode), read from the XDG
   settings portal. With no stated preference or no portal, Osier uses the dark theme (set in

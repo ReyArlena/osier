@@ -37,7 +37,6 @@ modules:
       - install -Dm755 packaging/flatpak/git-host /app/bin/git-host
       - install -Dm644 packaging/com.reyarlena.osier.desktop /app/share/applications/com.reyarlena.osier.desktop
       - install -Dm644 packaging/com.reyarlena.osier.metainfo.xml /app/share/metainfo/com.reyarlena.osier.metainfo.xml
-      - install -Dm644 packaging/icons/osier.svg /app/share/icons/hicolor/scalable/apps/com.reyarlena.osier.svg
       - for s in 16 32 48 64 128 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png /app/share/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png; done
     sources:
       - type: dir
