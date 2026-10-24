@@ -40,6 +40,9 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - The command palette opens with `ctrl-p` (and still `F1`).
+- Theme picker with preview cards for the dark and light themes. Following Dux Shell colours
+  is the first Theme setting, on by default when Dux Shell is detected; turning it on sets
+  the mode to System and turns the pickers off while it is on.
 - Prefix (leader) key: bind one key, then set each binding to No prefix, Prefix only or
   Either. A status bar badge shows while it waits; Escape, a click, an unbound key or the
   timeout (5 seconds, Settings > Keymap) cancel it. Works in text fields.

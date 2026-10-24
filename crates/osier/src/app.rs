@@ -737,7 +737,7 @@ impl Osier {
         use crate::themes::{DUX_DARK, DUX_LIGHT, ThemeStore};
         let a = &self.settings.appearance;
         let store = ThemeStore::global(cx);
-        let dux = a.dux_shell_sync && store.dux_available();
+        let dux = a.dux_shell_sync.unwrap_or(true) && store.dux_available();
         let dark = match a.mode {
             ThemeMode::Dark => true,
             ThemeMode::Light => false,
@@ -794,14 +794,25 @@ impl Osier {
                 a.mode = ThemeMode::Light;
             }
         }
-        a.dux_shell_sync = false;
+        a.dux_shell_sync = Some(false);
         self.apply_appearance(cx);
         self.save_settings();
         cx.notify();
     }
 
+    /// Whether Dux Shell colours are followed: the user's choice, else on when detected.
+    pub(crate) fn dux_sync_on(&self, cx: &App) -> bool {
+        crate::themes::ThemeStore::global(cx).dux_available()
+            && self.settings.appearance.dux_shell_sync.unwrap_or(true)
+    }
+
+    /// Turn Dux Shell sync on or off. Turning it on also sets the mode to System, so the
+    /// shell's light/dark decides; the user can still pick Dark or Light afterwards.
     pub(crate) fn set_dux_sync(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.settings.appearance.dux_shell_sync = on;
+        self.settings.appearance.dux_shell_sync = Some(on);
+        if on {
+            self.settings.appearance.mode = ThemeMode::System;
+        }
         self.apply_appearance(cx);
         self.save_settings();
         cx.notify();
@@ -4093,35 +4104,102 @@ mod tests {
 
         h.read(cx, |osier, cx| {
             assert!(!ThemeStore::global(cx).dux_available());
-            assert!(!osier.settings.appearance.dux_shell_sync);
+            assert_eq!(
+                osier.settings.appearance.dux_shell_sync, None,
+                "auto by default"
+            );
+            assert!(!osier.dux_sync_on(cx), "not detected: off");
         });
+        // Detected and never chosen: on by default.
         h.act(cx, |osier, _, cx| {
             ThemeStore::global_mut(cx).set_dux_source(DuxSource::File(colors.clone()));
-            osier.set_dux_sync(true, cx);
+            osier.apply_appearance(cx);
         });
         h.read(cx, |osier, cx| {
-            assert!(ThemeStore::global(cx).dux_available());
-            // Mode is still the user's (dark), only the colours come from Dux Shell.
+            assert!(osier.dux_sync_on(cx));
+            assert_eq!(
+                cx.theme().theme_name().as_ref(),
+                "Dux Shell Dark",
+                "mode is still dark"
+            );
+        });
+        // Turning it on sets System, so the shell's mode (light here) decides.
+        h.act(cx, |osier, _, cx| osier.set_dux_sync(true, cx));
+        h.read(cx, |osier, cx| {
+            assert_eq!(
+                osier.settings.appearance.mode,
+                osier_config::settings::ThemeMode::System
+            );
+            assert_eq!(osier.settings.appearance.dux_shell_sync, Some(true));
+            assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Light");
+        });
+        // The user can still pick Dark by hand: the Dux dark colours.
+        h.act(cx, |osier, _, cx| {
+            osier.set_theme_mode(osier_config::settings::ThemeMode::Dark, cx)
+        });
+        h.read(cx, |_, cx| {
             assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Dark");
             let rgb = cx.theme().background.to_rgb();
             assert_eq!((rgb.r * 255.0).round() as u8, 0x10);
             assert_eq!((rgb.b * 255.0).round() as u8, 0x18);
-            assert!(osier.settings.appearance.dux_shell_sync);
             let names = ThemeStore::global(cx).names(true);
             assert!(!names.iter().any(|n| n.as_ref() == "Dux Shell Dark"));
         });
-        // System mode follows the Dux Shell mode while sync is on.
-        h.act(cx, |osier, _, cx| {
-            osier.set_theme_mode(osier_config::settings::ThemeMode::System, cx)
-        });
-        h.read(cx, |_, cx| {
-            assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Light")
+        // Turning it off leaves the mode alone.
+        h.act(cx, |osier, _, cx| osier.set_dux_sync(false, cx));
+        h.read(cx, |osier, _| {
+            assert_eq!(
+                osier.settings.appearance.mode,
+                osier_config::settings::ThemeMode::Dark
+            )
         });
         // Picking an explicit theme turns sync off.
-        h.act(cx, |osier, _, cx| osier.set_theme("Catppuccin Mocha", cx));
+        h.act(cx, |osier, _, cx| {
+            osier.set_dux_sync(true, cx);
+            osier.set_theme("Catppuccin Mocha", cx)
+        });
         h.read(cx, |osier, cx| {
             assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Mocha");
-            assert!(!osier.settings.appearance.dux_shell_sync);
+            assert_eq!(osier.settings.appearance.dux_shell_sync, Some(false));
+        });
+    }
+
+    #[gpui::test]
+    fn ui_theme_cards_pick_a_theme_unless_dux_sync_is_on(cx: &mut TestAppContext) {
+        use crate::themes::{DuxSource, ThemeStore};
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        let other = h.read(cx, |o, cx| {
+            ThemeStore::global(cx)
+                .names(true)
+                .into_iter()
+                .find(|n| n.as_ref() != o.settings.appearance.dark_theme)
+                .expect("a second dark theme")
+                .to_string()
+        });
+        h.keys(cx, "ctrl-,");
+        h.click(cx, &format!("theme-card:{other}"));
+        h.read(cx, |o, _| {
+            assert_eq!(o.settings.appearance.dark_theme, other)
+        });
+
+        // With Dux Shell colours followed, the cards do nothing.
+        let dms = tempfile::tempdir().expect("tempdir");
+        let colors = dms.path().join("dms-colors.json");
+        std::fs::write(
+            &colors,
+            r##"{"mode":"dark","colors":{"dark":{"background":"#101418"},"light":{}},"dank16":{}}"##,
+        )
+        .expect("write");
+        h.act(cx, |o, _, cx| {
+            ThemeStore::global_mut(cx).set_dux_source(DuxSource::File(colors.clone()));
+            o.set_dux_sync(true, cx);
+            cx.notify();
+        });
+        h.click(cx, "theme-card:Catppuccin Mocha");
+        h.read(cx, |o, _| {
+            assert_eq!(o.settings.appearance.dark_theme, other, "disabled")
         });
     }
 

@@ -30,7 +30,7 @@ impl Osier {
         let dark_names = store.names(true);
         let light_names = store.names(false);
         let dux_available = store.dux_available();
-        let dux_on = a.dux_shell_sync && dux_available;
+        let dux_on = a.dux_shell_sync.unwrap_or(true) && dux_available;
         let active = cx.theme().theme_name().clone();
         Button::new("theme")
             .test_id("theme")

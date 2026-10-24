@@ -37,6 +37,7 @@ mod runtime_info;
 mod settings_panel;
 mod sidebar_query;
 mod test_ids;
+mod theme_cards;
 mod themes;
 mod viewer;
 mod views;

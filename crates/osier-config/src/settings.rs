@@ -46,8 +46,10 @@ pub struct Appearance {
     pub mode: ThemeMode,
     pub dark_theme: String,
     pub light_theme: String,
-    /// Follow Dux Shell (DankMaterialShell) colours when available.
-    pub dux_shell_sync: bool,
+    /// Follow Dux Shell (DankMaterialShell) colours. Unset means on when Dux Shell is
+    /// detected; `true`/`false` is the user's explicit choice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dux_shell_sync: Option<bool>,
     pub ui_font: Option<String>,
     pub mono_font: Option<String>,
     pub font_size: Option<f32>,
@@ -75,7 +77,7 @@ impl Default for Appearance {
             mode: ThemeMode::Dark,
             dark_theme: "Catppuccin Mocha".into(),
             light_theme: "Catppuccin Latte".into(),
-            dux_shell_sync: false,
+            dux_shell_sync: None,
             ui_font: None,
             mono_font: None,
             font_size: None,

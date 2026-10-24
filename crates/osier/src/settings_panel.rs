@@ -408,25 +408,49 @@ fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<Se
     ]
 }
 
+/// "Dark theme" / "Light theme" heading over its card picker.
+fn theme_section(title: &'static str, view: &Entity<Osier>, dark: bool, cx: &App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap_2()
+        .child(div().text_sm().child(title))
+        .child(crate::theme_cards::theme_picker(view, dark, cx))
+        .into_any_element()
+}
+
 fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let store = ThemeStore::global(cx);
-    let dark: Vec<(SharedString, SharedString)> = store
-        .names(true)
-        .into_iter()
-        .map(|n| (n.clone(), n))
-        .collect();
-    let light: Vec<(SharedString, SharedString)> = store
-        .names(false)
-        .into_iter()
-        .map(|n| (n.clone(), n))
-        .collect();
     let dux_available = store.dux_available();
-    let defaults = Settings::default().appearance;
     SettingPage::new("Appearance")
         .icon(Icon::new(Lucide::Palette))
         .default_open(true)
         .resettable(true)
-        .group(SettingGroup::new().title("Theme").items(vec![
+        .group(
+            SettingGroup::new().title("Theme").items(vec![
+                SettingItem::new(
+                    "Follow Dux Shell colours",
+                    SettingField::switch(
+                        {
+                            let v = view.clone();
+                            move |cx: &App| v.read(cx).dux_sync_on(cx)
+                        },
+                        {
+                            let v = view.clone();
+                            move |on: bool, cx: &mut App| {
+                                v.update(cx, |o, cx| o.set_dux_sync(on, cx))
+                            }
+                        },
+                    )
+                    .default_value(dux_available),
+                )
+                .description(if dux_available {
+                    "Take the theme from DankMaterialShell's colours and follow them live. \
+                     Turning it on sets the mode to System; the theme pickers below are off \
+                     while it is on."
+                } else {
+                    "Not detected: no dms-colors.json in the cache directory."
+                })
+                .disabled(!dux_available),
                 SettingItem::new(
                     "Mode",
                     SettingField::dropdown(
@@ -454,43 +478,16 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     .default_value("dark".to_string()),
                 )
                 .description("System follows the desktop, or Dux Shell when its sync is on."),
-                SettingItem::new(
-                    "Dark theme",
-                    SettingField::scrollable_dropdown(
-                        dark,
-                        get(view, |o| o.settings.appearance.dark_theme.clone().into()),
-                        set(view, |o, v: SharedString, _| {
-                            o.settings.appearance.dark_theme = v.to_string()
-                        }),
-                    )
-                    .default_value(defaults.dark_theme.clone()),
-                ),
-                SettingItem::new(
-                    "Light theme",
-                    SettingField::scrollable_dropdown(
-                        light,
-                        get(view, |o| o.settings.appearance.light_theme.clone().into()),
-                        set(view, |o, v: SharedString, _| {
-                            o.settings.appearance.light_theme = v.to_string()
-                        }),
-                    )
-                    .default_value(defaults.light_theme.clone()),
-                ),
-                SettingItem::new(
-                    "Follow Dux Shell colours",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.dux_shell_sync),
-                        set(view, |o, v: bool, _| o.settings.appearance.dux_shell_sync = v),
-                    )
-                    .default_value(false),
-                )
-                .description(if dux_available {
-                    "Generate the theme from DankMaterialShell's colour cache and follow it live."
-                } else {
-                    "Not detected: no dms-colors.json in the cache directory."
-                })
-                .disabled(!dux_available),
-            ]))
+                SettingItem::render({
+                    let v = view.clone();
+                    move |_, _, cx| theme_section("Dark theme", &v, true, cx)
+                }),
+                SettingItem::render({
+                    let v = view.clone();
+                    move |_, _, cx| theme_section("Light theme", &v, false, cx)
+                }),
+            ]),
+        )
         .group(
             SettingGroup::new().title("Sidebar").item(
                 SettingItem::new(

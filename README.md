@@ -115,7 +115,7 @@ re-read when it changes. Every key is optional.
 mode = "dark"                 # dark | light | system
 dark_theme = "Catppuccin Mocha"
 light_theme = "Catppuccin Latte"
-dux_shell_sync = false        # follow Dux Shell colours when its cache exists
+# dux_shell_sync = true        # follow Dux Shell colours; unset = on when Dux Shell is detected
 # ui_font = "Inter"
 # mono_font = "JetBrains Mono"
 # font_size = 14.0
