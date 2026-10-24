@@ -43,6 +43,8 @@ All notable changes to Osier are documented here. The format follows
 - New installs follow the desktop's light/dark preference (System mode), read from the XDG
   settings portal. With no stated preference or no portal, Osier uses the dark theme (set in
   Appearance > When the desktop has no preference).
+- Themes: One Dark, One Light, Monokai, Dracula, Nord, Gruvbox Dark and Light, Solarized Dark
+  and Light, Tokyo Night.
 - Theme picker with preview cards for the dark and light themes. Following Dux Shell colours
   is the first Theme setting, on by default when Dux Shell is detected; turning it on sets
   the mode to System and turns the pickers off while it is on.

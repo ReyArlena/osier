@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod catppuccin;
+pub mod classics;
 pub mod dux;
 pub mod palette;
 

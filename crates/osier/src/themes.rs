@@ -19,6 +19,7 @@ use osier_theme::Mode;
 const BUNDLED: &[&str] = &[
     include_str!("../../../themes/osier-catppuccin.json"),
     include_str!("../../../themes/catppuccin.json"),
+    include_str!("../../../themes/osier-classics.json"),
 ];
 pub const DUX_DARK: &str = "Dux Shell Dark";
 pub const DUX_LIGHT: &str = "Dux Shell Light";
@@ -328,6 +329,7 @@ mod parse_tests {
         for (origin, source) in [
             ("osier-catppuccin", super::BUNDLED[0].to_string()),
             ("upstream-catppuccin", super::BUNDLED[1].to_string()),
+            ("osier-classics", super::BUNDLED[2].to_string()),
         ] {
             let set = serde_json::from_str::<ThemeSet>(&source)
                 .unwrap_or_else(|e| panic!("{origin}: {e}"));
