@@ -95,8 +95,9 @@ Each key is set to No prefix, Prefix only or Either with three buttons on the Ke
 keys after the prefix also work while typing in a text field.
 
 **Context menus.** Every right-click entry (Add to .gitignore, Delete / Drop, Cherry-pick, ...)
-can have a key that runs it on the selected row of Changes, Files, Log or Patches. These keys
-start unbound and cannot share a key with any other binding.
+can have a key that runs it on the selected row of Changes, Files, Log, Branches, Stashes or
+Patches, and the menus show each entry's key. These keys start unbound and cannot share a key
+with any other binding.
 
 If you use Dux Shell (DankMaterialShell), Osier writes its shortcuts to
 `~/.config/dms/cheatsheets/osier.json`, so `dms keybinds show osier` and the DMS keybinds

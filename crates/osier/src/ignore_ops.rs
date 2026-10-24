@@ -12,7 +12,7 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -62,29 +62,42 @@ impl Osier {
             }
         };
         let mut menu = menu.item(
-            PopupMenuItem::new("Add to .gitignore")
-                .on_click(pick(PatternKind::Exact, IgnoreFile::Gitignore)),
+            crate::row_actions::menu_item(
+                "Add to .gitignore",
+                crate::row_actions::RowKind::AddToGitignore,
+            )
+            .on_click(pick(PatternKind::Exact, IgnoreFile::Gitignore)),
         );
         if let Some(pattern) = &ext {
             menu = menu.item(
-                PopupMenuItem::new(format!("Add all {pattern} files to .gitignore"))
-                    .on_click(pick(PatternKind::Extension, IgnoreFile::Gitignore)),
+                crate::row_actions::menu_item(
+                    format!("Add all {pattern} files to .gitignore"),
+                    crate::row_actions::RowKind::AddExtensionToGitignore,
+                )
+                .on_click(pick(PatternKind::Extension, IgnoreFile::Gitignore)),
             );
         }
         menu = menu.item(
-            PopupMenuItem::new("Ignore only on this machine")
-                .on_click(pick(PatternKind::Exact, IgnoreFile::LocalExclude)),
+            crate::row_actions::menu_item(
+                "Ignore only on this machine",
+                crate::row_actions::RowKind::IgnoreLocally,
+            )
+            .on_click(pick(PatternKind::Exact, IgnoreFile::LocalExclude)),
         );
         if !row.tracked {
             return menu;
         }
-        menu.item(PopupMenuItem::new(format!("Untrack this {what}")).on_click(
-            move |_, window, cx| {
+        menu.item(
+            crate::row_actions::menu_item(
+                format!("Untrack this {what}"),
+                crate::row_actions::RowKind::Untrack,
+            )
+            .on_click(move |_, window, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     this.untrack_prompt(path.clone(), row, window, cx)
                 });
-            },
-        ))
+            }),
+        )
     }
 
     /// Ignore `path`. Untracked: add the pattern, or say it is already ignored. Tracked: ask

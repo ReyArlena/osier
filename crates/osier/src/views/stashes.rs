@@ -1,10 +1,11 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
@@ -84,23 +85,44 @@ impl Osier {
                       _: &mut Context<gpui_kit::component::menu::PopupMenu>| {
                     let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                     let m = menu_message.clone();
-                    menu.item(PopupMenuItem::new("Apply").on_click(move |_, window, cx| {
-                        let _ =
-                            w1.update(cx, |this, cx| this.stash_apply(index, false, window, cx));
-                    }))
-                    .item(PopupMenuItem::new("Pop").on_click(move |_, window, cx| {
-                        let _ = w2.update(cx, |this, cx| this.stash_apply(index, true, window, cx));
-                    }))
+                    menu.item(
+                        crate::row_actions::menu_item("Apply", crate::row_actions::RowKind::Apply)
+                            .on_click(move |_, window, cx| {
+                                let _ = w1.update(cx, |this, cx| {
+                                    this.stash_apply(index, false, window, cx)
+                                });
+                            }),
+                    )
+                    .item(
+                        crate::row_actions::menu_item("Pop", crate::row_actions::RowKind::Pop)
+                            .on_click(move |_, window, cx| {
+                                let _ = w2.update(cx, |this, cx| {
+                                    this.stash_apply(index, true, window, cx)
+                                });
+                            }),
+                    )
                     .separator()
-                    .item(PopupMenuItem::new("Drop…").on_click(move |_, window, cx| {
-                        let _ = w3.update(cx, |this, cx| {
-                            this.confirm_stash_drop(index, m.clone(), window, cx)
-                        });
-                    }))
+                    .item(
+                        crate::row_actions::menu_item("Drop…", crate::row_actions::RowKind::Delete)
+                            .on_click(move |_, window, cx| {
+                                let _ = w3.update(cx, |this, cx| {
+                                    this.confirm_stash_drop(index, m.clone(), window, cx)
+                                });
+                            }),
+                    )
                 };
             list = list.child(
                 h_flex()
                     .id(("stash", s.index))
+                    .cursor_pointer()
+                    .when(
+                        self.stash_selected.as_deref() == Some(s.oid.as_str()),
+                        |this| this.bg(cx.theme().list_active),
+                    )
+                    .on_click(cx.listener({
+                        let oid = s.oid.clone();
+                        move |this, _, _, cx| this.select_stash(oid.clone(), cx)
+                    }))
                     .test_id(format!("stash-row:{}", s.index))
                     .group("row")
                     .px_3()

@@ -168,7 +168,14 @@ impl Osier {
                                     let item = |label: &str, f: CommitHandler| {
                                         let h = h.clone();
                                         let o = o.clone();
-                                        PopupMenuItem::new(label.to_string()).on_click(
+                                        match log_menu_kind(label) {
+                                            Some(kind) => crate::row_actions::menu_item(
+                                                label.to_string(),
+                                                kind,
+                                            ),
+                                            None => PopupMenuItem::new(label.to_string()),
+                                        }
+                                        .on_click(
                                             move |_, window, cx| {
                                                 let h = h.clone();
                                                 let f = f.clone();
@@ -561,4 +568,28 @@ impl Osier {
             .child(list)
             .into_any_element()
     }
+}
+
+/// The bindable action behind a Log commit menu entry, for its key hint.
+fn log_menu_kind(label: &str) -> Option<crate::row_actions::RowKind> {
+    use crate::row_actions::RowKind as K;
+    Some(match label {
+        "Checkout (detached)" => K::Checkout,
+        "New branch here…" => K::NewBranchHere,
+        "Tag here…" => K::TagHere,
+        "Copy as patch" => K::CopyAsPatch,
+        "Save to Patches…" => K::SaveToPatches,
+        "Export patch file…" => K::ExportPatch,
+        "Reset current branch here (soft)" => K::ResetSoft,
+        "Reset current branch here (mixed)" => K::ResetMixed,
+        "Reset current branch here (hard)" => K::ResetHard,
+        "Revert commit…" => K::Revert,
+        "Cherry-pick onto current branch…" => K::CherryPick,
+        "Compare with working tree" => K::CompareWithWorkingTree,
+        "Interactive rebase from here…" => K::InteractiveRebase,
+        "Undo last commit…" => K::UndoLastCommit,
+        "Copy hash" => K::CopyHash,
+        "Open on GitHub" => K::OpenOnGithub,
+        _ => return None,
+    })
 }

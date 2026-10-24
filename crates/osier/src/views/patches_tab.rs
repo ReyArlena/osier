@@ -1,6 +1,6 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex,
@@ -130,48 +130,64 @@ impl Osier {
                 let (n1, n2) = (n1.clone(), n2.clone());
                 let (o1, o2, o3, o4) = (w.clone(), w.clone(), w.clone(), w.clone());
                 menu.item(
-                    PopupMenuItem::new("Copy patch text")
-                        .icon(Lucide::ClipboardCopy)
-                        .on_click(move |_, window, cx| {
-                            let _ =
-                                o1.update(cx, |this, cx| this.copy_stored(i4.clone(), window, cx));
-                        }),
+                    crate::row_actions::menu_item(
+                        "Copy patch text",
+                        crate::row_actions::RowKind::CopyAsPatch,
+                    )
+                    .icon(Lucide::ClipboardCopy)
+                    .on_click(move |_, window, cx| {
+                        let _ = o1.update(cx, |this, cx| this.copy_stored(i4.clone(), window, cx));
+                    }),
                 )
                 .item(
-                    PopupMenuItem::new("Export to file…")
-                        .icon(Lucide::FileOutput)
+                    crate::row_actions::menu_item(
+                        "Export to file…",
+                        crate::row_actions::RowKind::ExportPatch,
+                    )
+                    .icon(Lucide::FileOutput)
+                    .on_click(move |_, window, cx| {
+                        let _ =
+                            o2.update(cx, |this, cx| this.export_stored(i5.clone(), window, cx));
+                    }),
+                )
+                .item(
+                    crate::row_actions::menu_item("Rename…", crate::row_actions::RowKind::Rename)
+                        .icon(Lucide::Pencil)
                         .on_click(move |_, window, cx| {
-                            let _ = o2
-                                .update(cx, |this, cx| this.export_stored(i5.clone(), window, cx));
+                            let _ = o3.update(cx, |this, cx| {
+                                this.rename_stored_prompt(i6.clone(), n1.clone(), window, cx)
+                            });
                         }),
                 )
-                .item(PopupMenuItem::new("Rename…").icon(Lucide::Pencil).on_click(
-                    move |_, window, cx| {
-                        let _ = o3.update(cx, |this, cx| {
-                            this.rename_stored_prompt(i6.clone(), n1.clone(), window, cx)
-                        });
-                    },
-                ))
                 .separator()
-                .item(PopupMenuItem::new("Delete…").icon(Lucide::Trash).on_click(
-                    move |_, window, cx| {
-                        let _ = o4.update(cx, |this, cx| {
-                            this.confirm_delete_stored(i7.clone(), n2.clone(), window, cx)
-                        });
-                    },
-                ))
+                .item(
+                    crate::row_actions::menu_item("Delete…", crate::row_actions::RowKind::Delete)
+                        .icon(Lucide::Trash)
+                        .on_click(move |_, window, cx| {
+                            let _ = o4.update(cx, |this, cx| {
+                                this.confirm_delete_stored(i7.clone(), n2.clone(), window, cx)
+                            });
+                        }),
+                )
             });
             // Right-click also offers the row's hover actions.
             let row_menu = crate::row_menu::RowMenu::new(move |menu, window, cx| {
                 let menu = if has_project {
                     let (w1, w2, i1, i2) = (wa.clone(), wa.clone(), ia.clone(), iu.clone());
-                    menu.item(PopupMenuItem::new("Apply").on_click(move |_, window, cx| {
-                        let _ = w1.update(cx, |this, cx| {
-                            this.apply_stored(i1.clone(), false, window, cx)
-                        });
-                    }))
+                    menu.item(
+                        crate::row_actions::menu_item("Apply", crate::row_actions::RowKind::Apply)
+                            .on_click(move |_, window, cx| {
+                                let _ = w1.update(cx, |this, cx| {
+                                    this.apply_stored(i1.clone(), false, window, cx)
+                                });
+                            }),
+                    )
                     .item(
-                        PopupMenuItem::new("Unshelve").on_click(move |_, window, cx| {
+                        crate::row_actions::menu_item(
+                            "Unshelve",
+                            crate::row_actions::RowKind::Unshelve,
+                        )
+                        .on_click(move |_, window, cx| {
                             let _ = w2.update(cx, |this, cx| {
                                 this.apply_stored(i2.clone(), true, window, cx)
                             });

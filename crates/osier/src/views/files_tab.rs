@@ -5,7 +5,6 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::tree::{TreeItem, tree};
 use gpui_kit::component::{
@@ -327,62 +326,100 @@ impl Osier {
                             let (p4, p5, p6) = (path.clone(), path.clone(), path.clone());
                             let menu = menu
                                 .when(!is_folder, |m| {
-                                    m.item(PopupMenuItem::new("View at HEAD").on_click(
-                                        move |_, _, cx| {
-                                            let _ = w6.update(cx, |this, cx| {
-                                                this.select_work_file(
-                                                    p6.clone(),
-                                                    Some("HEAD".into()),
-                                                    cx,
-                                                )
-                                            });
-                                        },
-                                    ))
-                                    .item(PopupMenuItem::new("Blame").on_click(move |_, _, cx| {
-                                        let _ = w4.update(cx, |this, cx| {
-                                            this.show_blame(p4.clone(), None, cx)
-                                        });
-                                    }))
-                                    .item(PopupMenuItem::new("History").on_click(
-                                        move |_, _, cx| {
-                                            let _ = w5.update(cx, |this, cx| {
-                                                this.show_file_history(p5.clone(), cx)
-                                            });
-                                        },
-                                    ))
+                                    m.item(
+                                        crate::row_actions::menu_item(
+                                            "View at HEAD",
+                                            crate::row_actions::RowKind::ViewAtHead,
+                                        )
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                let _ = w6.update(cx, |this, cx| {
+                                                    this.select_work_file(
+                                                        p6.clone(),
+                                                        Some("HEAD".into()),
+                                                        cx,
+                                                    )
+                                                });
+                                            },
+                                        ),
+                                    )
+                                    .item(
+                                        crate::row_actions::menu_item(
+                                            "Blame",
+                                            crate::row_actions::RowKind::Blame,
+                                        )
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                let _ = w4.update(cx, |this, cx| {
+                                                    this.show_blame(p4.clone(), None, cx)
+                                                });
+                                            },
+                                        ),
+                                    )
+                                    .item(
+                                        crate::row_actions::menu_item(
+                                            "History",
+                                            crate::row_actions::RowKind::FileHistory,
+                                        )
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                let _ = w5.update(cx, |this, cx| {
+                                                    this.show_file_history(p5.clone(), cx)
+                                                });
+                                            },
+                                        ),
+                                    )
                                     .separator()
                                 })
                                 .when(!is_folder, |m| {
-                                    m.item(PopupMenuItem::new("Open in editor").on_click(
+                                    m.item(
+                                        crate::row_actions::menu_item(
+                                            "Open in editor",
+                                            crate::row_actions::RowKind::OpenInEditor,
+                                        )
+                                        .on_click(
+                                            move |_, window, cx| {
+                                                let _ = w1.update(cx, |this, cx| {
+                                                    this.open_in_editor(
+                                                        Some((p1.clone(), None)),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            },
+                                        ),
+                                    )
+                                })
+                                .item(
+                                    crate::row_actions::menu_item(
+                                        "Open in file manager",
+                                        crate::row_actions::RowKind::OpenInFileManager,
+                                    )
+                                    .on_click(
                                         move |_, window, cx| {
-                                            let _ = w1.update(cx, |this, cx| {
-                                                this.open_in_editor(
-                                                    Some((p1.clone(), None)),
+                                            let _ = w2.update(cx, |this, cx| {
+                                                this.reveal_in_file_manager(
+                                                    Some(p2.clone()),
                                                     window,
                                                     cx,
                                                 )
                                             });
                                         },
-                                    ))
-                                })
-                                .item(PopupMenuItem::new("Open in file manager").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w2.update(cx, |this, cx| {
-                                            this.reveal_in_file_manager(
-                                                Some(p2.clone()),
-                                                window,
-                                                cx,
-                                            )
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Copy path").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w3.update(cx, |this, cx| {
-                                            this.copy_to_clipboard(p3.clone(), window, cx)
-                                        });
-                                    },
-                                ))
+                                    ),
+                                )
+                                .item(
+                                    crate::row_actions::menu_item(
+                                        "Copy path",
+                                        crate::row_actions::RowKind::CopyPath,
+                                    )
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            let _ = w3.update(cx, |this, cx| {
+                                                this.copy_to_clipboard(p3.clone(), window, cx)
+                                            });
+                                        },
+                                    ),
+                                )
                                 .separator();
                             Osier::ignore_menu(menu, w9, p9, row)
                         }

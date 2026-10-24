@@ -4,7 +4,7 @@ use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::repo::InProgress;
@@ -66,16 +66,6 @@ impl Osier {
                     .gap_2()
                     .text_xs()
                     .items_center()
-                    .when(self.prefix_waiting(), |this| {
-                        this.child(
-                            h_flex()
-                                .test_id("prefix-badge")
-                                .gap_1()
-                                .items_center()
-                                .child(Tag::primary().xsmall().child("Prefix key pressed"))
-                                .child(div().text_color(muted).child("Esc cancels")),
-                        )
-                    })
                     .when_some(in_progress, |this, op| {
                         this.child(Tag::warning().xsmall().child(op))
                     })
@@ -130,6 +120,26 @@ impl Osier {
                     .text_xs()
                     .text_color(muted)
                     .items_center()
+                    // Waiting for the key after the prefix key: orange (the theme's peach).
+                    .when(self.prefix_waiting(), |this| {
+                        this.child(
+                            h_flex()
+                                .test_id("prefix-badge")
+                                .gap_1()
+                                .items_center()
+                                .child("Esc cancels")
+                                .child(
+                                    div()
+                                        .px_1p5()
+                                        .py_0p5()
+                                        .rounded(cx.theme().radius)
+                                        .bg(cx.theme().chart_4)
+                                        .text_color(cx.theme().background)
+                                        .font_medium()
+                                        .child("Prefix key pressed"),
+                                ),
+                        )
+                    })
                     .when(has_project, |this| this.child(format!("{changes} changes")))
                     .child(
                         h_flex()

@@ -5,6 +5,7 @@
 
 use gpui_kit::*;
 use osier_git::ops::ignore::IgnoreFile;
+use osier_git::ops::integrate::MergeMode;
 use osier_git::ops::patches::PatchSource;
 use osier_git::ops::reset::ResetMode;
 
@@ -45,8 +46,15 @@ pub enum RowKind {
     OpenOnGithub,
     Apply,
     Unshelve,
+    Pop,
     Rename,
     Delete,
+    MergeIntoCurrent,
+    RebaseCurrentOnto,
+    CompareWithCurrent,
+    ShowCommit,
+    CopyName,
+    EditRemoteUrl,
 }
 
 /// The key-bindable form of a context-menu entry.
@@ -140,13 +148,13 @@ const ROWS: &[(&str, &str, &str, RowKind)] = &[
     (
         "row_checkout",
         "Check out",
-        "Log commits (detached)",
+        "Log commits and tags (detached), branches",
         RowKind::Checkout,
     ),
     (
         "row_new_branch_here",
         "New branch here",
-        "Log commits",
+        "Log commits and local branches",
         RowKind::NewBranchHere,
     ),
     ("row_tag_here", "Tag here", "Log commits", RowKind::TagHere),
@@ -210,19 +218,66 @@ const ROWS: &[(&str, &str, &str, RowKind)] = &[
         "Log commits",
         RowKind::OpenOnGithub,
     ),
-    ("row_apply", "Apply", "Patches rows", RowKind::Apply),
+    (
+        "row_apply",
+        "Apply",
+        "Patches and stashes rows",
+        RowKind::Apply,
+    ),
     (
         "row_unshelve",
         "Unshelve",
         "Patches rows",
         RowKind::Unshelve,
     ),
-    ("row_rename", "Rename", "Patches rows", RowKind::Rename),
+    ("row_pop", "Pop", "Stashes rows", RowKind::Pop),
+    (
+        "row_rename",
+        "Rename",
+        "Local branches, remotes and patches",
+        RowKind::Rename,
+    ),
     (
         "row_delete",
         "Delete / Drop",
-        "Patches rows",
+        "Local branches, tags, remotes (remove), stashes (drop) and patches",
         RowKind::Delete,
+    ),
+    (
+        "row_merge_into_current",
+        "Merge into current branch",
+        "Branches",
+        RowKind::MergeIntoCurrent,
+    ),
+    (
+        "row_rebase_current_onto",
+        "Rebase current branch onto this",
+        "Local branches",
+        RowKind::RebaseCurrentOnto,
+    ),
+    (
+        "row_compare_with_current",
+        "Compare with current branch",
+        "Branches",
+        RowKind::CompareWithCurrent,
+    ),
+    (
+        "row_show_commit",
+        "Show commit",
+        "Tags",
+        RowKind::ShowCommit,
+    ),
+    (
+        "row_copy_name",
+        "Copy name",
+        "Branches, tags and remotes",
+        RowKind::CopyName,
+    ),
+    (
+        "row_edit_remote_url",
+        "Edit remote URL",
+        "Remotes",
+        RowKind::EditRemoteUrl,
     ),
 ];
 
@@ -280,9 +335,24 @@ fn row_maker(kind: RowKind) -> fn() -> Box<dyn Action> {
         OpenOnGithub,
         Apply,
         Unshelve,
+        Pop,
         Rename,
-        Delete
+        Delete,
+        MergeIntoCurrent,
+        RebaseCurrentOnto,
+        CompareWithCurrent,
+        ShowCommit,
+        CopyName,
+        EditRemoteUrl
     )
+}
+
+/// A selected row in the Branches tab, kept by name so it survives refreshes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RefRow {
+    Branch { name: String, remote: bool },
+    Tag(String),
+    Remote(String),
 }
 
 /// What is selected in the current tab, as far as row actions care.
@@ -301,6 +371,23 @@ enum Row {
     Patch {
         id: String,
         name: String,
+    },
+    Branch {
+        name: String,
+        remote: bool,
+        is_head: bool,
+    },
+    Tag {
+        name: String,
+        target: String,
+    },
+    Remote {
+        name: String,
+        url: String,
+    },
+    Stash {
+        index: usize,
+        message: String,
     },
 }
 
@@ -348,8 +435,123 @@ impl Osier {
                     .map(|p| p.meta.name.clone())?;
                 Some(Row::Patch { id, name })
             }
-            Tab::Branches | Tab::Stashes => None,
+            Tab::Branches => {
+                let snapshot = self.active_project()?.snapshot.as_ref()?;
+                match self.ref_selected.as_ref()? {
+                    RefRow::Branch { name, remote } => snapshot
+                        .branches
+                        .iter()
+                        .find(|b| &b.name == name && b.is_remote == *remote)
+                        .map(|b| Row::Branch {
+                            name: b.name.clone(),
+                            remote: b.is_remote,
+                            is_head: b.is_head,
+                        }),
+                    RefRow::Tag(name) => {
+                        snapshot
+                            .tags
+                            .iter()
+                            .find(|t| &t.name == name)
+                            .map(|t| Row::Tag {
+                                name: t.name.clone(),
+                                target: t.target.clone(),
+                            })
+                    }
+                    RefRow::Remote(name) => {
+                        snapshot
+                            .remotes
+                            .iter()
+                            .find(|r| &r.name == name)
+                            .map(|r| Row::Remote {
+                                name: r.name.clone(),
+                                url: r.fetch_url.clone(),
+                            })
+                    }
+                }
+            }
+            Tab::Stashes => {
+                let snapshot = self.active_project()?.snapshot.as_ref()?;
+                let oid = self.stash_selected.as_ref()?;
+                snapshot
+                    .stashes
+                    .iter()
+                    .find(|s| &s.oid == oid)
+                    .map(|s| Row::Stash {
+                        index: s.index,
+                        message: s.message.clone(),
+                    })
+            }
         }
+    }
+
+    /// The Branches tab's selectable rows in screen order: local branches, remote branches,
+    /// tags, remotes.
+    pub(crate) fn ref_rows(&self) -> Vec<RefRow> {
+        let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
+            return Vec::new();
+        };
+        let branches = |remote: bool| {
+            snapshot
+                .branches
+                .iter()
+                .filter(move |b| b.is_remote == remote)
+                .map(move |b| RefRow::Branch {
+                    name: b.name.clone(),
+                    remote,
+                })
+        };
+        branches(false)
+            .chain(branches(true))
+            .chain(snapshot.tags.iter().map(|t| RefRow::Tag(t.name.clone())))
+            .chain(
+                snapshot
+                    .remotes
+                    .iter()
+                    .map(|r| RefRow::Remote(r.name.clone())),
+            )
+            .collect()
+    }
+
+    /// Select a Branches-tab row (click).
+    pub(crate) fn select_ref(&mut self, row: RefRow, cx: &mut Context<Self>) {
+        self.ref_selected = Some(row);
+        cx.notify();
+    }
+
+    /// Select a stash row by its commit id (click).
+    pub(crate) fn select_stash(&mut self, oid: String, cx: &mut Context<Self>) {
+        self.stash_selected = Some(oid);
+        cx.notify();
+    }
+
+    /// Up/down in the Branches and Stashes tabs.
+    pub(crate) fn move_ref_or_stash_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        fn step<T: PartialEq + Clone>(rows: &[T], current: Option<&T>, delta: isize) -> Option<T> {
+            if rows.is_empty() {
+                return None;
+            }
+            let next = match current.and_then(|c| rows.iter().position(|r| r == c)) {
+                Some(i) => i.saturating_add_signed(delta).min(rows.len() - 1),
+                None => 0,
+            };
+            rows.get(next).cloned()
+        }
+        match self.tab {
+            Tab::Branches => {
+                let rows = self.ref_rows();
+                self.ref_selected = step(&rows, self.ref_selected.as_ref(), delta);
+            }
+            Tab::Stashes => {
+                let rows: Vec<String> = self
+                    .active_project()
+                    .and_then(|p| p.snapshot.as_ref())
+                    .map(|s| s.stashes.iter().map(|s| s.oid.clone()).collect())
+                    .unwrap_or_default();
+                self.stash_selected = step(&rows, self.stash_selected.as_ref(), delta);
+            }
+            _ => return,
+        }
+        cx.notify();
     }
 
     /// Run `kind` on the selected row, when the row offers it.
@@ -463,6 +665,54 @@ impl Osier {
                 K::OpenOnGithub => self.open_commit_on_github(hash, window, cx),
                 _ => {}
             },
+            Row::Branch {
+                name,
+                remote,
+                is_head,
+            } => match kind {
+                K::Checkout if !is_head => self.checkout_branch(name, remote, window, cx),
+                K::NewBranchHere if !remote => self.prompt_new_branch(Some(name), window, cx),
+                K::Rename if !remote => self.prompt_rename_branch(name, window, cx),
+                K::Delete if !remote && !is_head => {
+                    self.confirm_delete_branch(name, false, window, cx)
+                }
+                K::MergeIntoCurrent if !is_head => {
+                    self.merge_branch(name, MergeMode::Default, window, cx)
+                }
+                K::RebaseCurrentOnto if !remote && !is_head => {
+                    self.confirm_rebase_onto(name, window, cx)
+                }
+                K::CompareWithCurrent if !is_head => {
+                    let current = self
+                        .active_project()
+                        .and_then(|p| p.snapshot.as_ref())
+                        .and_then(|s| s.status.branch.head.clone())
+                        .unwrap_or_else(|| "HEAD".into());
+                    self.select_compare(current, name, true, cx)
+                }
+                K::CopyName => self.copy_to_clipboard(name, window, cx),
+                _ => {}
+            },
+            Row::Tag { name, target } => match kind {
+                K::ShowCommit => self.select_commit_hash(target, cx),
+                K::Checkout => self.checkout_commit(target, window, cx),
+                K::CopyName => self.copy_to_clipboard(name, window, cx),
+                K::Delete => self.confirm_delete_tag(name, window, cx),
+                _ => {}
+            },
+            Row::Remote { name, url } => match kind {
+                K::EditRemoteUrl => self.prompt_remote_url(name, url, window, cx),
+                K::Rename => self.prompt_rename_remote(name, window, cx),
+                K::Delete => self.confirm_remove_remote(name, window, cx),
+                K::CopyName => self.copy_to_clipboard(name, window, cx),
+                _ => {}
+            },
+            Row::Stash { index, message } => match kind {
+                K::Apply => self.stash_apply(index, false, window, cx),
+                K::Pop => self.stash_apply(index, true, window, cx),
+                K::Delete => self.confirm_stash_drop(index, message, window, cx),
+                _ => {}
+            },
             Row::Patch { id, name } => match kind {
                 K::Apply => self.apply_stored(id, false, window, cx),
                 K::Unshelve => self.apply_stored(id, true, window, cx),
@@ -474,6 +724,46 @@ impl Osier {
             },
         }
     }
+}
+
+/// A context-menu entry for `kind`, labelled `label`, with its key (if bound) on the right,
+/// prefix included, read from the live keymap.
+pub(crate) fn menu_item(
+    label: impl Into<SharedString>,
+    kind: RowKind,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    use gpui_kit::component::{ActiveTheme as _, h_flex};
+    use gpui_kit::prelude::FluentBuilder as _;
+    let label = label.into();
+    gpui_kit::component::menu::PopupMenuItem::element(move |_, cx| {
+        let hint = key_hint(kind, cx);
+        h_flex()
+            .w_full()
+            .gap_6()
+            .justify_between()
+            .child(label.clone())
+            .when_some(hint, |this, hint| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+            })
+    })
+}
+
+/// "I", "Prefix I", or `None` when `kind` has no key.
+pub(crate) fn key_hint(kind: RowKind, cx: &App) -> Option<String> {
+    use crate::keymap::{KeyMode, Keymap, pretty_key, split_mode};
+    let id = ROWS.iter().find(|r| r.3 == kind)?.0;
+    let first = Keymap::global(cx).keys_for(id).first()?;
+    let (mode, key) = split_mode(first);
+    Some(match mode {
+        KeyMode::Prefix => format!("Prefix {}", pretty_key(key)),
+        KeyMode::Plain | KeyMode::Either => pretty_key(key),
+    })
 }
 
 #[cfg(test)]

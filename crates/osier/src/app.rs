@@ -168,6 +168,10 @@ pub struct Osier {
     pub(crate) settings_focus: FocusHandle,
     /// Waiting for the key after the prefix key (see `prefix.rs`).
     pub(crate) prefix_pending: Option<Subscription>,
+    /// Selected row in the Branches tab (branch, tag or remote).
+    pub(crate) ref_selected: Option<crate::row_actions::RefRow>,
+    /// Selected stash, by commit id.
+    pub(crate) stash_selected: Option<String>,
     pub(crate) prefix_generation: u64,
     /// Scroll state of the main tab strip, to tell when the tabs overflow.
     pub(crate) tab_scroll: ScrollHandle,
@@ -373,6 +377,8 @@ impl Osier {
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
             prefix_pending: None,
+            ref_selected: None,
+            stash_selected: None,
             prefix_generation: 0,
             tab_scroll: ScrollHandle::new(),
             settings_highlight: None,
@@ -1432,7 +1438,8 @@ impl Osier {
                 };
                 self.select_commit(next, cx);
             }
-            Tab::Branches | Tab::Stashes | Tab::Files | Tab::Patches => {}
+            Tab::Branches | Tab::Stashes => self.move_ref_or_stash_selection(delta, cx),
+            Tab::Files | Tab::Patches => {}
         }
     }
 
@@ -3362,6 +3369,102 @@ mod tests {
         h.keys(cx, "i");
         let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
         assert_eq!(gitignore, "/notes.tmp\n");
+    }
+
+    #[gpui::test]
+    fn ui_branch_tag_and_stash_rows_select_and_take_menu_keys(cx: &mut TestAppContext) {
+        use crate::row_actions::RefRow;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.git(["branch", "feature"]);
+        repo.git(["tag", "v1"]);
+        repo.write("a.txt", "changed\n");
+        repo.git(["stash", "-q"]);
+        let h = Harness::open(cx, &repo);
+        bind(
+            cx,
+            &[
+                ("row_checkout", &["c"]),
+                ("row_delete", &["x"]),
+                ("row_copy_name", &["n"]),
+            ],
+        );
+        let head = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                o.active_project()
+                    .and_then(|p| p.snapshot.as_ref())
+                    .and_then(|s| s.status.branch.head.clone())
+            })
+        };
+
+        // Click selects; the key runs the entry on that row.
+        h.click(cx, "tab-branches");
+        h.click(cx, "branch-row:feature");
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.ref_selected,
+                Some(RefRow::Branch {
+                    name: "feature".into(),
+                    remote: false
+                })
+            )
+        });
+        h.keys(cx, "c");
+        assert_eq!(head(&h, cx).as_deref(), Some("feature"));
+
+        // Arrow keys walk branches (feature, main), then tags.
+        h.keys(cx, "down");
+        h.read(cx, |o, _| {
+            assert!(matches!(
+                &o.ref_selected,
+                Some(RefRow::Branch { remote: false, .. })
+            ))
+        });
+        h.keys(cx, "down");
+        h.read(cx, |o, _| {
+            assert_eq!(o.ref_selected, Some(RefRow::Tag("v1".into())))
+        });
+        h.keys(cx, "n");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+            Some("v1")
+        );
+
+        // Stashes: select, then Delete / Drop asks first.
+        h.click(cx, "tab-stashes");
+        h.click(cx, "stash-row:0");
+        h.keys(cx, "x");
+        assert!(h.has_settings(cx), "drop asks for confirmation");
+        h.click(cx, "dialog-ok");
+        assert!(
+            repo.git(["stash", "list"]).trim().is_empty(),
+            "stash dropped"
+        );
+    }
+
+    #[gpui::test]
+    fn menu_entries_show_their_key(cx: &mut TestAppContext) {
+        use crate::row_actions::{RowKind, key_hint};
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let _h = Harness::open(cx, &repo);
+        assert_eq!(cx.update(|cx| key_hint(RowKind::AddToGitignore, cx)), None);
+        bind(
+            cx,
+            &[
+                ("row_add_to_gitignore", &["i"]),
+                ("row_untrack", &["prefix u"]),
+            ],
+        );
+        assert_eq!(
+            cx.update(|cx| key_hint(RowKind::AddToGitignore, cx))
+                .as_deref(),
+            Some("I")
+        );
+        assert_eq!(
+            cx.update(|cx| key_hint(RowKind::Untrack, cx)).as_deref(),
+            Some("Prefix U")
+        );
     }
 
     #[gpui::test]
