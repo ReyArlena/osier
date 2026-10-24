@@ -4808,6 +4808,8 @@ name = "osier"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ashpd",
+ "futures-util",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-reqwest-client",

@@ -425,8 +425,7 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         .icon(Icon::new(Lucide::Palette))
         .default_open(true)
         .resettable(true)
-        .group(
-            SettingGroup::new().title("Theme").items(vec![
+        .group(SettingGroup::new().title("Theme").items(vec![
                 SettingItem::new(
                     "Follow Dux Shell colours",
                     SettingField::switch(
@@ -478,6 +477,31 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     .default_value("dark".to_string()),
                 )
                 .description("System follows the desktop, or Dux Shell when its sync is on."),
+                SettingItem::new(
+                    "When the desktop has no preference",
+                    SettingField::dropdown(
+                        vec![("dark".into(), "Dark".into()), ("light".into(), "Light".into())],
+                        get(view, |o| {
+                            match o.settings.appearance.system_fallback {
+                                osier_config::settings::SystemFallback::Dark => "dark",
+                                osier_config::settings::SystemFallback::Light => "light",
+                            }
+                            .into()
+                        }),
+                        set(view, |o, v: SharedString, _| {
+                            o.settings.appearance.system_fallback = if v.as_ref() == "light" {
+                                osier_config::settings::SystemFallback::Light
+                            } else {
+                                osier_config::settings::SystemFallback::Dark
+                            }
+                        }),
+                    )
+                    .default_value("dark".to_string()),
+                )
+                .description(
+                    "System mode uses this when the desktop states no light or dark preference, \
+                     or has no settings portal.",
+                ),
                 SettingItem::render({
                     let v = view.clone();
                     move |_, _, cx| theme_section("Dark theme", &v, true, cx)
@@ -486,8 +510,7 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     let v = view.clone();
                     move |_, _, cx| theme_section("Light theme", &v, false, cx)
                 }),
-            ]),
-        )
+            ]))
         .group(
             SettingGroup::new().title("Sidebar").item(
                 SettingItem::new(

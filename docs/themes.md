@@ -21,7 +21,8 @@ The same choices live in `~/.config/osier/config.toml`:
 
 ```toml
 [appearance]
-mode = "dark"             # dark | light | system
+mode = "system"           # dark | light | system (default)
+system_fallback = "dark"  # system mode with no stated desktop preference
 dark_theme = "Catppuccin Mocha"
 light_theme = "Catppuccin Latte"
 # dux_shell_sync = true  # unset: on when Dux Shell is detected

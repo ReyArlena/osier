@@ -112,7 +112,8 @@ re-read when it changes. Every key is optional.
 
 ```toml
 [appearance]
-mode = "dark"                 # dark | light | system
+mode = "system"               # dark | light | system (the default follows the desktop)
+system_fallback = "dark"      # system mode when the desktop states no preference
 dark_theme = "Catppuccin Mocha"
 light_theme = "Catppuccin Latte"
 # dux_shell_sync = true        # follow Dux Shell colours; unset = on when Dux Shell is detected

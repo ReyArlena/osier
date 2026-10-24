@@ -168,6 +168,8 @@ pub struct Osier {
     pub(crate) settings_focus: FocusHandle,
     /// Waiting for the key after the prefix key (see `prefix.rs`).
     pub(crate) prefix_pending: Option<Subscription>,
+    /// The desktop's light/dark preference, for System mode (`system_scheme.rs`).
+    pub(crate) system_scheme: crate::system_scheme::SystemScheme,
     /// Selected row in the Branches tab (branch, tag or remote).
     pub(crate) ref_selected: Option<crate::row_actions::RefRow>,
     /// Selected stash, by commit id.
@@ -377,6 +379,7 @@ impl Osier {
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
             prefix_pending: None,
+            system_scheme: Default::default(),
             ref_selected: None,
             stash_selected: None,
             prefix_generation: 0,
@@ -541,6 +544,8 @@ impl Osier {
         }
         this.update_title(window);
         this.start_watcher_loop(window, cx);
+        #[cfg(all(target_os = "linux", not(test)))]
+        this.watch_system_scheme(cx);
         this.load_keymap(cx);
         // Without a focused element the app's key bindings have no dispatch path, so
         // shortcuts would only work after the first click into a list.
@@ -743,9 +748,13 @@ impl Osier {
             ThemeMode::Light => false,
             ThemeMode::System => match store.dux_mode() {
                 Some(mode) if dux => mode == osier_theme::Mode::Dark,
-                _ => matches!(
-                    cx.window_appearance(),
-                    WindowAppearance::Dark | WindowAppearance::VibrantDark
+                _ => crate::system_scheme::system_is_dark(
+                    self.system_scheme,
+                    matches!(
+                        cx.window_appearance(),
+                        WindowAppearance::Dark | WindowAppearance::VibrantDark
+                    ),
+                    a.system_fallback,
                 ),
             },
         };
@@ -4117,11 +4126,12 @@ mod tests {
         });
         h.read(cx, |osier, cx| {
             assert!(osier.dux_sync_on(cx));
+            // Fresh installs start in System mode, so the shell's mode (light here) decides.
             assert_eq!(
-                cx.theme().theme_name().as_ref(),
-                "Dux Shell Dark",
-                "mode is still dark"
+                osier.settings.appearance.mode,
+                osier_config::settings::ThemeMode::System
             );
+            assert_eq!(cx.theme().theme_name().as_ref(), "Dux Shell Light");
         });
         // Turning it on sets System, so the shell's mode (light here) decides.
         h.act(cx, |osier, _, cx| osier.set_dux_sync(true, cx));
@@ -4162,6 +4172,45 @@ mod tests {
             assert_eq!(cx.theme().theme_name().as_ref(), "Catppuccin Mocha");
             assert_eq!(osier.settings.appearance.dux_shell_sync, Some(false));
         });
+    }
+
+    #[gpui::test]
+    fn fresh_installs_follow_the_system_and_default_to_mocha_without_an_answer(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::system_scheme::SystemScheme;
+        use gpui_kit::component::ActiveTheme as _;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        let theme = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |_, cx| cx.theme().theme_name().to_string())
+        };
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.settings.appearance.mode,
+                osier_config::settings::ThemeMode::System
+            )
+        });
+        // No Dux Shell, no answer from the desktop: Catppuccin Mocha.
+        assert_eq!(theme(&h, cx), "Catppuccin Mocha");
+        let set = |h: &Harness, cx: &mut TestAppContext, s: SystemScheme| {
+            h.act(cx, move |o, _, cx| {
+                o.system_scheme = s;
+                o.apply_appearance(cx);
+            })
+        };
+        set(&h, cx, SystemScheme::Light);
+        assert_eq!(theme(&h, cx), "Catppuccin Latte");
+        set(&h, cx, SystemScheme::Dark);
+        assert_eq!(theme(&h, cx), "Catppuccin Mocha");
+        set(&h, cx, SystemScheme::NoPreference);
+        assert_eq!(theme(&h, cx), "Catppuccin Mocha", "fallback is dark");
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.system_fallback = osier_config::settings::SystemFallback::Light;
+            o.apply_appearance(cx);
+        });
+        assert_eq!(theme(&h, cx), "Catppuccin Latte");
     }
 
     #[gpui::test]

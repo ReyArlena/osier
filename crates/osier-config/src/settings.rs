@@ -46,6 +46,9 @@ pub struct Appearance {
     pub mode: ThemeMode,
     pub dark_theme: String,
     pub light_theme: String,
+    /// In System mode, what to show when the desktop states no light/dark preference (or has
+    /// no settings portal): `dark` or `light`.
+    pub system_fallback: SystemFallback,
     /// Follow Dux Shell (DankMaterialShell) colours. Unset means on when Dux Shell is
     /// detected; `true`/`false` is the user's explicit choice.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +65,15 @@ pub struct Appearance {
     pub tooltip_delay_ms: u32,
 }
 
+/// What System mode shows when the desktop has no light/dark preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemFallback {
+    #[default]
+    Dark,
+    Light,
+}
+
 /// `icon` tints the project's folder icon, `dot` draws a dot before its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -74,9 +86,10 @@ pub enum ChangesIndicator {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            mode: ThemeMode::Dark,
+            mode: ThemeMode::System,
             dark_theme: "Catppuccin Mocha".into(),
             light_theme: "Catppuccin Latte".into(),
+            system_fallback: SystemFallback::Dark,
             dux_shell_sync: None,
             ui_font: None,
             mono_font: None,
