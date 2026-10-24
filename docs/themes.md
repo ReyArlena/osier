@@ -24,7 +24,7 @@ The same choices live in `~/.config/osier/config.toml`:
 mode = "dark"             # dark | light | system
 dark_theme = "Catppuccin Mocha"
 light_theme = "Catppuccin Latte"
-dux_shell_sync = false
+# dux_shell_sync = true  # unset: on when Dux Shell is detected
 ui_font = "Inter"         # optional, overrides the theme's font
 mono_font = "JetBrains Mono"
 font_size = 14.0          # optional, UI and mono size
@@ -99,7 +99,9 @@ tokens, is gpui-kit's schema: `crates/component/src/theme/schema.rs` in the gpui
 
 ## Dux Shell sync
 
-With `dux_shell_sync = true` Osier reads `$XDG_CACHE_HOME/dms/dms-colors.json` (falling back to
+Sync is on by default when Dux Shell is detected (unless `dux_shell_sync = false`). Turning it
+on in Settings sets the mode to System, so the shell's light or dark decides; you can still pick
+Dark or Light afterwards. While it is on, the theme pickers are off. With sync on Osier reads `$XDG_CACHE_HOME/dms/dms-colors.json` (falling back to
 the older `DankMaterialShell/` directory) and `dms-typography.json` next to it, and builds two
 themes, `Dux Shell Dark` and `Dux Shell Light`. The files are watched, so a wallpaper change in
 Dux Shell recolours Osier within half a second. If the files are missing the toggle is shown
