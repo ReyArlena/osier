@@ -129,6 +129,8 @@ pub struct Projects {
     pub recent_status: RecentStatusMode,
     /// Sweep interval for `recent_status = "check"`, 1 to 60 minutes.
     pub recent_status_minutes: u32,
+    /// The tab to show instead of an empty Changes tab after switching project.
+    pub empty_changes_tab: EmptyChangesTab,
 }
 
 impl Default for Projects {
@@ -138,6 +140,7 @@ impl Default for Projects {
             scan_depth: None,
             recent_status: RecentStatusMode::Never,
             recent_status_minutes: 2,
+            empty_changes_tab: EmptyChangesTab::Log,
         }
     }
 }
@@ -146,6 +149,20 @@ impl Projects {
     pub fn recent_status_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(u64::from(self.recent_status_minutes.clamp(1, 60)) * 60)
     }
+}
+
+/// Where to go when switching (or opening) a project while on the Changes tab and that
+/// project has nothing to commit and no operation in progress. `Stay` keeps the Changes tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EmptyChangesTab {
+    Stay,
+    #[default]
+    Log,
+    Branches,
+    Stashes,
+    Files,
+    Patches,
 }
 
 /// How the sidebar learns the state of projects that are not open.
@@ -351,6 +368,18 @@ mod tests {
         assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Code);
         assert_eq!(extension(".bashrc"), None);
         assert_eq!(extension("a/b.c/README"), None);
+    }
+
+    #[test]
+    fn empty_changes_tab_defaults_to_log_and_reads_stay() {
+        assert_eq!(
+            Settings::default().projects.empty_changes_tab,
+            EmptyChangesTab::Log
+        );
+        let s: Settings = toml::from_str("[projects]\nempty_changes_tab = \"stay\"\n").unwrap();
+        assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Stay);
+        let s: Settings = toml::from_str("[projects]\nempty_changes_tab = \"branches\"\n").unwrap();
+        assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Branches);
     }
 
     #[test]

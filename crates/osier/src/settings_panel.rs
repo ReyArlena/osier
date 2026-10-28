@@ -1182,6 +1182,52 @@ fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 ),
         )
         .group(
+            SettingGroup::new().title("Switching projects").item(
+                SettingItem::new(
+                    "When Changes is empty",
+                    SettingField::dropdown(
+                        vec![
+                            ("stay".into(), "Don't switch".into()),
+                            ("log".into(), "Log".into()),
+                            ("branches".into(), "Branches".into()),
+                            ("stashes".into(), "Stashes".into()),
+                            ("files".into(), "Files".into()),
+                            ("patches".into(), "Patches".into()),
+                        ],
+                        get(view, |o| {
+                            use osier_config::settings::EmptyChangesTab as E;
+                            match o.settings.projects.empty_changes_tab {
+                                E::Stay => "stay",
+                                E::Log => "log",
+                                E::Branches => "branches",
+                                E::Stashes => "stashes",
+                                E::Files => "files",
+                                E::Patches => "patches",
+                            }
+                            .into()
+                        }),
+                        set(view, |o, v: SharedString, _| {
+                            use osier_config::settings::EmptyChangesTab as E;
+                            o.settings.projects.empty_changes_tab = match v.as_ref() {
+                                "stay" => E::Stay,
+                                "branches" => E::Branches,
+                                "stashes" => E::Stashes,
+                                "files" => E::Files,
+                                "patches" => E::Patches,
+                                _ => E::Log,
+                            };
+                        }),
+                    )
+                    .default_value("log".to_string()),
+                )
+                .description(
+                    "When you switch to or open a project while on the Changes tab and it has \
+                     nothing to commit, show this tab instead. Switching to a project with \
+                     changes brings Changes back.",
+                ),
+            ),
+        )
+        .group(
             highlightable(SettingGroup::new(), SettingsTarget::RECENT_STATUS, view, cx)
                 .title("Status of projects that are not open")
                 .description("Ahead/behind badges and the changes marker on pinned, recent and scanned projects.")

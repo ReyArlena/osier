@@ -138,6 +138,8 @@ scan_depth = 1
 recent_status = "never"       # badges on projects that are not open:
                               # never | cached | watch | check
 recent_status_minutes = 2     # check mode sweep interval, 1 to 60
+empty_changes_tab = "log"     # tab shown instead of an empty Changes tab after switching
+                              # project: stay | log | branches | stashes | files | patches
 
 [diff]
 context_lines = 3

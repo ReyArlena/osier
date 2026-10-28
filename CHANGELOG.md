@@ -34,6 +34,10 @@ All notable changes to Osier are documented here. The format follows
   dropdown under the filter box.
 - The Changes tab shows how many files have changes.
 - Open on GitHub in the project and commit context menus.
+- Switching to or opening a project with nothing to commit while on the Changes tab shows the
+  Log tab instead; switching to a project with changes brings Changes back. Other tabs are
+  kept as before. Pick the tab or turn it off in Settings > Projects
+  (`projects.empty_changes_tab`).
 - Command palette submenus. "Switch project…" (`ctrl-o` opens it directly) searches the open,
   pinned and recent projects, shown with the same changes, ahead/behind and pin markers as the
   sidebar, and switches to or opens the chosen one. Backspace on an empty query or Esc goes

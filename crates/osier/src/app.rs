@@ -106,6 +106,13 @@ pub struct Osier {
     pub(crate) projects: Vec<Project>,
     pub(crate) active: Option<usize>,
     pub(crate) tab: Tab,
+    /// The tab a project switch moved to from an empty Changes tab
+    /// (`projects.empty_changes_tab`). Switching to a project with changes returns to Changes
+    /// while it is still showing; choosing a tab clears it.
+    pub(crate) auto_tab: Option<Tab>,
+    /// The active project changed before its first snapshot: apply the empty-Changes rule
+    /// when the snapshot arrives.
+    tab_check_pending: bool,
     /// Log tab shows the reflog instead of the commit list.
     pub(crate) show_reflog: bool,
     pub(crate) sidebar_visible: bool,
@@ -352,6 +359,8 @@ impl Osier {
                 Ok("patches") => Tab::Patches,
                 _ => Tab::Changes,
             },
+            auto_tab: None,
+            tab_check_pending: false,
             expanded_command: None,
             diff,
             diff_files: 0,
@@ -929,7 +938,11 @@ impl Osier {
     ) -> Result<usize, String> {
         if let Some(ix) = self.projects.iter().position(|p| p.path == path) {
             if make_active {
+                let switched = self.active != Some(ix);
                 self.active = Some(ix);
+                if switched {
+                    self.switch_tab_for_project();
+                }
                 self.state.open(&self.projects[ix].path);
                 self.save_state();
             }
@@ -956,6 +969,8 @@ impl Osier {
                 self.refresh_project(ix, cx);
                 if make_active {
                     self.active = Some(ix);
+                    // A new project has no snapshot yet: decided when it arrives.
+                    self.switch_tab_for_project();
                 }
                 Ok(ix)
             }
@@ -1026,10 +1041,14 @@ impl Osier {
         if ix >= self.projects.len() {
             return;
         }
+        let switched = self.active != Some(ix);
         self.active = Some(ix);
         let path = self.projects[ix].path.clone();
         self.state.open(&path);
         self.save_state();
+        if switched {
+            self.switch_tab_for_project();
+        }
         self.reload_selection(cx);
         self.update_title(window);
         cx.notify();
@@ -1041,6 +1060,7 @@ impl Osier {
         }
         let project = self.projects.remove(ix);
         self.state.close(&project.path);
+        let closed_active = self.active == Some(ix);
         self.active = match self.active {
             Some(a) if a == ix => {
                 if self.projects.is_empty() {
@@ -1055,6 +1075,9 @@ impl Osier {
         if let Some(a) = self.active {
             let p = self.projects[a].path.clone();
             self.state.active_project = Some(p);
+            if closed_active {
+                self.switch_tab_for_project();
+            }
         }
         self.save_state();
         self.reload_selection(cx);
@@ -1182,6 +1205,9 @@ impl Osier {
                 project.error = None;
             }
             Err(error) => project.error = Some(error),
+        }
+        if is_active && self.tab_check_pending {
+            self.switch_tab_for_project();
         }
         if is_active && reload {
             self.reload_selection(cx);
@@ -1516,7 +1542,47 @@ impl Osier {
 
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
+        self.auto_tab = None;
         cx.notify();
+    }
+
+    /// After the active project changed: leave an empty Changes tab for the tab set in
+    /// `projects.empty_changes_tab`, or return to Changes when an earlier switch left it and
+    /// this project has something to show. Waits for the first snapshot of a new project.
+    pub(crate) fn switch_tab_for_project(&mut self) {
+        use osier_config::settings::EmptyChangesTab as E;
+        let Some(empty) = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map(|s| s.status.entries.is_empty() && s.in_progress.is_none())
+        else {
+            self.tab_check_pending = true;
+            return;
+        };
+        self.tab_check_pending = false;
+        if let Some(auto) = self.auto_tab.take()
+            && self.tab == auto
+        {
+            if empty {
+                self.auto_tab = Some(auto);
+            } else {
+                self.tab = Tab::Changes;
+            }
+            return;
+        }
+        if self.tab != Tab::Changes || !empty {
+            return;
+        }
+        let target = match self.settings.projects.empty_changes_tab {
+            E::Stay => return,
+            E::Log => Tab::Log,
+            E::Branches => Tab::Branches,
+            E::Stashes => Tab::Stashes,
+            E::Files => Tab::Files,
+            E::Patches => Tab::Patches,
+        };
+        self.tab = target;
+        self.auto_tab = Some(target);
     }
 
     /// Apply `keymap.toml` (startup, or after it changed). Problems are logged and returned.
@@ -2770,6 +2836,8 @@ mod tests {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");
         let h = Harness::open(cx, &repo);
+        // A clean repository opens on Log (`projects.empty_changes_tab`); start from Changes.
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Changes, cx));
         let file = h.read(cx, |o, _| o.paths.keymap_file());
         std::fs::create_dir_all(file.parent().expect("dir")).expect("mkdir");
         std::fs::write(
@@ -2921,6 +2989,8 @@ mod tests {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");
         let h = Harness::open(cx, &repo);
+        // A clean repository opens on Log (`projects.empty_changes_tab`); start from Changes.
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Changes, cx));
         h.act(cx, |o, _, cx| o.start_key_recording("tab_log", cx));
         h.keys(cx, "ctrl-3");
         h.read(cx, |o, cx| {
@@ -3180,6 +3250,86 @@ mod tests {
         let e = row(&h, cx);
         assert_eq!(e.section, Section::Pinned);
         assert!(!e.active);
+    }
+
+    fn tab(h: &Harness, cx: &mut TestAppContext) -> super::Tab {
+        h.read(cx, |o, _| o.tab)
+    }
+
+    #[gpui::test]
+    fn empty_changes_tab_on_startup_and_when_switching(cx: &mut TestAppContext) {
+        use super::Tab;
+        // Startup on a clean project: Changes would be empty, so Log shows.
+        let (h, a, _b, first, second) = two_projects(cx);
+        assert_eq!(tab(&h, cx), Tab::Log);
+        // Changes appear in the first project; going back there returns to Changes.
+        a.write("new.txt", "x\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), first);
+        assert_eq!(tab(&h, cx), Tab::Changes);
+        // And to the clean one: Log again.
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), second);
+        assert_eq!(tab(&h, cx), Tab::Log);
+    }
+
+    #[gpui::test]
+    fn ui_other_tabs_and_manual_choices_are_kept(cx: &mut TestAppContext) {
+        use super::Tab;
+        let (h, a, _b, first, _second) = two_projects(cx);
+        a.write("new.txt", "x\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        // On Branches, switching never moves the tab.
+        h.click(cx, "tab-branches");
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), first);
+        assert_eq!(tab(&h, cx), Tab::Branches);
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(tab(&h, cx), Tab::Branches);
+        // Moved to Log automatically, then picked Log by hand: it stays Log on a project
+        // with changes.
+        h.click(cx, "tab-changes");
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(tab(&h, cx), Tab::Changes, "first has changes");
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(tab(&h, cx), Tab::Log);
+        h.click(cx, "tab-log");
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), first);
+        assert_eq!(tab(&h, cx), Tab::Log);
+    }
+
+    #[gpui::test]
+    fn empty_changes_tab_setting_picks_the_tab_or_stays(cx: &mut TestAppContext) {
+        use super::Tab;
+        use osier_config::settings::EmptyChangesTab;
+        let (h, a, _b, _first, _second) = two_projects(cx);
+        a.write("new.txt", "x\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        h.act(cx, |o, w, cx| {
+            o.settings.projects.empty_changes_tab = EmptyChangesTab::Stashes;
+            o.activate(0, w, cx);
+        });
+        assert_eq!(tab(&h, cx), Tab::Changes);
+        h.act(cx, |o, w, cx| o.activate(1, w, cx));
+        assert_eq!(tab(&h, cx), Tab::Stashes);
+        h.act(cx, |o, w, cx| {
+            o.activate(0, w, cx);
+            o.settings.projects.empty_changes_tab = EmptyChangesTab::Stay;
+            o.activate(1, w, cx);
+        });
+        assert_eq!(tab(&h, cx), Tab::Changes);
+        // A project opened fresh is judged once its first status arrives.
+        let c = TempRepo::new();
+        c.commit_file("c.txt", "c\n", "first");
+        let path = c.path().to_path_buf();
+        h.act(cx, |o, w, cx| {
+            o.settings.projects.empty_changes_tab = EmptyChangesTab::Files;
+            o.activate(0, w, cx);
+            o.open_project_notify(&path, w, cx);
+        });
+        assert_eq!(tab(&h, cx), Tab::Files);
     }
 
     #[gpui::test]
