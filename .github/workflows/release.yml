@@ -40,7 +40,7 @@ jobs:
           mkdir -p "dist/${name}"
           cp "target/${{ matrix.target }}/release/osier" "dist/${name}/"
           cp LICENSE README.md "dist/${name}/"
-          cp -r packaging/com.reyarlena.osier.desktop packaging/com.reyarlena.osier.metainfo.xml packaging/icons "dist/${name}/"
+          cp -r packaging/com.reyarlena.osier.desktop packaging/com.reyarlena.osier.askpass.desktop packaging/com.reyarlena.osier.metainfo.xml packaging/icons "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
       - uses: actions/upload-artifact@v4

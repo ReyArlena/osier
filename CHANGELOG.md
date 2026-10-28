@@ -44,6 +44,7 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - New application icon.
+- The askpass window shows the Osier icon (a hidden desktop entry matches its app id).
 - The command palette opens with `ctrl-p` (and still `F1`).
 - Open repository moved from `ctrl-o` to `ctrl-shift-o`; `ctrl-o` now switches project.
 - New installs follow the desktop's light/dark preference (System mode), read from the XDG

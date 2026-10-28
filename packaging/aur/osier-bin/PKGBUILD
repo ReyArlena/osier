@@ -19,6 +19,7 @@ package() {
   cd "osier-$pkgver-${CARCH}-unknown-linux-gnu"
   install -Dm755 osier "$pkgdir/usr/bin/osier"
   install -Dm644 com.reyarlena.osier.desktop "$pkgdir/usr/share/applications/com.reyarlena.osier.desktop"
+  install -Dm644 com.reyarlena.osier.askpass.desktop "$pkgdir/usr/share/applications/com.reyarlena.osier.askpass.desktop"
   install -Dm644 com.reyarlena.osier.metainfo.xml "$pkgdir/usr/share/metainfo/com.reyarlena.osier.metainfo.xml"
   for s in 16 32 48 64 128 256 512; do
     install -Dm644 "icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png" \

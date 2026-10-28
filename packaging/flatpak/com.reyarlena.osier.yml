@@ -36,6 +36,7 @@ modules:
       - install -Dm755 target/release/osier /app/bin/osier
       - install -Dm755 packaging/flatpak/git-host /app/bin/git-host
       - install -Dm644 packaging/com.reyarlena.osier.desktop /app/share/applications/com.reyarlena.osier.desktop
+      - install -Dm644 packaging/com.reyarlena.osier.askpass.desktop /app/share/applications/com.reyarlena.osier.askpass.desktop
       - install -Dm644 packaging/com.reyarlena.osier.metainfo.xml /app/share/metainfo/com.reyarlena.osier.metainfo.xml
       - for s in 16 32 48 64 128 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png /app/share/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png; done
     sources:

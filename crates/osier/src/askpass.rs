@@ -58,6 +58,11 @@ impl Render for Askpass {
     }
 }
 
+/// The askpass window's own Wayland app id, so a compositor rule can target it (float it,
+/// say). `packaging/com.reyarlena.osier.askpass.desktop` matches it and points at the main
+/// icon by name, which is how the window gets Osier's icon.
+pub(crate) const ASKPASS_APP_ID: &str = "com.reyarlena.osier.askpass";
+
 pub fn run(prompt: String) -> ExitCode {
     // Secrets are typed here; the prompt may say "passphrase" or "password". Mask unless the
     // prompt is clearly a yes/no question (host key confirmation).
@@ -88,7 +93,7 @@ pub fn run(prompt: String) -> ExitCode {
                     title: Some("Osier".into()),
                     ..Default::default()
                 }),
-                app_id: Some("com.reyarlena.osier.askpass".into()),
+                app_id: Some(ASKPASS_APP_ID.into()),
                 ..Default::default()
             };
             let prompt = prompt.clone();
@@ -124,4 +129,28 @@ pub fn run(prompt: String) -> ExitCode {
             cx.activate(true);
         });
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    /// Each window's app id needs a desktop entry of the same name for its icon, and both
+    /// entries name the one themed icon, so a new icon reaches every window.
+    #[test]
+    fn every_app_id_has_a_desktop_entry_with_the_main_icon() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging");
+        for id in [crate::APP_ID, super::ASKPASS_APP_ID] {
+            let entry = std::fs::read_to_string(dir.join(format!("{id}.desktop")))
+                .unwrap_or_else(|e| panic!("no desktop entry for {id}: {e}"));
+            assert!(
+                entry.lines().any(|l| l == format!("StartupWMClass={id}")),
+                "{id}"
+            );
+            assert!(
+                entry
+                    .lines()
+                    .any(|l| l == format!("Icon={}", crate::APP_ID)),
+                "{id} must use the main icon"
+            );
+        }
+    }
 }

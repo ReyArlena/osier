@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Osier
+Comment=Password and passphrase prompts from git and ssh
+Exec=osier
+Icon=com.reyarlena.osier
+Terminal=false
+NoDisplay=true
+StartupWMClass=com.reyarlena.osier.askpass

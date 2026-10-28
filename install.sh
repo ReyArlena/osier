@@ -81,8 +81,13 @@ install_desktop() {
   src="$1"
   if [ -f "$src/$APP_ID.desktop" ]; then
     mkdir -p "$DATA_DIR/applications" "$DATA_DIR/metainfo"
-    sed "s|^Exec=osier |Exec=$BIN_DIR/osier |" "$src/$APP_ID.desktop" > "$DATA_DIR/applications/$APP_ID.desktop"
-    chmod 644 "$DATA_DIR/applications/$APP_ID.desktop"
+    # The main entry, plus a hidden one matching the askpass window's app id (for its icon).
+    for id in "$APP_ID" "$APP_ID.askpass"; do
+      [ -f "$src/$id.desktop" ] || continue
+      sed -e "s|^Exec=osier |Exec=$BIN_DIR/osier |" -e "s|^Exec=osier\$|Exec=$BIN_DIR/osier|" \
+        "$src/$id.desktop" > "$DATA_DIR/applications/$id.desktop"
+      chmod 644 "$DATA_DIR/applications/$id.desktop"
+    done
     [ -f "$src/$APP_ID.metainfo.xml" ] && install -m 644 "$src/$APP_ID.metainfo.xml" "$DATA_DIR/metainfo/$APP_ID.metainfo.xml"
     for dir in "$src"/icons/hicolor/*; do
       size="$(basename "$dir")"
