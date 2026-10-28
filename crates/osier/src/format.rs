@@ -57,6 +57,17 @@ pub fn tilde(path: &Path) -> String {
     s.into_owned()
 }
 
+/// `↑a ↓b` for commits ahead of and behind the upstream, only the non-zero parts; `None`
+/// when in sync.
+pub fn ahead_behind(ahead: u32, behind: u32) -> Option<String> {
+    match (ahead, behind) {
+        (0, 0) => None,
+        (a, 0) => Some(format!("↑{a}")),
+        (0, b) => Some(format!("↓{b}")),
+        (a, b) => Some(format!("↑{a} ↓{b}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,7 +14,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
-use crate::format::tilde;
+use crate::format::{ahead_behind as arrows_text, tilde};
 use crate::test_ids::TestId as _;
 
 type MoveHandler = std::rc::Rc<dyn Fn(usize, usize, &mut App)>;
@@ -80,16 +80,6 @@ fn row_suffix(fade: RowFade, active: bool) -> Div {
             .bg(crate::fade::fade_fill(color))
             .group_hover("sidebar-row", move |s| s.bg(crate::fade::fade_fill(hover))),
     )
-}
-
-/// `↑a ↓b`, only the non-zero parts; `None` when in sync.
-fn arrows_text(ahead: u32, behind: u32) -> Option<String> {
-    match (ahead, behind) {
-        (0, 0) => None,
-        (a, 0) => Some(format!("↑{a}")),
-        (0, b) => Some(format!("↓{b}")),
-        (a, b) => Some(format!("↑{a} ↓{b}")),
-    }
 }
 
 impl ReorderMenu {
@@ -760,7 +750,10 @@ impl Osier {
                                 .w_full()
                                 .icon(Lucide::FolderPlus)
                                 .label("Open repository")
-                                .tooltip("Open a repository (ctrl-o)")
+                                .tooltip(match crate::keymap::hint("open_repository", cx) {
+                                    Some(k) => format!("Open a repository ({k})"),
+                                    None => "Open a repository".to_string(),
+                                })
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.prompt_open_repository(window, cx)
                                 })),

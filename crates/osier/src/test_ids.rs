@@ -18,6 +18,8 @@
 //! - the filter dropdown `filter-suggestions`, its rows `filter-suggestion:<term>` and the
 //!   settings link `filter-open-settings`
 //! - the settings dialog content `settings-dialog`
+//! - command palette: query field `palette-query`, submenu badge `palette-badge`, rows
+//!   `palette-command:<label>` and `palette-project:<name>`
 
 use gpui_kit::InteractiveElement;
 

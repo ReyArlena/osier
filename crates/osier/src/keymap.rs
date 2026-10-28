@@ -119,7 +119,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             "open_repository",
             "Open repository",
             "General",
-            ["ctrl-o"],
+            ["ctrl-shift-o"],
             App,
             OpenRepository
         ),
@@ -138,6 +138,14 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ["ctrl-p", "f1"],
             App,
             OpenCommandPalette
+        ),
+        spec!(
+            "switch_project",
+            "Switch project",
+            "General",
+            ["ctrl-o"],
+            App,
+            SwitchProject
         ),
         spec!(
             "open_settings",
@@ -556,6 +564,12 @@ pub(crate) fn plausible(keys: &str) -> bool {
                     && key.starts_with('f')
                     && key[1..].chars().all(|c| c.is_ascii_digit()))
         })
+}
+
+/// The first key bound to action `id`, pretty-printed for hints and tooltips; `None` when
+/// unbound.
+pub(crate) fn hint(id: &str, cx: &App) -> Option<String> {
+    Keymap::global(cx).keys_for(id).first().map(|k| pretty(k))
 }
 
 /// `ctrl-shift-p` as `Ctrl+Shift+P`, `escape` as `Esc`, sequences joined by spaces. The form

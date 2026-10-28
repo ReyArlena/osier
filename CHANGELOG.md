@@ -34,6 +34,10 @@ All notable changes to Osier are documented here. The format follows
   dropdown under the filter box.
 - The Changes tab shows how many files have changes.
 - Open on GitHub in the project and commit context menus.
+- Command palette submenus. "Switch project…" (`ctrl-o` opens it directly) searches the open,
+  pinned and recent projects, shown with the same changes, ahead/behind and pin markers as the
+  sidebar, and switches to or opens the chosen one. Backspace on an empty query or Esc goes
+  back to the commands.
 - Right-click any commit, reflog entry, branch, tag, remote, worktree, stash or patch row for
   its menu. The `...` row buttons are hidden by default (Settings > Appearance > Lists).
 
@@ -41,6 +45,7 @@ All notable changes to Osier are documented here. The format follows
 
 - New application icon.
 - The command palette opens with `ctrl-p` (and still `F1`).
+- Open repository moved from `ctrl-o` to `ctrl-shift-o`; `ctrl-o` now switches project.
 - New installs follow the desktop's light/dark preference (System mode), read from the XDG
   settings portal. With no stated preference or no portal, Osier uses the dark theme (set in
   Appearance > When the desktop has no preference).

@@ -63,8 +63,9 @@ osier [path]      open a repository (or start with the last session)
 osier --version --verbose
 ```
 
-Open repositories from the sidebar (`ctrl-o`), or let Osier scan directories for them
-(Settings > Projects). Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
+Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directories for them
+(Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
+projects in the command palette. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
 `ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-p` or
 `F1` opens the command palette, `ctrl-,` opens settings, `/` searches projects, `?` searches
 files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a

@@ -40,12 +40,12 @@ fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
 impl Osier {
     pub(crate) fn render_changes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(project) = self.active_project() else {
+            let hint = match crate::keymap::hint("open_repository", cx) {
+                Some(k) => format!("Open a repository from the sidebar or press {k}."),
+                None => "Open a repository from the sidebar.".to_string(),
+            };
             return self
-                .empty_state(
-                    "No repository open",
-                    "Open a repository from the sidebar or press ctrl-o.",
-                    cx,
-                )
+                .empty_state("No repository open", &hint, cx)
                 .into_any_element();
         };
         let Some(snapshot) = &project.snapshot else {

@@ -32,6 +32,7 @@ gpui_kit::actions!(
         ToggleTheme,
         OpenSettings,
         OpenCommandPalette,
+        SwitchProject,
         TabChanges,
         TabLog,
         TabBranches,
@@ -553,6 +554,23 @@ impl Osier {
         window.defer(cx, move |window, cx| root_focus.focus(window, cx));
         // Dev aid for screenshots: OSIER_OPEN_SETTINGS=1 opens the settings sheet at startup.
         // The sheet needs gpui-kit's root, which exists only after this view is installed.
+        // OSIER_OPEN_PALETTE=root|switch_project opens the command palette on that mode.
+        let palette = match std::env::var("OSIER_OPEN_PALETTE").as_deref() {
+            Ok("root") => Some(crate::palette::PaletteMode::Root),
+            Ok("switch_project") => Some(crate::palette::PaletteMode::SwitchProject),
+            _ => None,
+        };
+        if let Some(mode) = palette {
+            cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(300))
+                    .await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.open_palette_in(mode, window, cx)
+                });
+            })
+            .detach();
+        }
         if std::env::var_os("OSIER_OPEN_SETTINGS").is_some_and(|v| v == "1") {
             cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor()
@@ -618,10 +636,12 @@ impl Osier {
         })
     }
 
-    /// Recents and scanned repositories that are not open, filtered, with their origin.
     /// Pinned repositories that are not open, filtered like the rest of the sidebar.
     pub(crate) fn pinned_entries(&self, cx: &App) -> Vec<PathBuf> {
-        let query = self.sidebar_query(cx);
+        self.pinned_matching(&self.sidebar_query(cx))
+    }
+
+    pub(crate) fn pinned_matching(&self, query: &Query) -> Vec<PathBuf> {
         self.state
             .pinned
             .iter()
@@ -631,8 +651,14 @@ impl Osier {
             .collect()
     }
 
+    /// Recents and scanned repositories that are not open, filtered, with their origin.
     pub(crate) fn recent_entries(&self, cx: &App) -> Vec<(PathBuf, Option<PathBuf>)> {
-        let query = self.sidebar_query(cx);
+        self.recent_matching(&self.sidebar_query(cx))
+    }
+
+    /// Recents and scanned repositories that are not open or pinned, with their scan
+    /// directory when one provides them.
+    pub(crate) fn recent_matching(&self, query: &Query) -> Vec<(PathBuf, Option<PathBuf>)> {
         let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
         for p in self.state.recent_not_open() {
             if self.state.is_pinned(p) {
@@ -1911,6 +1937,9 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &OpenCommandPalette, window, cx| {
                 this.open_command_palette(window, cx)
             }))
+            .on_action(cx.listener(|this, _: &SwitchProject, window, cx| {
+                this.open_palette_in(crate::palette::PaletteMode::SwitchProject, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &TabChanges, _, cx| this.set_tab(Tab::Changes, cx)))
             .on_action(cx.listener(|this, _: &TabLog, _, cx| this.set_tab(Tab::Log, cx)))
             .on_action(cx.listener(|this, _: &TabBranches, _, cx| this.set_tab(Tab::Branches, cx)))
@@ -2999,6 +3028,176 @@ mod tests {
         h.type_text(cx, "Log tab");
         h.keys(cx, "enter");
         h.read(cx, |osier, _| assert_eq!(osier.tab, super::Tab::Log));
+    }
+
+    /// Two open repositories, the second one active. Returns the harness and both names.
+    fn two_projects(cx: &mut TestAppContext) -> (Harness, TempRepo, TempRepo, String, String) {
+        let a = TempRepo::new();
+        a.commit_file("a.txt", "a\n", "first");
+        let b = TempRepo::new();
+        b.commit_file("b.txt", "b\n", "first");
+        let h = Harness::open(cx, &a);
+        let path = b.path().to_path_buf();
+        h.act(cx, |o, w, cx| o.open_project_notify(&path, w, cx));
+        let names = h.read(cx, |o, _| {
+            assert_eq!(o.active, Some(1));
+            (o.projects[0].name.clone(), o.projects[1].name.clone())
+        });
+        (h, a, b, names.0, names.1)
+    }
+
+    fn in_palette(h: &Harness, cx: &mut TestAppContext) -> bool {
+        h.has_settings(cx)
+    }
+
+    fn active_name(h: &Harness, cx: &mut TestAppContext) -> String {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .map(|p| p.name.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    #[gpui::test]
+    fn ui_switch_project_shortcut_flips_to_the_other_project(cx: &mut TestAppContext) {
+        let (h, _a, _b, first, second) = two_projects(cx);
+        h.keys(cx, "ctrl-o");
+        assert!(h.bounds(cx, "palette-badge").is_some(), "submenu badge");
+        assert!(h.bounds(cx, &format!("palette-project:{first}")).is_some());
+        assert!(h.bounds(cx, &format!("palette-project:{second}")).is_some());
+        // The current project is skipped by the initial highlight.
+        h.keys(cx, "enter");
+        assert!(!in_palette(&h, cx));
+        assert_eq!(active_name(&h, cx), first);
+        // Now the first is current: the highlight starts on the second.
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), second);
+    }
+
+    #[gpui::test]
+    fn ui_switch_project_highlights_the_first_row_when_it_is_not_current(cx: &mut TestAppContext) {
+        let (h, _a, _b, first, second) = two_projects(cx);
+        // A recent project below the open ones must not steal the highlight.
+        h.act(cx, |o, w, cx| o.activate(0, w, cx));
+        let c = TempRepo::new();
+        c.commit_file("c.txt", "c\n", "first");
+        let path = c.path().to_path_buf();
+        h.act(cx, |o, w, cx| {
+            o.open_project_notify(&path, w, cx);
+            o.close_project(2, w, cx);
+            o.activate(1, w, cx);
+        });
+        assert_eq!(active_name(&h, cx), second);
+        h.keys(cx, "ctrl-o enter");
+        assert_eq!(active_name(&h, cx), first);
+    }
+
+    #[gpui::test]
+    fn ui_switch_project_filters_and_moves_with_arrows(cx: &mut TestAppContext) {
+        let (h, _a, _b, first, second) = two_projects(cx);
+        h.keys(cx, "ctrl-o");
+        h.type_text(cx, &second);
+        assert!(h.bounds(cx, &format!("palette-project:{first}")).is_none());
+        h.keys(cx, "enter");
+        assert_eq!(active_name(&h, cx), second);
+        // Arrows reach the list through the custom query field.
+        h.keys(cx, "ctrl-o down up enter");
+        assert_eq!(active_name(&h, cx), first);
+    }
+
+    #[gpui::test]
+    fn ui_switch_project_opens_a_recent_project(cx: &mut TestAppContext) {
+        let (h, _a, b, first, second) = two_projects(cx);
+        h.act(cx, |o, w, cx| o.close_project(1, w, cx));
+        assert_eq!(active_name(&h, cx), first);
+        h.keys(cx, "ctrl-o");
+        h.type_text(cx, &second);
+        assert!(h.bounds(cx, &format!("palette-project:{second}")).is_some());
+        h.keys(cx, "enter");
+        assert_eq!(active_name(&h, cx), second);
+        h.read(cx, |o, _| {
+            assert!(o.projects.iter().any(|p| p.path == b.path()));
+        });
+    }
+
+    #[gpui::test]
+    fn ui_palette_submenu_back_and_escape(cx: &mut TestAppContext) {
+        let (h, _a, _b, first, _second) = two_projects(cx);
+        // Into the submenu from the commands, by typing and by clicking.
+        h.keys(cx, "ctrl-p");
+        assert!(h.bounds(cx, "palette-badge").is_none());
+        h.type_text(cx, "switch proj");
+        h.keys(cx, "enter");
+        assert!(h.bounds(cx, "palette-badge").is_some());
+        // Backspace with an empty query goes back to the commands; the palette stays.
+        h.keys(cx, "backspace");
+        assert!(h.bounds(cx, "palette-badge").is_none());
+        assert!(in_palette(&h, cx));
+        h.click(cx, "palette-command:Switch project…");
+        assert!(h.bounds(cx, "palette-badge").is_some());
+        // Backspace that deletes text stays in the submenu.
+        h.type_text(cx, "x");
+        h.keys(cx, "backspace");
+        assert!(h.bounds(cx, "palette-badge").is_some());
+        // Escape goes back too, then closes the commands as before.
+        h.keys(cx, "escape");
+        assert!(h.bounds(cx, "palette-badge").is_none());
+        assert!(in_palette(&h, cx));
+        h.keys(cx, "escape");
+        assert!(!in_palette(&h, cx));
+        // Opened straight into the submenu, Escape still lands on the commands.
+        h.keys(cx, "ctrl-o escape");
+        assert!(in_palette(&h, cx));
+        assert!(h.bounds(cx, "palette-command:Switch project…").is_some());
+        h.keys(cx, "escape");
+        assert!(!in_palette(&h, cx));
+        assert_ne!(active_name(&h, cx), first);
+    }
+
+    #[gpui::test]
+    fn switch_project_rows_carry_the_sidebar_markers(cx: &mut TestAppContext) {
+        use crate::switch_project::Section;
+        use osier_config::settings::ChangesIndicator;
+        let repo = repo_with_upstream(2, true);
+        let h = Harness::open(cx, &repo);
+        let path = repo.path().to_path_buf();
+        let row = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| o.switch_project_entries().remove(0))
+        };
+        let e = row(&h, cx);
+        assert_eq!(e.section, Section::Open);
+        assert!(e.active && e.dirty && !e.dot && !e.pinned);
+        assert_eq!(e.arrows.as_deref(), Some("↑2"));
+        assert!(e.dir.ends_with(&e.name));
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.changes_indicator = ChangesIndicator::Dot;
+            o.toggle_pin(&path, cx);
+        });
+        let e = row(&h, cx);
+        assert!(e.dirty && e.dot && e.pinned);
+        // Closed and pinned: listed under Pinned with the pin as its icon.
+        h.act(cx, |o, w, cx| o.close_project(0, w, cx));
+        let e = row(&h, cx);
+        assert_eq!(e.section, Section::Pinned);
+        assert!(!e.active);
+    }
+
+    #[gpui::test]
+    fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |_, cx| {
+            let keymap = crate::keymap::Keymap::global(cx);
+            assert_eq!(
+                keymap.keys_for("open_repository"),
+                vec!["ctrl-shift-o".to_string()]
+            );
+            assert_eq!(
+                keymap.keys_for("switch_project"),
+                vec!["ctrl-o".to_string()]
+            );
+        });
     }
 
     fn status_has(h: &Harness, cx: &mut TestAppContext, line: &str) -> bool {
