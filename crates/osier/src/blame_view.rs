@@ -195,6 +195,7 @@ impl Osier {
                                             ("blame-time", ix),
                                             iso_date(l.authored_at),
                                             l.authored_at,
+                                            cx,
                                         ))
                                     })
                                 }),

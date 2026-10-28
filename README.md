@@ -151,6 +151,7 @@ large_file_bytes = 2097152
 [git]
 log_page_size = 500
 show_command_log = false
+log_badges = "left"           # Log branch/tag badges: left (before the subject) | right
 
 [auth]
 askpass = true                # route ssh/git prompts to Osier's own window

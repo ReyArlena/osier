@@ -229,7 +229,7 @@ impl Osier {
                             }),
                     )
                     .child(
-                        super::relative_time_label(("patch-time", ix), p.meta.created as i64)
+                        super::relative_time_label(("patch-time", ix), p.meta.created as i64, cx)
                             .text_xs()
                             .text_color(muted)
                             .flex_none(),

@@ -26,25 +26,32 @@ use crate::app::{Osier, Tab};
 use crate::test_ids::TestId as _;
 
 /// A time as lists show it (`text`, e.g. "12h ago" or a date) with the full local date and
-/// time in a tooltip.
+/// time in a tooltip. gpui's own element tooltips have a fixed delay, so the configured one
+/// (`appearance.tooltip_delay_ms`, installed as gpui-kit's tooltip default) is passed on.
 pub(crate) fn time_label(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     unix: i64,
+    cx: &App,
 ) -> Stateful<Div> {
     let full = SharedString::from(crate::format::full_time(unix));
-    div().id(id).child(text.into()).tooltip(move |window, cx| {
-        let full = full.clone();
-        gpui_kit::component::tooltip::Tooltip::element(move |_, _| {
-            div().test_id("time-tooltip").child(full.clone())
+    let delay = gpui_kit::base::TooltipDefaults::global(cx).show_delay();
+    div()
+        .id(id)
+        .child(text.into())
+        .tooltip_show_delay(delay)
+        .tooltip(move |window, cx| {
+            let full = full.clone();
+            gpui_kit::component::tooltip::Tooltip::element(move |_, _| {
+                div().test_id("time-tooltip").child(full.clone())
+            })
+            .build(window, cx)
         })
-        .build(window, cx)
-    })
 }
 
 /// [`time_label`] with the relative time ("5 min ago", "12h ago", "yesterday").
-pub(crate) fn relative_time_label(id: impl Into<ElementId>, unix: i64) -> Stateful<Div> {
-    time_label(id, crate::format::relative_time(unix), unix)
+pub(crate) fn relative_time_label(id: impl Into<ElementId>, unix: i64, cx: &App) -> Stateful<Div> {
+    time_label(id, crate::format::relative_time(unix), unix, cx)
 }
 
 impl Osier {

@@ -219,6 +219,17 @@ pub struct Git {
     pub log_page_size: usize,
     /// Show the git command log panel on startup.
     pub show_command_log: bool,
+    /// Where the Log puts branch and tag badges: before the subject or at the end of the line.
+    pub log_badges: LogBadges,
+}
+
+/// `left` puts ref badges before the commit subject, `right` at the end of the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogBadges {
+    #[default]
+    Left,
+    Right,
 }
 
 impl Default for Git {
@@ -226,6 +237,7 @@ impl Default for Git {
         Self {
             log_page_size: 500,
             show_command_log: false,
+            log_badges: LogBadges::Left,
         }
     }
 }
@@ -368,6 +380,13 @@ mod tests {
         assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Code);
         assert_eq!(extension(".bashrc"), None);
         assert_eq!(extension("a/b.c/README"), None);
+    }
+
+    #[test]
+    fn log_badges_default_left_and_read_right() {
+        assert_eq!(Settings::default().git.log_badges, LogBadges::Left);
+        let s: Settings = toml::from_str("[git]\nlog_badges = \"right\"\n").unwrap();
+        assert_eq!(s.git.log_badges, LogBadges::Right);
     }
 
     #[test]

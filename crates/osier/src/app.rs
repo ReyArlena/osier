@@ -3343,14 +3343,27 @@ mod tests {
             .expect("time in the log row")
             .center();
         assert!(h.bounds(cx, "time-tooltip").is_none());
+        // The configured delay applies, not gpui's fixed 500 ms.
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.tooltip_delay_ms = 1000;
+            o.apply_tooltip_delay(cx);
+            cx.notify();
+        });
         h.visual(cx)
             .simulate_mouse_move(at, None, gpui::Modifiers::none());
         cx.executor()
-            .advance_clock(std::time::Duration::from_secs(2));
+            .advance_clock(std::time::Duration::from_millis(700));
+        cx.run_until_parked();
+        assert!(
+            h.bounds(cx, "time-tooltip").is_none(),
+            "still waiting at 700 ms"
+        );
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(400));
         cx.run_until_parked();
         assert!(
             h.bounds(cx, "time-tooltip").is_some(),
-            "tooltip after hovering"
+            "tooltip after the delay"
         );
         let committed = h.read(cx, |o, _| {
             o.active_project()
@@ -3359,6 +3372,28 @@ mod tests {
                 .unwrap_or_default()
         });
         assert!(crate::format::full_time(committed).contains(", "));
+    }
+
+    #[gpui::test]
+    fn log_badges_sit_before_the_subject_or_at_the_end(cx: &mut TestAppContext) {
+        use osier_config::settings::LogBadges;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.git(["tag", "v1"]);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        let badge = |h: &Harness, cx: &mut TestAppContext| {
+            h.bounds(cx, "log-ref:0:v1").expect("tag badge").origin.x
+        };
+        let subject = |h: &Harness, cx: &mut TestAppContext| {
+            h.bounds(cx, "log-subject:0").expect("subject").origin.x
+        };
+        assert!(badge(&h, cx) < subject(&h, cx), "left by default");
+        h.act(cx, |o, _, cx| {
+            o.settings.git.log_badges = LogBadges::Right;
+            cx.notify();
+        });
+        assert!(badge(&h, cx) > subject(&h, cx), "right when set");
     }
 
     #[gpui::test]

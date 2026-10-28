@@ -140,7 +140,7 @@ impl Osier {
                             .child(s.message.clone()),
                     )
                     .child(
-                        super::relative_time_label(("stash-time", s.index), s.created_at)
+                        super::relative_time_label(("stash-time", s.index), s.created_at, cx)
                             .text_xs()
                             .text_color(muted),
                     )

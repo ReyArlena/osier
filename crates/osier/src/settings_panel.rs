@@ -768,6 +768,30 @@ fn git_page(view: &Entity<Osier>) -> SettingPage {
                 )
                 .default_value(defaults.git.show_command_log),
             ),
+            SettingItem::new(
+                "Branch and tag badges",
+                SettingField::dropdown(
+                    vec![
+                        ("left".into(), "Before the subject".into()),
+                        ("right".into(), "At the end of the line".into()),
+                    ],
+                    get(view, |o| {
+                        match o.settings.git.log_badges {
+                            osier_config::settings::LogBadges::Left => "left",
+                            osier_config::settings::LogBadges::Right => "right",
+                        }
+                        .into()
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.git.log_badges = if v.as_ref() == "right" {
+                            osier_config::settings::LogBadges::Right
+                        } else {
+                            osier_config::settings::LogBadges::Left
+                        }
+                    }),
+                )
+                .default_value("left".to_string()),
+            ),
         ]))
         .group(SettingGroup::new().title("Prompts and viewer").items(vec![
             SettingItem::new(

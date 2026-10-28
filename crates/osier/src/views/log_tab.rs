@@ -71,6 +71,7 @@ impl Osier {
         let muted = cx.theme().muted_foreground;
         let count = commits.len();
         let page = project.log_page_size;
+        let badges_right = self.settings.git.log_badges == osier_config::settings::LogBadges::Right;
 
         v_flex()
             .size_full()
@@ -342,8 +343,10 @@ impl Osier {
                                                 commit.is_merge(),
                                             ))
                                             .child(subject_with_refs(
+                                                ix,
                                                 subject,
                                                 refs,
+                                                badges_right,
                                                 (fade_base, fade_hover),
                                                 cx,
                                             ))
@@ -360,6 +363,7 @@ impl Osier {
                                                 super::relative_time_label(
                                                     ("commit-time", ix),
                                                     commit.committed_at,
+                                                    cx,
                                                 )
                                                 .test_id(format!("commit-time:{ix}"))
                                                 .text_xs()
@@ -473,7 +477,7 @@ impl Osier {
                             .child(e.message.clone()),
                     )
                     .child(
-                        super::relative_time_label(("reflog-time", ix), e.at)
+                        super::relative_time_label(("reflog-time", ix), e.at, cx)
                             .text_xs()
                             .text_color(muted)
                             .flex_none(),
@@ -557,20 +561,26 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
     tag.xsmall().child(text)
 }
 
-/// A commit subject followed by up to three ref badges at the end of the line. Without
-/// badges the subject ends in an ellipsis. With badges it runs up to them and fades out
+/// A commit subject with up to three ref badges (`git.log_badges`). Without badges the
+/// subject ends in an ellipsis.
+///
+/// Left: badges first, then the subject; the row's end fades out over badges that do not
+/// fit. Right: the subject runs up to the badges at the end of the line and fades out
 /// under their left edge, as sidebar names do before their ahead/behind badges. Badges that
 /// do not fit run into the box's right padding and fade out there; badges that fit end
 /// before it, so the fade covers nothing. `fade` is the row background (normal, hover).
 fn subject_with_refs(
+    ix: usize,
     subject: String,
     refs: Vec<String>,
+    right: bool,
     fade: (Hsla, Hsla),
     cx: &App,
 ) -> AnyElement {
     let (base, hover) = fade;
     if refs.is_empty() {
         return div()
+            .test_id(format!("log-subject:{ix}"))
             .flex_1()
             .min_w_0()
             .text_sm()
@@ -585,8 +595,34 @@ fn subject_with_refs(
             .trim_start_matches("HEAD -> ")
             .trim_start_matches("tag: ")
             .to_string();
-        div().flex_none().child(ref_tag(label, is_head, is_tag, cx))
+        div()
+            .flex_none()
+            .test_id(format!("log-ref:{ix}:{label}"))
+            .child(ref_tag(label, is_head, is_tag, cx))
     });
+    if !right {
+        return h_flex()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .gap(px(REF_GAP))
+            .items_center()
+            .children(badges)
+            .child(
+                div()
+                    .test_id(format!("log-subject:{ix}"))
+                    .text_sm()
+                    .truncate()
+                    .min_w_0()
+                    .child(subject),
+            )
+            .child(
+                crate::fade::fade_right(base)
+                    .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
+            )
+            .into_any_element();
+    }
     h_flex()
         .flex_1()
         .min_w_0()
@@ -595,6 +631,7 @@ fn subject_with_refs(
         .child(
             // Runs under the gap so the fade, not the clip, ends the text.
             div()
+                .test_id(format!("log-subject:{ix}"))
                 .flex_1()
                 .min_w_0()
                 .mr(px(-REF_GAP))

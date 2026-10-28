@@ -330,6 +330,7 @@ impl Osier {
                                 super::relative_time_label(
                                     SharedString::from(format!("branch-time:{}", b.name)),
                                     b.committed_at,
+                                    cx,
                                 )
                                 .text_xs()
                                 .text_color(muted)
