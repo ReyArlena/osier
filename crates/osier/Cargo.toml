@@ -44,6 +44,8 @@ osier-config.workspace = true
 osier-theme.workspace = true
 serde_json.workspace = true
 osier-auth.workspace = true
+# Local time zone for the full date and time in time tooltips. Already in the graph via gpui.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
 # The desktop's light/dark preference, read directly so "no preference" can be told apart from
 # "prefer light" (gpui reports both as light). Same crate and features gpui's Linux platform uses.

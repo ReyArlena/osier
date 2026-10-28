@@ -3333,6 +3333,35 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_log_time_shows_the_full_date_on_hover(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        let at = h
+            .bounds(cx, "commit-time:0")
+            .expect("time in the log row")
+            .center();
+        assert!(h.bounds(cx, "time-tooltip").is_none());
+        h.visual(cx)
+            .simulate_mouse_move(at, None, gpui::Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+        assert!(
+            h.bounds(cx, "time-tooltip").is_some(),
+            "tooltip after hovering"
+        );
+        let committed = h.read(cx, |o, _| {
+            o.active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .map(|s| s.commits[0].committed_at)
+                .unwrap_or_default()
+        });
+        assert!(crate::format::full_time(committed).contains(", "));
+    }
+
+    #[gpui::test]
     fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "first");

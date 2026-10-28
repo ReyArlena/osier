@@ -25,6 +25,28 @@ use osier_git::repo::InProgress;
 use crate::app::{Osier, Tab};
 use crate::test_ids::TestId as _;
 
+/// A time as lists show it (`text`, e.g. "12h ago" or a date) with the full local date and
+/// time in a tooltip.
+pub(crate) fn time_label(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    unix: i64,
+) -> Stateful<Div> {
+    let full = SharedString::from(crate::format::full_time(unix));
+    div().id(id).child(text.into()).tooltip(move |window, cx| {
+        let full = full.clone();
+        gpui_kit::component::tooltip::Tooltip::element(move |_, _| {
+            div().test_id("time-tooltip").child(full.clone())
+        })
+        .build(window, cx)
+    })
+}
+
+/// [`time_label`] with the relative time ("5 min ago", "12h ago", "yesterday").
+pub(crate) fn relative_time_label(id: impl Into<ElementId>, unix: i64) -> Stateful<Div> {
+    time_label(id, crate::format::relative_time(unix), unix)
+}
+
 impl Osier {
     pub(crate) fn render_center(
         &mut self,

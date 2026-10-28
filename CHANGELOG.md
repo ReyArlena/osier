@@ -48,6 +48,11 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - New application icon.
+- Log: branch and tag badges sit at the end of the commit subject, which fades out under
+  them like sidebar names; branch badges other than the checked-out one are tinted with the
+  primary colour.
+- Times in the Log, reflog, Branches, Stashes, Patches and blame show the full local date and
+  time on hover; "12 h ago" is now "12h ago".
 - The askpass window shows the Osier icon (a hidden desktop entry matches its app id).
 - The command palette opens with `ctrl-p` (and still `F1`).
 - Open repository moved from `ctrl-o` to `ctrl-shift-o`; `ctrl-o` now switches project.

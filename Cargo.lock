@@ -4809,6 +4809,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ashpd",
+ "chrono",
  "futures-util",
  "gpui-kit",
  "gpui-pre",

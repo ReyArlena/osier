@@ -20,7 +20,6 @@ use crate::test_ids::TestId as _;
 
 /// Menu handler receiving the commit hash.
 type CommitHandler = std::rc::Rc<dyn Fn(&mut Osier, String, &mut Window, &mut Context<Osier>)>;
-use crate::format::relative_time;
 use crate::graph::{graph_cell, lane_colors};
 
 impl Osier {
@@ -136,7 +135,7 @@ impl Osier {
             )
             .child(
                 div().id("log-list").flex_1().min_h_0().child(
-                    uniform_list("commits", count, move |range, _, _cx| {
+                    uniform_list("commits", count, move |range, _, cx| {
                         range
                             .map(|ix| {
                                 let commit = &commits[ix];
@@ -342,51 +341,12 @@ impl Osier {
                                                 colors,
                                                 commit.is_merge(),
                                             ))
-                                            .child(
-                                                h_flex()
-                                                    .relative()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .gap_2()
-                                                    .items_center()
-                                                    .children(refs.into_iter().take(3).map(|r| {
-                                                        let is_head = r.starts_with("HEAD");
-                                                        let is_tag = r.starts_with("tag: ");
-                                                        let label = r
-                                                            .trim_start_matches("HEAD -> ")
-                                                            .trim_start_matches("tag: ")
-                                                            .to_string();
-                                                        let text = div()
-                                                            .max_w(px(150.))
-                                                            .truncate()
-                                                            .child(label);
-                                                        div().flex_none().child(if is_head {
-                                                            Tag::primary().xsmall().child(text)
-                                                        } else if is_tag {
-                                                            Tag::warning().xsmall().child(text)
-                                                        } else {
-                                                            Tag::secondary().xsmall().child(text)
-                                                        })
-                                                    }))
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .truncate()
-                                                            .min_w_0()
-                                                            .child(subject),
-                                                    )
-                                                    // Badges that do not fit fade out instead
-                                                    // of being cut mid-letter.
-                                                    .child(
-                                                        crate::fade::fade_right(fade_base)
-                                                            .group_hover("log-row", move |s| {
-                                                                s.bg(crate::fade::fade_fill(
-                                                                    fade_hover,
-                                                                ))
-                                                            }),
-                                                    ),
-                                            )
+                                            .child(subject_with_refs(
+                                                subject,
+                                                refs,
+                                                (fade_base, fade_hover),
+                                                cx,
+                                            ))
                                             .child(
                                                 div()
                                                     .text_xs()
@@ -397,13 +357,16 @@ impl Osier {
                                                     .child(commit.author_name.clone()),
                                             )
                                             .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(muted)
-                                                    .flex_none()
-                                                    .w(px(78.))
-                                                    .text_right()
-                                                    .child(relative_time(commit.committed_at)),
+                                                super::relative_time_label(
+                                                    ("commit-time", ix),
+                                                    commit.committed_at,
+                                                )
+                                                .test_id(format!("commit-time:{ix}"))
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .flex_none()
+                                                .w(px(78.))
+                                                .text_right(),
                                             )
                                             .child(
                                                 div()
@@ -510,11 +473,10 @@ impl Osier {
                             .child(e.message.clone()),
                     )
                     .child(
-                        div()
+                        super::relative_time_label(("reflog-time", ix), e.at)
                             .text_xs()
                             .text_color(muted)
-                            .flex_none()
-                            .child(relative_time(e.at)),
+                            .flex_none(),
                     )
                     .child(
                         div()
@@ -568,6 +530,114 @@ impl Osier {
             .child(list)
             .into_any_element()
     }
+}
+
+/// Gap between a commit subject and its ref badges.
+const REF_GAP: f32 = 8.0;
+/// Fade over the end of a subject that runs into the badges, like sidebar rows, and over
+/// badges that do not fit.
+const SUBJECT_FADE: f32 = 14.0;
+
+/// The badge for one ref: HEAD's branch solid, tags in the warning colour, other branches
+/// tinted with the primary colour like the sidebar's selected row.
+pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> Tag {
+    let text = div().max_w(px(150.)).truncate().child(label);
+    let tag = if is_head {
+        Tag::primary()
+    } else if is_tag {
+        Tag::warning()
+    } else {
+        let primary = cx.theme().primary;
+        Tag::custom(
+            primary.opacity(0.18),
+            cx.theme().foreground,
+            primary.opacity(0.32),
+        )
+    };
+    tag.xsmall().child(text)
+}
+
+/// A commit subject followed by up to three ref badges at the end of the line. Without
+/// badges the subject ends in an ellipsis. With badges it runs up to them and fades out
+/// under their left edge, as sidebar names do before their ahead/behind badges. Badges that
+/// do not fit run into the box's right padding and fade out there; badges that fit end
+/// before it, so the fade covers nothing. `fade` is the row background (normal, hover).
+fn subject_with_refs(
+    subject: String,
+    refs: Vec<String>,
+    fade: (Hsla, Hsla),
+    cx: &App,
+) -> AnyElement {
+    let (base, hover) = fade;
+    if refs.is_empty() {
+        return div()
+            .flex_1()
+            .min_w_0()
+            .text_sm()
+            .truncate()
+            .child(subject)
+            .into_any_element();
+    }
+    let badges = refs.into_iter().take(3).map(|r| {
+        let is_head = r.starts_with("HEAD");
+        let is_tag = r.starts_with("tag: ");
+        let label = r
+            .trim_start_matches("HEAD -> ")
+            .trim_start_matches("tag: ")
+            .to_string();
+        div().flex_none().child(ref_tag(label, is_head, is_tag, cx))
+    });
+    h_flex()
+        .flex_1()
+        .min_w_0()
+        .gap(px(REF_GAP))
+        .items_center()
+        .child(
+            // Runs under the gap so the fade, not the clip, ends the text.
+            div()
+                .flex_1()
+                .min_w_0()
+                .mr(px(-REF_GAP))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_sm()
+                .child(subject),
+        )
+        .child(
+            h_flex()
+                .relative()
+                .flex_none()
+                .max_w(relative(0.45))
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(-SUBJECT_FADE))
+                        .w(px(SUBJECT_FADE))
+                        .bg(crate::fade::fade_fill(base))
+                        .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
+                )
+                .child(
+                    h_flex()
+                        .relative()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .pr(px(SUBJECT_FADE))
+                        .mr(px(-SUBJECT_FADE / 2.))
+                        .gap_1()
+                        .items_center()
+                        .children(badges)
+                        .child(
+                            crate::fade::fade_right(base)
+                                .w(px(SUBJECT_FADE))
+                                .group_hover("log-row", move |s| {
+                                    s.bg(crate::fade::fade_fill(hover))
+                                }),
+                        ),
+                ),
+        )
+        .into_any_element()
 }
 
 /// The bindable action behind a Log commit menu entry, for its key hint.

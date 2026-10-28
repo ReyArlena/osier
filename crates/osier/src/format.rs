@@ -3,12 +3,16 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// "5 min ago", "yesterday", "2024-01-05".
+/// "5 min ago", "12h ago", "yesterday", "2024-01-05".
 pub fn relative_time(unix: i64) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    relative_to(now, unix)
+}
+
+fn relative_to(now: i64, unix: i64) -> String {
     let delta = now - unix;
     if delta < 0 {
         return "in the future".into();
@@ -19,12 +23,21 @@ pub fn relative_time(unix: i64) -> String {
     match () {
         _ if delta < 45 => "just now".into(),
         _ if minutes < 60 => format!("{} min ago", minutes.max(1)),
-        _ if hours < 24 => format!("{hours} h ago"),
+        _ if hours < 24 => format!("{hours}h ago"),
         _ if days == 1 => "yesterday".into(),
         _ if days < 14 => format!("{days} days ago"),
         _ if days < 60 => format!("{} weeks ago", days / 7),
         _ if days < 365 => format!("{} months ago", days / 30),
         _ => iso_date(unix),
+    }
+}
+
+/// The full local date and time, for tooltips: "Monday 1 January 2024, 12:00".
+pub fn full_time(unix: i64) -> String {
+    use chrono::TimeZone as _;
+    match chrono::Local.timestamp_opt(unix, 0).single() {
+        Some(t) => t.format("%A %-d %B %Y, %H:%M").to_string(),
+        None => iso_date(unix),
     }
 }
 
@@ -77,5 +90,21 @@ mod tests {
         assert_eq!(iso_date(0), "1970-01-01");
         assert_eq!(iso_date(1_704_067_200), "2024-01-01");
         assert_eq!(iso_date(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn relative_times_have_no_space_before_h() {
+        let now = 1_800_000_000;
+        assert_eq!(relative_to(now, now - 10), "just now");
+        assert_eq!(relative_to(now, now - 5 * 60), "5 min ago");
+        assert_eq!(relative_to(now, now - 12 * 3600), "12h ago");
+        assert_eq!(relative_to(now, now - 36 * 3600), "yesterday");
+    }
+
+    #[test]
+    fn full_time_names_the_day_and_month() {
+        // Noon UTC is the same calendar day in every time zone from -11 to +11.
+        let t = full_time(1_704_110_400); // 2024-01-01 12:00 UTC
+        assert!(t.starts_with("Monday 1 January 2024, "), "{t}");
     }
 }

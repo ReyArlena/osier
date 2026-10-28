@@ -9,7 +9,6 @@ use gpui_kit::*;
 use osier_git::refs::Branch;
 
 use crate::app::Osier;
-use crate::format::relative_time;
 use crate::row_actions::RefRow;
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::MergeMode;
@@ -328,13 +327,15 @@ impl Osier {
                                 )
                             })
                             .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .flex_none()
-                                    .w(px(78.))
-                                    .text_right()
-                                    .child(relative_time(b.committed_at)),
+                                super::relative_time_label(
+                                    SharedString::from(format!("branch-time:{}", b.name)),
+                                    b.committed_at,
+                                )
+                                .text_xs()
+                                .text_color(muted)
+                                .flex_none()
+                                .w(px(78.))
+                                .text_right(),
                             )
                             .child(
                                 h_flex()

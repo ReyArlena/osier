@@ -9,7 +9,6 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
-use crate::format::relative_time;
 use crate::test_ids::TestId as _;
 
 impl Osier {
@@ -230,11 +229,10 @@ impl Osier {
                             }),
                     )
                     .child(
-                        div()
+                        super::relative_time_label(("patch-time", ix), p.meta.created as i64)
                             .text_xs()
                             .text_color(muted)
-                            .flex_none()
-                            .child(relative_time(p.meta.created as i64)),
+                            .flex_none(),
                     )
                     .child(
                         h_flex()

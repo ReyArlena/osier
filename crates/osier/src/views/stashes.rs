@@ -9,7 +9,6 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
-use crate::format::relative_time;
 use crate::test_ids::TestId as _;
 
 impl Osier {
@@ -141,10 +140,9 @@ impl Osier {
                             .child(s.message.clone()),
                     )
                     .child(
-                        div()
+                        super::relative_time_label(("stash-time", s.index), s.created_at)
                             .text_xs()
-                            .text_color(muted)
-                            .child(relative_time(s.created_at)),
+                            .text_color(muted),
                     )
                     .child(
                         h_flex()

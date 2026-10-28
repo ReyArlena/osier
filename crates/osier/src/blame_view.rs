@@ -190,13 +190,13 @@ impl Osier {
                                     } else {
                                         l.author_name.clone()
                                     }))
-                                    .child(div().child(
-                                        if local {
-                                            String::new()
-                                        } else {
-                                            iso_date(l.authored_at)
-                                        },
-                                    ))
+                                    .when(!local, |this| {
+                                        this.child(crate::views::time_label(
+                                            ("blame-time", ix),
+                                            iso_date(l.authored_at),
+                                            l.authored_at,
+                                        ))
+                                    })
                                 }),
                         )
                         .child(
