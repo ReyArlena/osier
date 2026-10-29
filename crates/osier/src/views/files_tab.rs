@@ -203,9 +203,9 @@ impl Osier {
                             .min_w_0()
                             .truncate()
                             .child(if filtering {
-                                format!("{count} of {total} files")
+                                format!("{count} of {}", crate::format::count(total, "file"))
                             } else {
-                                format!("{count} files")
+                                crate::format::count(count, "file")
                             }),
                     )
                     .child(

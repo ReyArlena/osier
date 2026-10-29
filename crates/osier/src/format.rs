@@ -70,6 +70,15 @@ pub fn tilde(path: &Path) -> String {
     s.into_owned()
 }
 
+/// "1 change", "3 changes": a count with its noun, singular for one.
+pub fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 /// `↑a ↓b` for commits ahead of and behind the upstream, only the non-zero parts; `None`
 /// when in sync.
 pub fn ahead_behind(ahead: u32, behind: u32) -> Option<String> {
@@ -90,6 +99,13 @@ mod tests {
         assert_eq!(iso_date(0), "1970-01-01");
         assert_eq!(iso_date(1_704_067_200), "2024-01-01");
         assert_eq!(iso_date(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn counts_are_singular_for_one() {
+        assert_eq!(count(0, "change"), "0 changes");
+        assert_eq!(count(1, "change"), "1 change");
+        assert_eq!(count(2, "file"), "2 files");
     }
 
     #[test]
