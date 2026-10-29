@@ -91,6 +91,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The centre panel keeps its saved width when the window is resized, including right after a tiling compositor opens it.
 - The per-hunk actions button is a boxed plus or minus icon, so it no longer reads as a second diff sign.
 - Counts read "1 change" and "1 file" instead of "1 changes" and "1 files".
 - Startup reopens the project that was active last session, not the last one in the open list.

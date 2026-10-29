@@ -18,6 +18,7 @@ use osier_git::{GitRunner, Repository};
 use crate::command_log::UiCommandSink;
 use crate::project::{Area, Project, Selection, load_snapshot};
 use crate::sidebar_query::{self, Query, RowStatus};
+use crate::test_ids::TestId as _;
 use osier_config::settings::RecentStatusMode;
 
 gpui_kit::actions!(
@@ -2079,7 +2080,17 @@ impl Render for Osier {
                                                         .center_width
                                                         .unwrap_or(440.)))
                                                     .size_range(px(260.)..px(1400.))
-                                                    .child(self.render_center(window, cx)),
+                                                    // Keep the saved width when the window
+                                                    // resizes (a tiling compositor resizes it
+                                                    // right after it opens); the diff pane
+                                                    // takes up the difference.
+                                                    .fixed()
+                                                    .child(
+                                                        div()
+                                                            .test_id("center-pane")
+                                                            .size_full()
+                                                            .child(self.render_center(window, cx)),
+                                                    ),
                                             )
                                             .child(
                                                 resizable_panel()
@@ -3426,6 +3437,36 @@ mod tests {
                 "the saved active project, not the last opened"
             );
         });
+    }
+
+    #[gpui::test]
+    fn center_pane_keeps_its_saved_width_when_the_window_resizes(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let mut state = State::default();
+        state.layout.sidebar_visible = true;
+        state.layout.center_width = Some(320.);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        let width = |h: &Harness, cx: &mut TestAppContext| {
+            f32::from(h.bounds(cx, "center-pane").expect("center pane").size.width)
+        };
+        assert!(
+            (width(&h, cx) - 320.).abs() < 2.,
+            "restored: {}",
+            width(&h, cx)
+        );
+        for size in [
+            gpui::size(gpui::px(1600.), gpui::px(900.)),
+            gpui::size(gpui::px(1100.), gpui::px(700.)),
+        ] {
+            h.visual(cx).simulate_resize(size);
+            cx.run_until_parked();
+            assert!(
+                (width(&h, cx) - 320.).abs() < 2.,
+                "after resize: {}",
+                width(&h, cx)
+            );
+        }
     }
 
     #[gpui::test]
