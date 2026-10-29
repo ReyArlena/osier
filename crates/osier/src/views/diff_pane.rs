@@ -204,8 +204,8 @@ impl Osier {
                             )
                         };
                         DiffGutterMarker::new(("hunk", ix), position).with_label(match a {
-                            Area::Staged => "−",
-                            _ => "+",
+                            Area::Staged => "unstage",
+                            _ => "stage",
                         })
                     })
                     .collect();
@@ -231,10 +231,17 @@ impl Osier {
                                             && h.old_start == line)
                                 })
                             });
+                        // An icon, not a bare "+" or "−": next to the diff's own +/- column
+                        // a text sign reads as part of the line.
+                        let icon = if marker.label().as_ref() == "unstage" {
+                            Lucide::SquareMinus
+                        } else {
+                            Lucide::SquarePlus
+                        };
                         let button = Button::new(marker.id().clone())
                             .ghost()
                             .xsmall()
-                            .label(marker.label().clone())
+                            .icon(icon)
                             .tooltip("Hunk actions");
                         let Some(hunk_ix) = hunk_ix else {
                             return button.into_any_element();

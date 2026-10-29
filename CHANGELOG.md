@@ -91,6 +91,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The per-hunk actions button is a boxed plus or minus icon, so it no longer reads as a second diff sign.
 - Counts read "1 change" and "1 file" instead of "1 changes" and "1 files".
 - Startup reopens the project that was active last session, not the last one in the open list.
 - Confirmation dialogs now have OK and Cancel buttons (they only answered to Enter and
