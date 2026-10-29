@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Measure the numbers quoted on the website (site/index.html), from a release build.
 
-Usage: scripts/measure.py [--runs N] [--repos N] [--no-build]
-       scripts/measure.py --real [--runs N]          (same as --open ~/Work --open ~/Projects)
-       scripts/measure.py --open DIR [--open DIR ...] [--runs N]
+Usage: scripts/benchmark.py [--runs N] [--repos N] [--no-build]   (10 repositories by default)
+       scripts/benchmark.py --real [--runs N]          (same as --open ~/Work --open ~/Projects)
+       scripts/benchmark.py --open DIR [--open DIR ...] [--runs N]
 
 With --open, the generated repositories are replaced by every git repository directly inside
 the given directories (real-world projects); --real uses ~/Work and ~/Projects, whichever
-exist. Only the count is printed; the paths stay in scratch/measure/ (gitignored), so nothing
+exist. Only the count is printed; the paths stay in scratch/benchmark/ (gitignored), so nothing
 about your projects ends up in the repository. Osier only reads them: its runner sets
 GIT_OPTIONAL_LOCKS=0 and opening never fetches. The run then also waits until Osier settles
 (no git child processes and almost no CPU for three seconds) and reports how long that took.
 
 - Builds `target/release/osier` (the real optimised binary, not `cargo run`).
-- Creates a throwaway demo setup under scratch/measure/ (gitignored): a HOME with N
+- Creates a throwaway demo setup under scratch/benchmark/ (gitignored): a HOME with N
   repositories (a local clone of this repository plus small generated ones) and its own
   config, state and cache dirs, so your own projects and settings are never touched.
 - Launches the binary N times. Time to window: process start until the compositor reports a
@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WORK = ROOT / "scratch" / "measure"
+WORK = ROOT / "scratch" / "benchmark"
 BIN = ROOT / "target" / "release" / "osier"
 
 
@@ -203,7 +203,7 @@ def status_timing(runs=5):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=7)
-    ap.add_argument("--repos", type=int, default=3)
+    ap.add_argument("--repos", type=int, default=10)
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--open", action="append", metavar="DIR",
                     help="open every git repository directly inside DIR (repeatable)")
