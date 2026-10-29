@@ -91,6 +91,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Startup reopens the project that was active last session, not the last one in the open list.
 - Confirmation dialogs now have OK and Cancel buttons (they only answered to Enter and
   Escape before).
 - install.sh: source builds now install the desktop entry and icons, and the entry

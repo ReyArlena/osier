@@ -513,6 +513,8 @@ impl Osier {
         // Restore open projects, then the CLI argument on top. Failures go to the status bar:
         // toasts need the window root, which does not exist yet during construction.
         let restore: Vec<PathBuf> = this.state.open_projects.clone();
+        // Opening marks each project active in the state; keep the one saved last session.
+        let saved_active = this.state.active_project.clone();
         let mut failures = Vec::new();
         for p in restore {
             if let Err(e) = this.open_project(&p, false, cx) {
@@ -530,7 +532,7 @@ impl Osier {
                 failures.join("; ")
             ));
         }
-        if let Some(active) = this.state.active_project.clone()
+        if let Some(active) = saved_active
             && let Some(ix) = this.projects.iter().position(|p| p.path == active)
         {
             this.activate(ix, window, cx);
@@ -2128,20 +2130,28 @@ mod tests {
 
     impl Harness {
         fn open(cx: &mut TestAppContext, repo: &TempRepo) -> Self {
+            Self::open_with(cx, State::default(), Some(repo.path().to_path_buf()))
+        }
+
+        /// Start like a later session: `state` as saved, `open` as the command-line path.
+        fn open_with(
+            cx: &mut TestAppContext,
+            state: State,
+            open: Option<std::path::PathBuf>,
+        ) -> Self {
             cx.update(gpui_kit::init);
             cx.update(init);
             let dirs = tempfile::tempdir().expect("tempdir");
             let paths = Paths::under(dirs.path());
             let sink = Arc::new(UiCommandSink::default());
             let runner = isolated(sink.clone());
-            let open = Some(repo.path().to_path_buf());
             let (handle, view) = cx.update(|cx| {
                 gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
                     cx.new(|cx| {
                         Osier::new(
                             paths,
                             Settings::default(),
-                            State::default(),
+                            state,
                             runner,
                             sink,
                             open,
@@ -3394,6 +3404,28 @@ mod tests {
             cx.notify();
         });
         assert!(badge(&h, cx) > subject(&h, cx), "right when set");
+    }
+
+    #[gpui::test]
+    fn startup_restores_the_project_that_was_active(cx: &mut TestAppContext) {
+        let (a, b, c) = (TempRepo::new(), TempRepo::new(), TempRepo::new());
+        for r in [&a, &b, &c] {
+            r.commit_file("a.txt", "a\n", "first");
+        }
+        let state = State {
+            open_projects: vec![a.path().into(), b.path().into(), c.path().into()],
+            active_project: Some(b.path().into()),
+            ..State::default()
+        };
+        let h = Harness::open_with(cx, state, None);
+        h.read(cx, |o, _| {
+            assert_eq!(o.projects.len(), 3);
+            assert_eq!(
+                o.active,
+                Some(1),
+                "the saved active project, not the last opened"
+            );
+        });
     }
 
     #[gpui::test]
