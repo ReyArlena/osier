@@ -2,6 +2,15 @@
 """Measure the numbers quoted on the website (site/index.html), from a release build.
 
 Usage: scripts/measure.py [--runs N] [--repos N] [--no-build]
+       scripts/measure.py --real [--runs N]          (same as --open ~/Work --open ~/Projects)
+       scripts/measure.py --open DIR [--open DIR ...] [--runs N]
+
+With --open, the generated repositories are replaced by every git repository directly inside
+the given directories (real-world projects); --real uses ~/Work and ~/Projects, whichever
+exist. Only the count is printed; the paths stay in scratch/measure/ (gitignored), so nothing
+about your projects ends up in the repository. Osier only reads them: its runner sets
+GIT_OPTIONAL_LOCKS=0 and opening never fetches. The run then also waits until Osier settles
+(no git child processes and almost no CPU for three seconds) and reports how long that took.
 
 - Builds `target/release/osier` (the real optimised binary, not `cargo run`).
 - Creates a throwaway demo setup under scratch/measure/ (gitignored): a HOME with N
@@ -43,13 +52,24 @@ def git(repo, *args):
     run(["git", "-C", str(repo), *args], env=env, stdout=subprocess.DEVNULL)
 
 
-def setup(repos):
+def find_repos(dirs):
+    paths = []
+    for d in dirs:
+        base = Path(d).expanduser()
+        paths += sorted(p for p in base.iterdir() if (p / ".git").exists())
+    return paths
+
+
+def setup(repos, existing=None):
     if WORK.exists():
         shutil.rmtree(WORK)
     projects = WORK / "home" / "Projects"
     projects.mkdir(parents=True)
     for d in ("config", "state", "cache"):
         (WORK / d).mkdir()
+    if existing:
+        write_config_and_state(existing)
+        return existing
     paths = []
     clone = projects / "osier"
     run(["git", "clone", "-q", str(ROOT), str(clone)])
@@ -63,6 +83,11 @@ def setup(repos):
             git(repo, "add", "-A")
             git(repo, "commit", "-q", "-m", f"Commit {n}")
         paths.append(repo)
+    write_config_and_state(paths)
+    return paths
+
+
+def write_config_and_state(paths):
     (WORK / "config" / "config.toml").write_text(
         '[appearance]\nmode = "dark"\ndark_theme = "Catppuccin Mocha"\ndux_shell_sync = false\n'
     )
@@ -71,7 +96,6 @@ def setup(repos):
         f'open_projects = [{quoted}]\nactive_project = "{paths[0]}"\n'
         "[layout]\nsidebar_visible = true\n"
     )
-    return paths
 
 
 def memory(pid):
@@ -87,6 +111,40 @@ def memory(pid):
     }
 
 
+def cpu_ticks(pid):
+    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    return int(fields[11]) + int(fields[12])  # utime + stime
+
+
+def has_children(pid):
+    for task in Path(f"/proc/{pid}/task").iterdir():
+        try:
+            if (task / "children").read_text().strip():
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def wait_settled(pid, t0, limit=300):
+    """Seconds from launch until no git children and < 3% CPU for three seconds."""
+    hz = os.sysconf("SC_CLK_TCK")
+    quiet_since = None
+    last = cpu_ticks(pid)
+    while time.perf_counter() - t0 < limit:
+        time.sleep(0.5)
+        now = cpu_ticks(pid)
+        busy = (now - last) / hz / 0.5 > 0.03 or has_children(pid)
+        last = now
+        if busy:
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = time.perf_counter()
+        elif time.perf_counter() - quiet_since >= 3:
+            return quiet_since - t0
+    return None
+
+
 def mapped(pid):
     try:
         out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True).stdout
@@ -95,7 +153,7 @@ def mapped(pid):
         return False
 
 
-def launch_runs(runs, hyprland):
+def launch_runs(runs, hyprland, settle=False):
     env = dict(os.environ, HOME=str(WORK / "home"), OSIER_CONFIG_DIR=str(WORK / "config"),
                OSIER_STATE_DIR=str(WORK / "state"), OSIER_CACHE_DIR=str(WORK / "cache"),
                OSIER_LOG="error", GIT_CONFIG_NOSYSTEM="1")
@@ -109,12 +167,17 @@ def launch_runs(runs, hyprland):
                 if mapped(p.pid):
                     ms = (time.perf_counter() - t0) * 1000
                     break
-        time.sleep(4)
+        settled = None
+        if settle:
+            settled = wait_settled(p.pid, t0)
+        else:
+            time.sleep(4)
         mem = memory(p.pid)
         p.terminate()
         p.wait()
-        results.append((ms, mem))
+        results.append((ms, mem, settled))
         print(f"  run {i + 1}: window {f'{ms:.0f} ms' if ms else 'n/a'}, "
+              + (f"settled {settled:.1f} s, " if settled else "")
               + ", ".join(f"{k} {v:.0f} MB" for k, v in mem.items()), flush=True)
         time.sleep(0.5)
     return results
@@ -142,7 +205,18 @@ def main():
     ap.add_argument("--runs", type=int, default=7)
     ap.add_argument("--repos", type=int, default=3)
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--open", action="append", metavar="DIR",
+                    help="open every git repository directly inside DIR (repeatable)")
+    ap.add_argument("--real", action="store_true",
+                    help="open every repository in ~/Work and ~/Projects")
     args = ap.parse_args()
+    if args.real:
+        args.open = (args.open or []) + [
+            d for d in ("~/Work", "~/Projects") if Path(d).expanduser().is_dir()
+        ]
+    existing = find_repos(args.open) if args.open else None
+    if existing:
+        args.repos = len(existing)
 
     if not args.no_build:
         run(["cargo", "build", "--release", "-p", "osier"], cwd=ROOT)
@@ -150,17 +224,21 @@ def main():
     cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "?")
     print(f"CPU: {cpu}\nrepos open: {args.repos}, runs: {args.runs}, time to window: "
           f"{'hyprctl' if hyprland else 'skipped (needs Hyprland)'}")
-    setup(args.repos)
-    results = launch_runs(args.runs, hyprland)
+    setup(args.repos, existing)
+    results = launch_runs(args.runs, hyprland, settle=bool(existing))
     warm = results[1:] or results
     med = lambda xs: statistics.median(xs) if xs else None
     times = [r[0] for r in warm if r[0] is not None]
     print("\nSummary (medians of the warm runs)")
     if results[0][0] is not None:
         print(f"  time to window: {med(times):.0f} ms (cold first run {results[0][0]:.0f} ms)")
+    settles = [r[2] for r in warm if r[2] is not None]
+    if settles:
+        print(f"  all repositories loaded and idle: {med(settles):.1f} s after launch")
     for k in ("rss", "anon", "pss", "uss"):
         print(f"  {k}: {med([r[1][k] for r in warm]):.0f} MB")
-    print(f"  git status, 10k files / 2k changed: {status_timing()}")
+    if not existing:
+        print(f"  git status, 10k files / 2k changed: {status_timing()}")
 
 
 if __name__ == "__main__":
