@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Osier - a fast, native Git GUI for Linux</title>
+  <meta name="description" content="Osier is a free, open source Git client for Linux, written in Rust and drawn on the GPU. Stage single lines, read your history as a graph, resolve conflicts in place and drive it all from the keyboard.">
+  <link rel="canonical" href="https://reyarlena.github.io/osier/">
+  <meta name="theme-color" content="#11111b">
+  <meta name="color-scheme" content="dark">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Osier">
+  <meta property="og:title" content="Osier - a fast, native Git GUI for Linux">
+  <meta property="og:description" content="Stage single lines, read your history as a graph and resolve conflicts in place. Native Rust, drawn on the GPU, free and open source.">
+  <meta property="og:url" content="https://reyarlena.github.io/osier/">
+  <meta property="og:image" content="https://reyarlena.github.io/osier/assets/shots/hero.webp">
+  <meta property="og:image:width" content="2672">
+  <meta property="og:image:height" content="1180">
+  <meta property="og:image:alt" content="Osier's Changes tab: a staged Rust file with its diff, the project sidebar and the commit box.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Osier - a fast, native Git GUI for Linux">
+  <meta name="twitter:description" content="Native Rust, drawn on the GPU. Line staging, a real commit graph, in-place conflict resolution and a keyboard for everything.">
+  <meta name="twitter:image" content="https://reyarlena.github.io/osier/assets/shots/hero.webp">
+
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="preload" href="assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/site.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Osier",
+    "description": "A fast, native Git GUI for Linux, written in Rust and drawn on the GPU.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux",
+    "url": "https://reyarlena.github.io/osier/",
+    "downloadUrl": "https://github.com/ReyArlena/osier",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": { "@type": "Person", "name": "Rey Arlena" },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "image": "https://reyarlena.github.io/osier/assets/shots/hero.webp"
+  }
+  </script>
+  <script>document.documentElement.classList.add("js")</script>
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true" focusable="false"><!-- Lucide icons (ISC), Discord mark from Simple Icons (CC0) -->
+<symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /></symbol>
+<symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><path d="M11 18H8a2 2 0 0 1-2-2V9" /></symbol>
+<symbol id="i-git-graph" viewBox="0 0 24 24"><circle cx="5" cy="6" r="3" /><path d="M5 9v6" /><circle cx="5" cy="18" r="3" /><path d="M12 3v18" /><circle cx="19" cy="6" r="3" /><path d="M16 15.7A9 9 0 0 0 19 9" /></symbol>
+<symbol id="i-git-fork" viewBox="0 0 24 24"><circle cx="12" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" /><path d="M12 12v3" /></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></symbol>
+<symbol id="i-package" viewBox="0 0 24 24"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" /><path d="M12 22V12" /><polyline points="3.29 7 12 12 20.71 7" /><path d="m7.5 4.27 9 5.15" /></symbol>
+<symbol id="i-file-search" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><circle cx="11.5" cy="14.5" r="2.5" /><path d="M13.3 16.3 15 18" /></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" /></symbol>
+<symbol id="i-folder-git-2" viewBox="0 0 24 24"><path d="M18 19a5 5 0 0 1-5-5v8" /><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5" /><circle cx="13" cy="12" r="2" /><circle cx="20" cy="19" r="2" /></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><path d="M16 3.128a4 4 0 0 1 0 7.744" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><circle cx="9" cy="7" r="4" /></symbol>
+<symbol id="i-github" viewBox="0 0 24 24"><path d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5" /></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2" /><path d="M12 2v2" /><path d="M17 20v2" /><path d="M17 2v2" /><path d="M2 12h2" /><path d="M2 17h2" /><path d="M2 7h2" /><path d="M20 12h2" /><path d="M20 17h2" /><path d="M20 7h2" /><path d="M7 20v2" /><path d="M7 2v2" /><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="8" y="8" width="8" height="8" rx="1" /></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" /><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" /><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" /></symbol>
+<symbol id="i-clipboard-paste" viewBox="0 0 24 24"><path d="M11 14h10" /><path d="M16 4h2a2 2 0 0 1 2 2v1.344" /><path d="m17 18 4-4-4-4" /><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 1.793-1.113" /><rect x="8" y="2" width="8" height="4" rx="1" /></symbol>
+<symbol id="i-cloud-download" viewBox="0 0 24 24"><path d="M12 13v8l-4-4" /><path d="m12 21 4-4" /><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284" /></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></symbol>
+<symbol id="i-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></symbol>
+<symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2" /><path d="M11 13h4" /><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z" /></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /><path d="M12 5v14" /></symbol>
+<symbol id="i-scroll-text" viewBox="0 0 24 24"><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></symbol>
+<symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></symbol>
+<symbol id="i-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Osier home">
+      <img src="assets/icon-32.png" srcset="assets/icon-32.png 1x, assets/icon-192.png 6x" width="30" height="30" alt="">
+      Osier
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#speed">Speed</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-btn" href="https://github.com/ReyArlena/osier" aria-label="Osier on GitHub"><svg class="icon"><use href="#i-github"/></svg></a>
+      <a class="btn btn-primary btn-sm" href="#install">Install</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ===== hero ===== -->
+  <section class="hero" id="top">
+    <div class="wrap">
+      <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Open source &middot; Linux &middot; MIT</p>
+      <h1>
+        <span class="sr-only">A fast, native, beautiful Git GUI for Linux.</span>
+        <span class="line" aria-hidden="true">A <span class="rotator"><span class="word" data-words="fast AF|native|beautiful|GPU-drawn|no-fuss|modern">fast AF</span><span class="caret"></span></span></span>
+        <span class="line" aria-hidden="true">Git GUI.</span>
+      </h1>
+      <p class="lede">
+        Osier is a Git client for Linux, written in Rust and drawn on your GPU.
+        Stage single lines, read your history as a graph and untangle merges
+        <strong>without waiting on your tools</strong>. It's on screen in about 170&nbsp;ms.
+      </p>
+      <div class="hero-cta">
+        <div class="cmd">
+          <code><span class="prompt">$</span><span data-copy-source>curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh</span></code>
+          <button class="copy" type="button" aria-label="Copy install command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+        </div>
+        <a class="btn btn-ghost" href="https://github.com/ReyArlena/osier"><svg class="icon"><use href="#i-github"/></svg>Star on GitHub</a>
+      </div>
+      <p class="hero-meta">
+        <span>Linux &middot; Wayland &amp; X11</span>
+        <span>Git 2.30+</span>
+        <span>MIT licence</span>
+        <a href="#install">Arch, Flatpak and source installs</a>
+      </p>
+
+      <figure class="shot hero-shot reveal">
+        <picture>
+        <source media="(max-width: 600px)" srcset="assets/shots/hero-m.webp" width="1000" height="827">
+        <img src="assets/shots/hero.webp"
+             srcset="assets/shots/hero-1x.webp 1336w, assets/shots/hero.webp 2672w"
+             sizes="(max-width: 1260px) 100vw, 1180px"
+             width="2672" height="1180"
+             alt="Osier's Changes tab: the project sidebar with ahead and behind badges, a staged Rust file, and its syntax-highlighted diff side by side."
+             fetchpriority="high">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ===== stats ===== -->
+  <section class="stats-band" aria-label="Measured numbers">
+    <div class="wrap">
+      <div class="stats">
+        <div class="stat"><span class="num">~170<small>ms</small></span><span class="label">Launch to window</span></div>
+        <div class="stat"><span class="num">~70<small>ms</small></span><span class="label">Status of 10,000 files</span></div>
+        <div class="stat"><span class="num">~30<small>MB</small></span><span class="label">App memory, ten repos open</span></div>
+        <div class="stat"><span class="num">0</span><span class="label">Web views (we checked)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== showcase ===== -->
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>01</b> / What you get</div>
+        <div>
+          <h2>Everything Git can do, <span class="dim">nothing in your way.</span></h2>
+          <p>The everyday work is one click or one keystroke away, and the scary stuff is
+            just as easy to get right.</p>
+        </div>
+      </div>
+
+      <div class="showcase">
+
+        <article class="feature wide reveal">
+          <div class="feature-copy">
+            <span class="feature-num">Staging</span>
+            <h3>Stage the line, not the whole file.</h3>
+            <p>Pick exactly what goes into a commit: whole files, single hunks or a few
+              selected lines straight from the diff. Then commit, amend, sign off, or commit
+              and push in one go.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Unified or split diffs with syntax highlighting</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Discarded untracked files go to the trash, not the void</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Your recent commit messages, one click away</span></li>
+            </ul>
+          </div>
+          <figure class="shot">
+            <img src="assets/shots/staging.webp"
+                 srcset="assets/shots/staging-1x.webp 870w, assets/shots/staging.webp 1740w"
+                 sizes="(max-width: 1260px) 100vw, 1180px"
+                 width="1740" height="880" loading="lazy" decoding="async"
+                 alt="The Changes list with staged, unstaged and untracked files next to a highlighted diff of a Rust file.">
+          </figure>
+        </article>
+
+        <article class="feature flip reveal">
+          <div class="feature-copy">
+            <span class="feature-num">History</span>
+            <h3>History that reads like a map.</h3>
+            <p>A real commit graph with branch and tag labels, paged so even long histories
+              stay quick. Compare any two commits, follow a file through renames, and blame
+              any line straight back to the commit that wrote it.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Shift-click two commits to compare them</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Cherry-pick, revert, reset or rebase from the log</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>The reflog, for when you need an undo button for Git</span></li>
+            </ul>
+          </div>
+          <figure class="shot">
+            <img src="assets/shots/log.webp"
+                 srcset="assets/shots/log-1x.webp 629w, assets/shots/log.webp 1258w"
+                 sizes="(max-width: 860px) 100vw, 680px"
+                 width="1258" height="1170" loading="lazy" decoding="async"
+                 alt="The Log tab: a commit graph with merged feature branches, branch and tag badges, authors, times and hashes.">
+          </figure>
+        </article>
+
+        <article class="feature reveal">
+          <div class="feature-copy">
+            <span class="feature-num">Keyboard</span>
+            <h3>Keyboard first. Mouse welcome.</h3>
+            <p>Every action lives in the command palette, and every shortcut can be rebound,
+              including an optional leader key. <kbd>Ctrl</kbd> <kbd>O</kbd> switches project
+              in a couple of keystrokes, opening it if it isn't already.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>66 rebindable actions, with conflicts flagged as you record</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>j</kbd> / <kbd>k</kbd> in lists, <kbd>Space</kbd> to stage, <kbd>Ctrl</kbd> <kbd>Enter</kbd> to commit</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Right-click menus everywhere, if you're a mouse person</span></li>
+            </ul>
+          </div>
+          <figure class="shot shot-narrow">
+            <img src="assets/shots/palette.webp"
+                 srcset="assets/shots/palette-1x.webp 368w, assets/shots/palette.webp 736w"
+                 sizes="(max-width: 860px) 100vw, 560px"
+                 width="736" height="520" loading="lazy" decoding="async"
+                 alt="The command palette in Switch project mode, listing open, pinned and recent projects with ahead and behind badges.">
+          </figure>
+        </article>
+
+        <article class="feature flip reveal">
+          <div class="feature-copy">
+            <span class="feature-num">Conflicts</span>
+            <h3>Merge conflicts, minus the dread.</h3>
+            <p>Conflicts open right in the diff pane. Accept the current side, the incoming
+              side or both, block by block, or edit the result yourself. Interactive rebase,
+              cherry-pick and revert all land here when they collide.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Continue or abort the merge from a banner, no terminal needed</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Take a whole file as ours or theirs in one click</span></li>
+            </ul>
+          </div>
+          <figure class="shot shot-narrow">
+            <img src="assets/shots/conflict.webp"
+                 srcset="assets/shots/conflict-1x.webp 531w, assets/shots/conflict.webp 1062w"
+                 sizes="(max-width: 860px) 100vw, 560px"
+                 width="1062" height="1060" loading="lazy" decoding="async"
+                 alt="A TypeScript merge conflict with Accept Current, Accept Incoming and Accept Both above each conflicting block.">
+          </figure>
+        </article>
+
+        <article class="feature reveal">
+          <div class="feature-copy">
+            <span class="feature-num">Looks</span>
+            <h3>Easy on the eyes, day or night.</h3>
+            <p>Catppuccin, Dracula, Nord, Gruvbox, Solarized, Tokyo Night, One Dark, Monokai
+              and more, with light and dark picked separately. Osier can follow your desktop's
+              light or dark setting, and drop-in theme files reload while it runs.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Live colours from Dux Shell, if that's your desktop</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Your own UI and code fonts</span></li>
+            </ul>
+          </div>
+          <figure class="shot shot-narrow">
+            <img src="assets/shots/themes.webp"
+                 srcset="assets/shots/themes-1x.webp 580w, assets/shots/themes.webp 1160w"
+                 sizes="(max-width: 860px) 100vw, 560px"
+                 width="1160" height="760" loading="lazy" decoding="async"
+                 alt="The theme picker in Settings, showing preview cards for Catppuccin, Dracula, Gruvbox, Monokai, Nord, One Dark and Solarized themes.">
+          </figure>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== everything else ===== -->
+  <section class="section alt" id="more">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>02</b> / And the rest</div>
+        <div>
+          <h2>The other things <span class="dim">you'll be glad it does.</span></h2>
+        </div>
+      </div>
+      <div class="cards reveal">
+        <div class="card" style="--tile: var(--blue)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-cloud-download"/></svg></span>
+          <h3>Fetch, pull, push</h3>
+          <p>Live progress and a cancel button. Osier offers to set an upstream when a
+            branch has none, and force pushes are always <code>--force-with-lease</code>.</p>
+        </div>
+        <div class="card" style="--tile: var(--mauve)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-users"/></svg></span>
+          <h3>Several GitHub accounts</h3>
+          <p>Through the gh CLI. Pick an account per project and Osier remembers it. Tokens
+            never touch a command line or a log.</p>
+        </div>
+        <div class="card" style="--tile: var(--peach)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-archive"/></svg></span>
+          <h3>Stash and shelve</h3>
+          <p>Stash with a message, or shelve changes onto a patch clipboard and carry them to
+            another project.</p>
+        </div>
+        <div class="card" style="--tile: var(--green)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-clipboard-paste"/></svg></span>
+          <h3>Patches</h3>
+          <p>Copy files or commits as a patch. Apply from the clipboard or a file, with a dry
+            run first and a three-way fallback.</p>
+        </div>
+        <div class="card" style="--tile: var(--teal)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-git-branch"/></svg></span>
+          <h3>Branches, tags, remotes</h3>
+          <p>Checkout, create, rename, merge, rebase onto and delete, with a confirmation
+            wherever work could be lost.</p>
+        </div>
+        <div class="card" style="--tile: var(--sapphire)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-layers"/></svg></span>
+          <h3>Worktrees and submodules</h3>
+          <p>Listed alongside your branches with their state, and updated in one go when you
+            need them.</p>
+        </div>
+        <div class="card" style="--tile: var(--yellow)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-file-search"/></svg></span>
+          <h3>Files at any revision</h3>
+          <p>Browse code with highlighting, rendered markdown and images at any commit, and
+            edit files in place.</p>
+        </div>
+        <div class="card" style="--tile: var(--red)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-folder-git-2"/></svg></span>
+          <h3>A sidebar for every repo</h3>
+          <p>Open, pinned and recent projects, plus folders scanned for repositories, with
+            ahead, behind and changes at a glance.</p>
+        </div>
+        <div class="card" style="--tile: var(--lavender)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-key-round"/></svg></span>
+          <h3>SSH prompts that behave</h3>
+          <p>Passphrases and Git prompts get Osier's own small window, not a hung process in
+            the background.</p>
+        </div>
+        <div class="card" style="--tile: var(--flamingo)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-square-terminal"/></svg></span>
+          <h3>Open it elsewhere</h3>
+          <p>Send a file or the whole project to your editor, a terminal or the file
+            manager, or open the repository on GitHub.</p>
+        </div>
+        <div class="card" style="--tile: var(--sky)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-package"/></svg></span>
+          <h3>Git LFS aware</h3>
+          <p>LFS pointer files are recognised and labelled, so you never stare at a hash
+            wondering where your image went.</p>
+        </div>
+        <div class="card" style="--tile: var(--pink)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-git-compare"/></svg></span>
+          <h3>Editable diffs</h3>
+          <p>Fix a typo right in the diff, or revert a single hunk, without leaving the
+            change you're reviewing.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== speed ===== -->
+  <section class="section" id="speed">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>03</b> / Speed</div>
+        <div>
+          <h2>Fast to open. <span class="dim">Faster to use.</span></h2>
+          <p>Osier is a native Rust app, so there's no browser engine to boot and no
+            JavaScript to warm up. The interface is drawn on your GPU, and the keyboard
+            reaches everything.</p>
+        </div>
+      </div>
+      <div class="speed">
+        <div class="meters reveal">
+          <div class="meter-row">
+            <div class="meter-top"><span>Launch to window on screen</span><b>~170 ms</b></div>
+            <div class="bar"><i style="--w: 17%"></i></div>
+          </div>
+          <div class="meter-row">
+            <div class="meter-top"><span>git status, 10,000 files, 2,000 changed</span><b>~70 ms</b></div>
+            <div class="bar"><i style="--w: 7%"></i></div>
+          </div>
+          <div class="meter-row">
+            <div class="meter-top"><span>App memory with ten repositories open</span><b>~30 MB</b></div>
+            <div class="bar"><i style="--w: 3%"></i></div>
+          </div>
+          <div class="meter-row">
+            <div class="meter-top"><span>App memory with 446 real repositories open</span><b>~185 MB</b></div>
+            <div class="bar"><i style="--w: 18.5%"></i></div>
+          </div>
+          <p class="note note-sm">Bars are out of one second and one GB. Measured on a
+            Framework 13 (Ryzen 5 7640U), launch until the compositor showed the window, and
+            memory after opening ten repositories. App memory is Osier's own heap, the figure
+            most system monitors show; counting its fair share of the GPU driver and font
+            libraries it is about 70&nbsp;MB. Your numbers will vary; ours did too, by a few
+            milliseconds.</p>
+        </div>
+        <div class="reveal">
+          <h3>Shortcuts that stick</h3>
+          <ul class="ticks">
+            <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>Ctrl</kbd> <kbd>P</kbd> opens the command palette. Type a few letters, hit <kbd>Enter</kbd>.</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>Ctrl</kbd> <kbd>O</kbd> switches project, opening it if needed.</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>Ctrl</kbd> <kbd>1</kbd> to <kbd>6</kbd> jump between tabs.</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>F</kbd>, <kbd>L</kbd> and <kbd>P</kbd> fetch, pull and push.</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span><kbd>/</kbd> searches projects, <kbd>?</kbd> searches files.</span></li>
+          </ul>
+          <p class="note">All of them are defaults. Change any of them in Settings, or in
+            <code>keymap.toml</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== principles ===== -->
+  <section class="section alt" id="principles">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>04</b> / How it's built</div>
+        <div>
+          <h2>Built to be trusted <span class="dim">with your repositories.</span></h2>
+        </div>
+      </div>
+      <div class="cards principles reveal">
+        <div class="card" style="--tile: var(--peach)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-git-graph"/></svg></span>
+          <h3>Your Git, not a lookalike</h3>
+          <p>Osier runs the git you already have, so hooks, credential helpers, your SSH
+            agent, conditional identities and LFS all behave exactly as they do in a
+            terminal.</p>
+        </div>
+        <div class="card" style="--tile: var(--teal)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-cpu"/></svg></span>
+          <h3>Native, all the way down</h3>
+          <p>Written in Rust on gpui, a GPU-accelerated UI framework, and rendered through
+            Vulkan. Slow git work runs in the background, so the window stays responsive.</p>
+        </div>
+        <div class="card" style="--tile: var(--green)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-shield-check"/></svg></span>
+          <h3>Careful with your work</h3>
+          <p>Anything that could lose work asks first. Untracked files go to the trash,
+            and force pushes always use <code>--force-with-lease</code>.</p>
+        </div>
+        <div class="card" style="--tile: var(--blue)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-eye"/></svg></span>
+          <h3>Nothing hidden</h3>
+          <p>A command log shows every git command Osier runs, with its output, exit code
+            and timing. Copy any of them and run it yourself.</p>
+        </div>
+        <div class="card" style="--tile: var(--mauve)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-lock"/></svg></span>
+          <h3>Stays on your machine</h3>
+          <p>No telemetry, no account, no update pings. The only network traffic is Git's
+            own, plus images in READMEs, which you can switch off.</p>
+        </div>
+        <div class="card" style="--tile: var(--yellow)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-settings"/></svg></span>
+          <h3>Config you can keep in dotfiles</h3>
+          <p>Plain TOML settings and keymap in <code>~/.config/osier</code>, picked up live
+            when you edit them. Themes are JSON files you can drop in.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== install ===== -->
+  <section class="section" id="install">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>05</b> / Install</div>
+        <div>
+          <h2>Up and running <span class="dim">in one command.</span></h2>
+          <p>Pick whichever suits your system. They all install the same app.</p>
+        </div>
+      </div>
+      <div class="install-grid">
+        <!-- vendor: script -->
+        <div class="install-card reveal">
+          <header><svg class="icon"><use href="#i-zap"/></svg><h3>Install script</h3><span class="badge">Recommended</span></header>
+          <p>Fetches the latest release for x86_64 or ARM64 into <code>~/.local/bin</code>,
+            with the desktop entry and icons. It builds from source with cargo if no release
+            matches your machine.</p>
+          <div class="cmd">
+            <code><span class="prompt">$</span><span data-copy-source>curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh</span></code>
+            <button class="copy" type="button" aria-label="Copy install script command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+          </div>
+        </div>
+        <!-- /vendor: script -->
+        <!-- vendor: aur -->
+        <div class="install-card reveal">
+          <header><svg class="icon"><use href="#i-package"/></svg><h3>Arch Linux (AUR)</h3></header>
+          <p>Prebuilt as <code>osier-bin</code>, or <code>osier</code> to build from source.
+            Use your favourite AUR helper.</p>
+          <div class="cmd">
+            <code><span class="prompt">$</span><span data-copy-source>yay -S osier-bin</span></code>
+            <button class="copy" type="button" aria-label="Copy AUR command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+          </div>
+        </div>
+        <!-- /vendor: aur -->
+        <!-- vendor: flatpak -->
+        <div class="install-card reveal">
+          <header><svg class="icon"><use href="#i-layers"/></svg><h3>Flatpak</h3></header>
+          <p>Sandboxed, from Flathub, for any distribution.</p>
+          <div class="cmd">
+            <code><span class="prompt">$</span><span data-copy-source>flatpak install flathub com.reyarlena.osier</span></code>
+            <button class="copy" type="button" aria-label="Copy Flatpak command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+          </div>
+        </div>
+        <!-- /vendor: flatpak -->
+        <!-- vendor: source -->
+        <div class="install-card reveal">
+          <header><svg class="icon"><use href="#i-git-fork"/></svg><h3>From source</h3></header>
+          <p>Needs a Rust toolchain and a few development libraries, listed in the
+            <a href="https://github.com/ReyArlena/osier#install">README</a>.</p>
+          <div class="cmd">
+            <code><span class="prompt">$</span><span data-copy-source>cargo install --locked --git https://github.com/ReyArlena/osier osier</span></code>
+            <button class="copy" type="button" aria-label="Copy cargo command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+          </div>
+        </div>
+        <!-- /vendor: source -->
+      </div>
+      <p class="requirements">Needs Linux on Wayland or X11, <code>git</code> 2.30 or newer and a
+        GPU driver with Vulkan. Then run <code>osier</code>, or <code>osier ~/path/to/repo</code>.</p>
+    </div>
+  </section>
+
+  <!-- ===== faq ===== -->
+  <section class="section alt" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker"><b>06</b> / FAQ</div>
+        <div>
+          <h2>Questions people ask first.</h2>
+        </div>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Is Osier free?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>Yes. It's open source under the MIT licence, with no paid tier and nothing to sign
+            up for. If it saves you time, you can <a href="https://github.com/sponsors/ReyArlena">sponsor development</a>.</p>
+        </details>
+        <details>
+          <summary>Does it run on macOS or Windows?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>Not yet. Osier is Linux first, on Wayland with an X11 fallback. Ports to macOS and
+            Windows are on the roadmap.</p>
+        </details>
+        <details>
+          <summary>Will it mess with my Git setup?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>No. Osier runs your installed git, so it uses your config, hooks, credential
+            helpers and SSH agent as they are. It keeps its own settings in
+            <code>~/.config/osier</code> and only changes your repositories when you ask it to.</p>
+        </details>
+        <details>
+          <summary>Is it safe on real work?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>It's built to be. Anything that could lose work asks first, untracked files you
+            discard go to the trash, force pushes always use <code>--force-with-lease</code>,
+            and the command log shows exactly what ran.</p>
+        </details>
+        <details>
+          <summary>Does it phone home?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>No. There's no telemetry, no account and no update check. Network traffic is
+            Git's own, plus remote images in markdown files, which you can turn off in
+            Settings.</p>
+        </details>
+        <details>
+          <summary>Can I use more than one GitHub account?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>Yes. Osier works with the accounts you've signed into with the
+            <a href="https://cli.github.com/">GitHub CLI</a>, lets you pick one per project and
+            remembers your choice.</p>
+        </details>
+        <details>
+          <summary>Where do I report a bug or ask for a feature?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>On <a href="https://github.com/ReyArlena/osier/issues">GitHub issues</a>. Copying the
+            failing command from the command log into your report helps a lot.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== final cta ===== -->
+  <section class="section cta">
+    <div class="wrap">
+      <h2>Go on. <span class="dim">Commit to something.</span></h2>
+      <p>One command to install, and your repositories are waiting. You can always go back to
+        typing <code>git add -p</code> by hand. We won't tell anyone.</p>
+      <div class="hero-cta">
+        <div class="cmd">
+          <code><span class="prompt">$</span><span data-copy-source>curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh</span></code>
+          <button class="copy" type="button" aria-label="Copy install command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
+        </div>
+        <a class="btn btn-ghost" href="https://github.com/ReyArlena/osier"><svg class="icon"><use href="#i-github"/></svg>View on GitHub</a>
+      </div>
+    </div>
+    <img class="cta-mark" src="assets/osier-256.webp" width="256" height="256" alt="" loading="lazy">
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="#top"><img src="assets/icon-32.png" srcset="assets/icon-32.png 1x, assets/icon-192.png 6x" width="30" height="30" alt="">Osier</a>
+        <p class="blurb">A fast, native Git GUI for Linux. Named after the willow whose bendy
+          branches get woven together.</p>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul>
+          <li><a href="https://github.com/ReyArlena/osier"><svg class="icon"><use href="#i-github"/></svg>GitHub</a></li>
+          <li><a href="https://github.com/ReyArlena/osier/issues"><svg class="icon"><use href="#i-message-circle"/></svg>Issues</a></li>
+          <li><a href="https://github.com/ReyArlena/osier/blob/main/CHANGELOG.md"><svg class="icon"><use href="#i-scroll-text"/></svg>Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Community</h4>
+        <ul>
+          <!-- Sponsor page: not set up yet -->
+          <li><a href="https://github.com/sponsors/ReyArlena"><svg class="icon"><use href="#i-heart"/></svg>Sponsor</a></li>
+          <!-- Discord server: not set up yet, replace the link when it exists -->
+          <li><a href="#" aria-disabled="true" class="pending"><svg class="icon solid"><use href="#i-discord"/></svg>Discord <span class="soon">Soon</span></a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 Rey Arlena &middot; MIT licence</span>
+      <span>Built with Rust, drawn on the GPU</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
