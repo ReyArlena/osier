@@ -72,7 +72,7 @@ fn reopen_error(failures: &[String]) -> String {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
     Changes,
     Log,
@@ -564,7 +564,7 @@ impl Osier {
         if let Ok(file) = std::env::var("OSIER_START_FILE")
             && this.active.is_some()
         {
-            this.tab = Tab::Files;
+            this.set_tab(Tab::Files, cx);
             this.select_work_file(file, None, cx);
         }
         this.update_title(window);
@@ -954,6 +954,9 @@ impl Osier {
         if let Some(ix) = self.projects.iter().position(|p| p.path == path) {
             if make_active {
                 let switched = self.active != Some(ix);
+                if switched {
+                    self.park_pane();
+                }
                 self.active = Some(ix);
                 if switched {
                     self.switch_tab_for_project();
@@ -977,6 +980,7 @@ impl Osier {
                 self.save_state();
                 self.refresh_project(ix, cx);
                 if make_active {
+                    self.park_pane();
                     self.active = Some(ix);
                     // A new project has no snapshot yet: decided when it arrives.
                     self.switch_tab_for_project();
@@ -1172,6 +1176,9 @@ impl Osier {
             return;
         }
         let switched = self.active != Some(ix);
+        if switched {
+            self.park_pane();
+        }
         self.active = Some(ix);
         let path = self.projects[ix].path.clone();
         self.state.open(&path);
@@ -1179,7 +1186,7 @@ impl Osier {
         if switched {
             self.switch_tab_for_project();
         }
-        self.reload_selection(cx);
+        self.sync_pane(true, cx);
         self.update_title(window);
         cx.notify();
     }
@@ -1188,9 +1195,14 @@ impl Osier {
         if ix >= self.projects.len() {
             return;
         }
+        let closed_active = self.active == Some(ix);
+        if closed_active {
+            // Its editor and blame go with it.
+            self.editor = None;
+            self.blame = None;
+        }
         let project = self.projects.remove(ix);
         self.state.close(&project.path);
-        let closed_active = self.active == Some(ix);
         self.active = match self.active {
             Some(a) if a == ix => {
                 if self.projects.is_empty() {
@@ -1210,7 +1222,7 @@ impl Osier {
             }
         }
         self.save_state();
-        self.reload_selection(cx);
+        self.sync_pane(true, cx);
         self.update_title(window);
         cx.notify();
     }
@@ -1286,6 +1298,10 @@ impl Osier {
         };
         let is_active = self.active == Some(ix);
         let project = &mut self.projects[ix];
+        let had_conflicts = project
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.status.conflicted().count() > 0);
         if project.revision != revision {
             return;
         }
@@ -1335,12 +1351,20 @@ impl Osier {
                 {
                     project.selection = Selection::None;
                 }
-                // First load: select the first changed file so the diff pane is not empty.
+                // Nothing picked on this tab yet: its default (the first change on Changes,
+                // the latest commit on Log), so the pane is not empty.
                 if project.selection == Selection::None
-                    && let Some((path, area)) = first_change(&snapshot.status)
+                    && let Some(tab) = project.pane_tab
                 {
-                    project.selection = Selection::File { path, area };
-                    reload = true;
+                    let pane = Project::default_pane(tab, Some(&snapshot));
+                    if pane.selection != Selection::None {
+                        project.selection = pane.selection;
+                        project.picked = pane.picked;
+                        project.selected_commit = pane
+                            .selected_hash
+                            .and_then(|h| snapshot.commits.iter().position(|c| c.hash == h));
+                        reload = true;
+                    }
                 }
                 let b = &snapshot.status.branch;
                 self.recent_status.record(
@@ -1357,6 +1381,31 @@ impl Osier {
         }
         if is_active && self.tab_check_pending {
             self.switch_tab_for_project();
+            self.sync_pane(false, cx);
+        }
+        // A merge, rebase or cherry-pick just stopped on conflicts: they are resolved on the
+        // Changes tab, so go there and show the first one.
+        let first_conflict = self.projects[ix]
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.status.conflicted().next().map(|e| e.path.clone()));
+        if is_active
+            && !had_conflicts
+            && let Some(path) = first_conflict
+        {
+            self.set_tab(Tab::Changes, cx);
+            let shown = matches!(
+                &self.projects[ix].selection,
+                Selection::File {
+                    area: Area::Conflicted,
+                    ..
+                }
+            );
+            if !shown {
+                self.select_file(path, Area::Conflicted, cx);
+            }
+            cx.notify();
+            return;
         }
         if is_active && reload {
             self.reload_selection(cx);
@@ -1772,7 +1821,73 @@ impl Osier {
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
         self.auto_tab = None;
+        self.sync_pane(false, cx);
         cx.notify();
+    }
+
+    /// Keep the active project's open editor and blame with it while another is active.
+    fn park_pane(&mut self) {
+        let (editor, blame) = (self.editor.take(), self.blame.take());
+        if let Some(p) = self.active_project_mut() {
+            p.parked_editor = editor;
+            p.parked_blame = blame;
+        }
+    }
+
+    /// Make the right pane match the current tab: each tab keeps its own selection (and
+    /// editor and blame), restored when it comes back, or starts from its default (the
+    /// first change on Changes, the latest commit on Log). `reload` also reloads when the
+    /// tab did not change, for a project switch.
+    pub(crate) fn sync_pane(&mut self, reload: bool, cx: &mut Context<Self>) {
+        let tab = self.tab;
+        let Some(ix) = self.active.filter(|ix| *ix < self.projects.len()) else {
+            self.editor = None;
+            self.blame = None;
+            if reload {
+                self.reload_selection(cx);
+            }
+            return;
+        };
+        let p = &mut self.projects[ix];
+        let mut editor = self.editor.take().or_else(|| p.parked_editor.take());
+        let mut blame = self.blame.take().or_else(|| p.parked_blame.take());
+        let switching = p.pane_tab != Some(tab);
+        if switching {
+            if let Some(old) = p.pane_tab {
+                let hash_at = |ix: Option<usize>| {
+                    let s = p.snapshot.as_ref()?;
+                    Some(s.commits.get(ix?)?.hash.clone())
+                };
+                let pane = crate::project::TabPane {
+                    selected_hash: hash_at(p.selected_commit),
+                    compare_hash: hash_at(p.compare_commit),
+                    selection: std::mem::take(&mut p.selection),
+                    picked: std::mem::take(&mut p.picked),
+                    editor: editor.take(),
+                    blame: blame.take(),
+                };
+                p.panes.insert(old, pane);
+            }
+            // A tab left with nothing picked starts from its default again (changes may have
+            // appeared on Changes since).
+            let restored = match p.panes.remove(&tab) {
+                Some(pane) if pane.selection != Selection::None => pane,
+                _ => Project::default_pane(tab, p.snapshot.as_ref()),
+            };
+            p.selected_commit = restored.selected_hash.as_deref().and_then(|h| p.row_of(h));
+            p.compare_commit = restored.compare_hash.as_deref().and_then(|h| p.row_of(h));
+            p.selection = restored.selection;
+            p.picked = restored.picked;
+            p.pane_tab = Some(tab);
+            editor = restored.editor;
+            blame = restored.blame;
+            self.diff_force_large = false;
+        }
+        if switching || reload {
+            self.reload_selection(cx);
+        }
+        self.editor = editor;
+        self.blame = blame;
     }
 
     /// After the active project changed: leave an empty Changes tab for the tab set in
@@ -2098,7 +2213,7 @@ impl Osier {
 }
 
 /// Conflicts first, then staged, unstaged, untracked.
-fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
+pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
     status
         .conflicted()
         .map(|e| (e.path.clone(), Area::Conflicted))
@@ -3925,6 +4040,153 @@ mod tests {
                 .collect();
             assert_eq!(marked, ["local 1", "local 0"]);
         });
+    }
+
+    fn selection(h: &Harness, cx: &mut TestAppContext) -> Selection {
+        h.read(cx, |o, _| o.active_project().unwrap().selection.clone())
+    }
+
+    #[gpui::test]
+    fn ui_each_tab_keeps_its_own_right_pane(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        repo.write("a.txt", "changed\n");
+        repo.write("b.txt", "changed too\n");
+        let h = Harness::open(cx, &repo);
+        assert_eq!(h.read(cx, |o, _| o.tab), super::Tab::Changes);
+        // Changes starts on its first change; pick the second.
+        h.click(cx, "change-row:unstaged:b.txt");
+        let b = Selection::File {
+            path: "b.txt".into(),
+            area: Area::Unstaged,
+        };
+        assert_eq!(selection(&h, cx), b);
+        // Log starts on the latest commit, not on Changes' file.
+        h.click(cx, "tab-log");
+        let latest = h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .commits[0]
+                .hash
+                .clone()
+        });
+        assert_eq!(selection(&h, cx), Selection::Commit { hash: latest });
+        h.click(cx, "log-row:1");
+        let older = h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .commit_at(1)
+                .unwrap()
+                .hash
+                .clone()
+        });
+        // Tabs with nothing picked show nothing.
+        h.click(cx, "tab-stashes");
+        assert_eq!(selection(&h, cx), Selection::None);
+        // Each tab comes back as it was left.
+        h.click(cx, "tab-changes");
+        assert_eq!(selection(&h, cx), b);
+        h.click(cx, "tab-log");
+        assert_eq!(
+            selection(&h, cx),
+            Selection::Commit {
+                hash: older.clone()
+            }
+        );
+        h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            assert_eq!(p.selected_commit, Some(1));
+            assert_eq!(p.picked, [older]);
+        });
+    }
+
+    #[gpui::test]
+    fn an_open_editor_survives_switching_tabs(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("a.txt", "changed\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, w, cx| o.open_editor(w, cx));
+        h.act(cx, |o, w, cx| {
+            let editor = o.editor.as_ref().expect("editor open");
+            editor
+                .state
+                .update(cx, |s, cx| s.set_value("typed but not saved\n", w, cx));
+        });
+        h.click(cx, "tab-log");
+        h.read(cx, |o, _| {
+            assert!(o.editor.is_none(), "Log shows its commit")
+        });
+        h.click(cx, "tab-changes");
+        h.read(cx, |o, cx| {
+            let editor = o.editor.as_ref().expect("editor back");
+            assert_eq!(
+                editor.state.read(cx).value().to_string(),
+                "typed but not saved\n"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn an_open_editor_comes_back_with_its_project(cx: &mut TestAppContext) {
+        let (h, a, b, _first, _second) = two_projects(cx);
+        a.write("a.txt", "a changed\n");
+        b.write("b.txt", "b changed\n");
+        h.act(cx, |o, _, cx| {
+            o.refresh_project(0, cx);
+            o.refresh_project(1, cx);
+        });
+        h.act(cx, |o, w, cx| {
+            o.activate(0, w, cx);
+            o.set_tab(super::Tab::Changes, cx);
+        });
+        h.act(cx, |o, w, cx| o.open_editor(w, cx));
+        h.read(cx, |o, _| {
+            assert_eq!(o.editor.as_ref().unwrap().path, "a.txt")
+        });
+        h.act(cx, |o, w, cx| o.activate(1, w, cx));
+        h.read(cx, |o, _| {
+            assert!(o.editor.is_none(), "not on the other project")
+        });
+        h.act(cx, |o, w, cx| o.activate(0, w, cx));
+        h.read(cx, |o, _| {
+            assert_eq!(o.editor.as_ref().map(|e| e.path.as_str()), Some("a.txt"))
+        });
+    }
+
+    #[gpui::test]
+    fn clicking_a_stash_shows_its_changes(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("a.txt", "stashed\n");
+        repo.git(["stash", "push", "-q", "-m", "wip"]);
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-stashes");
+        assert_eq!(selection(&h, cx), Selection::None);
+        let oid = h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .stashes[0]
+                .oid
+                .clone()
+        });
+        h.act(cx, |o, _, cx| o.select_stash(oid.clone(), cx));
+        assert_eq!(
+            selection(&h, cx),
+            Selection::Compare {
+                from: format!("{oid}^1"),
+                to: oid,
+                since_merge_base: false
+            }
+        );
+        h.read(cx, |o, _| assert_eq!(o.diff_files, 1, "the stashed file"));
     }
 
     #[gpui::test]

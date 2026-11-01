@@ -526,10 +526,11 @@ impl Osier {
         cx.notify();
     }
 
-    /// Select a stash row by its commit id (click).
+    /// Select a stash row by its commit id (click, or up/down): the right pane shows its
+    /// changes, against the commit it was made on (the stash commit's first parent).
     pub(crate) fn select_stash(&mut self, oid: String, cx: &mut Context<Self>) {
-        self.stash_selected = Some(oid);
-        cx.notify();
+        self.stash_selected = Some(oid.clone());
+        self.select_compare(format!("{oid}^1"), oid, false, cx);
     }
 
     /// Up/down in the Branches and Stashes tabs.
@@ -555,7 +556,10 @@ impl Osier {
                     .and_then(|p| p.snapshot.as_ref())
                     .map(|s| s.stashes.iter().map(|s| s.oid.clone()).collect())
                     .unwrap_or_default();
-                self.stash_selected = step(&rows, self.stash_selected.as_ref(), delta);
+                if let Some(oid) = step(&rows, self.stash_selected.as_ref(), delta) {
+                    self.select_stash(oid, cx);
+                    return;
+                }
             }
             _ => return,
         }

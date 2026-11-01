@@ -167,12 +167,24 @@ impl Osier {
                 .child(div().text_sm().text_color(muted).child(error.clone()))
                 .into_any_element()
         } else if selection == Selection::None {
-            self.empty_state(
-                "Nothing selected",
-                "Pick a file in Changes or a commit in Log to see its diff here.",
-                cx,
-            )
-            .into_any_element()
+            // Each tab keeps its own selection here; say what this tab's would be.
+            let (title, hint) = match self.tab {
+                crate::app::Tab::Changes => (
+                    "Nothing to show",
+                    "Pick a changed file to see its diff here.",
+                ),
+                crate::app::Tab::Log => {
+                    ("No commit picked", "Pick a commit to see what it changed.")
+                }
+                crate::app::Tab::Branches => (
+                    "Nothing to compare",
+                    "Use Compare on a branch to see how it differs from the current one.",
+                ),
+                crate::app::Tab::Stashes => ("No stash picked", "Pick a stash to see its changes."),
+                crate::app::Tab::Files => ("No file open", "Pick a file to view it here."),
+                crate::app::Tab::Patches => ("No patch picked", "Pick a patch to see it here."),
+            };
+            self.empty_state(title, hint, cx).into_any_element()
         } else if self.diff_files == 0 {
             self.empty_state("No changes", "This selection has no textual changes.", cx)
                 .into_any_element()

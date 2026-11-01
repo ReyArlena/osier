@@ -56,6 +56,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- The right pane follows the tab: each tab keeps its own selection (and open editor or
+  blame) and shows it again when you come back. Changes starts on the first change, Log on
+  the latest commit, other tabs show what to pick. Clicking a stash shows its changes. A
+  merge, rebase or cherry-pick that stops on conflicts switches to Changes and shows the
+  first conflicted file.
 - New application icon.
 - Log: branch and tag badges can sit before the subject (default) or at the end of the line,
   where the subject fades out under them like sidebar names (Settings > Git > Log,

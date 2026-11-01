@@ -46,8 +46,9 @@ pub enum Area {
     Untracked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Selection {
+    #[default]
     None,
     File {
         path: String,
@@ -92,6 +93,13 @@ pub struct Project {
     /// Commits picked in the Log, by hash: one on click, a range on shift-click, toggled one
     /// at a time on ctrl-click. Hashes, not rows, so new commits arriving do not move it.
     pub picked: Vec<String>,
+    /// The tab the current selection (and the right pane) belongs to.
+    pub pane_tab: Option<crate::app::Tab>,
+    /// What the right pane showed on each other tab, restored when that tab comes back.
+    pub panes: std::collections::HashMap<crate::app::Tab, TabPane>,
+    /// The open editor and blame while another project is active.
+    pub parked_editor: Option<crate::edit_pane::FileEditor>,
+    pub parked_blame: Option<crate::blame_view::BlameView>,
     pub log_page_size: usize,
     /// When set, the Log shows this file's history (`log --follow`).
     pub log_path: Option<String>,
@@ -99,6 +107,19 @@ pub struct Project {
     watch: Option<crate::repo_watch::RepoWatch>,
     dirty_since: Option<Instant>,
     last_refresh: Instant,
+}
+
+/// The right pane of one tab, kept while another tab is showing.
+#[derive(Debug, Default)]
+pub struct TabPane {
+    pub selection: Selection,
+    /// Log rows by hash (rows move when commits arrive while the tab is away).
+    pub selected_hash: Option<String>,
+    pub compare_hash: Option<String>,
+    pub picked: Vec<String>,
+    /// An open editor keeps its text: switching tabs never loses edits.
+    pub editor: Option<crate::edit_pane::FileEditor>,
+    pub blame: Option<crate::blame_view::BlameView>,
 }
 
 /// The slow part of opening a project (finding the repository, starting its file watcher),
@@ -150,6 +171,10 @@ impl Project {
             selected_commit: None,
             compare_commit: None,
             picked: Vec::new(),
+            pane_tab: None,
+            panes: Default::default(),
+            parked_editor: None,
+            parked_blame: None,
             log_page_size,
             log_path: None,
             task: Task::ready(()),
@@ -193,6 +218,40 @@ impl Project {
 
     pub fn commit_at(&self, ix: usize) -> Option<&Commit> {
         self.snapshot.as_ref()?.commits.get(ix)
+    }
+
+    /// The right pane a tab shows before anything is picked on it: the first change on
+    /// Changes, the latest commit on Log, nothing elsewhere.
+    pub fn default_pane(tab: crate::app::Tab, snapshot: Option<&Snapshot>) -> TabPane {
+        use crate::app::Tab;
+        let mut pane = TabPane::default();
+        match (tab, snapshot) {
+            (Tab::Changes, Some(s)) => {
+                if let Some((path, area)) = crate::app::first_change(&s.status) {
+                    pane.selection = Selection::File { path, area };
+                }
+            }
+            (Tab::Log, Some(s)) => {
+                if let Some(c) = s.commits.first() {
+                    pane.selection = Selection::Commit {
+                        hash: c.hash.clone(),
+                    };
+                    pane.selected_hash = Some(c.hash.clone());
+                    pane.picked = vec![c.hash.clone()];
+                }
+            }
+            _ => {}
+        }
+        pane
+    }
+
+    /// Row of a commit in the loaded log page.
+    pub fn row_of(&self, hash: &str) -> Option<usize> {
+        self.snapshot
+            .as_ref()?
+            .commits
+            .iter()
+            .position(|c| c.hash == hash)
     }
 
     /// Log rows of the picked commits, for highlighting. Falls back to the single selected
