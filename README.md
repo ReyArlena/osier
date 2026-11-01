@@ -16,7 +16,7 @@ none of the IDE.
   create/rename/delete/checkout actions and confirmations where data could be lost.
 - **Fetch, pull, push** with progress and cancel, upstream prompts, pull strategy memory per
   repository, `--force-with-lease` only (never plain `--force`).
-- **Merge, rebase, cherry-pick, revert, interactive rebase** with conflicts resolved in place:
+- **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
 - **Patches**: copy files or commits as a patch, apply from clipboard or file with a dry run
   and a three-way fallback, and a patch clipboard that shelves changes and carries them

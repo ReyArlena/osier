@@ -1310,6 +1310,21 @@ impl Osier {
                 if let Selection::Commit { hash } = &project.selection {
                     project.selected_commit = snapshot.commits.iter().position(|c| &c.hash == hash);
                 }
+                // Keep a shift-click pair on the same commits too: the rows are indices, and
+                // a new commit at the top moves every row down by one.
+                if project.compare_commit.is_some() {
+                    let old_commits = project.snapshot.as_ref().map(|s| &s.commits);
+                    let remap = |ix: Option<usize>| {
+                        let hash = &old_commits?.get(ix?)?.hash;
+                        snapshot.commits.iter().position(|c| &c.hash == hash)
+                    };
+                    let (anchor, other) = (
+                        remap(project.selected_commit),
+                        remap(project.compare_commit),
+                    );
+                    project.selected_commit = anchor;
+                    project.compare_commit = other;
+                }
                 // Drop a file selection that no longer exists.
                 if let Selection::File { path, .. } = &project.selection
                     && !snapshot.status.entries.iter().any(|e| &e.path == path)
@@ -3640,6 +3655,103 @@ mod tests {
                 width(&h, cx)
             );
         }
+    }
+
+    fn log_subjects(h: &Harness, cx: &mut TestAppContext) -> Vec<String> {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .map(|s| s.commits.iter().map(|c| c.subject.clone()).collect())
+                .unwrap_or_default()
+        })
+    }
+
+    #[gpui::test]
+    fn shift_click_pair_stays_on_its_commits_when_new_ones_arrive(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        for s in ["a", "b", "c", "d"] {
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        h.click(cx, "log-row:1");
+        h.click_with(cx, "log-row:2", gpui::Modifiers::shift());
+        let picked = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                let p = o.active_project().unwrap();
+                let hash = |ix: Option<usize>| p.commit_at(ix.unwrap()).unwrap().subject.clone();
+                (hash(p.selected_commit), hash(p.compare_commit))
+            })
+        };
+        assert_eq!(picked(&h, cx), ("c".to_string(), "b".to_string()));
+        // A commit made outside Osier lands on top.
+        repo.commit_file("e.txt", "x\n", "e");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert_eq!(log_subjects(&h, cx)[0], "e");
+        assert_eq!(
+            picked(&h, cx),
+            ("c".to_string(), "b".to_string()),
+            "same commits"
+        );
+    }
+
+    #[gpui::test]
+    fn ui_squash_a_shift_click_range(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        for s in ["a", "b", "c", "d"] {
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        // Newest to oldest: d, c, b.
+        h.click(cx, "log-row:0");
+        h.click_with(cx, "log-row:2", gpui::Modifiers::shift());
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.active_project().unwrap().squash_run(),
+                Some(vec![0, 1, 2])
+            )
+        });
+        h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
+        assert!(h.has_settings(cx), "squash dialog open");
+        assert!(h.bounds(cx, "squash-message").is_some());
+        h.click(cx, "dialog-ok");
+        assert_eq!(
+            log_subjects(&h, cx),
+            ["b\n\nc\n\nd".lines().next().unwrap(), "a"]
+        );
+        h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            let head = &p.snapshot.as_ref().unwrap().commits[0];
+            assert_eq!(head.body.trim(), "c\n\nd", "messages kept, oldest first");
+            assert_eq!(
+                p.selected_commit,
+                Some(0),
+                "the squashed commit is selected"
+            );
+            assert_eq!(p.compare_commit, None);
+        });
+    }
+
+    #[gpui::test]
+    fn squash_of_commits_on_different_lines_is_refused(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "x\n", "a");
+        repo.git(["checkout", "-qb", "side"]);
+        repo.commit_file("s.txt", "x\n", "side");
+        repo.git(["checkout", "-q", "main"]);
+        repo.commit_file("b.txt", "x\n", "b");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        // b and side: rows 0 and 1, not one line of history.
+        h.act(cx, |o, _, cx| o.select_commit(0, cx));
+        h.act(cx, |o, _, cx| o.compare_with_selected(1, cx));
+        h.read(cx, |o, _| {
+            assert_eq!(o.active_project().unwrap().squash_run(), None)
+        });
+        h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
+        assert!(!h.has_settings(cx), "no dialog");
+        assert_eq!(log_subjects(&h, cx).len(), 3, "nothing changed");
     }
 
     #[gpui::test]

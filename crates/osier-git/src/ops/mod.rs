@@ -15,6 +15,7 @@ pub mod patches;
 pub mod rebase_interactive;
 pub mod remote;
 pub mod reset;
+pub mod squash;
 pub mod stage;
 pub mod stash;
 pub mod submodule;

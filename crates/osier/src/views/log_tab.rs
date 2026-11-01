@@ -59,6 +59,8 @@ impl Osier {
         let graph = Arc::new(snapshot.graph.clone());
         let selected = project.selected_commit;
         let compare = project.compare_commit;
+        // A shift-click range on one line of history: highlighted whole, squashable.
+        let run: Arc<Vec<usize>> = Arc::new(project.squash_run().unwrap_or_default());
         // Colours behind a row, for the fade over clipped badges (see `fade.rs`).
         let row_bg = cx.theme().background;
         let row_hover = row_bg.blend(cx.theme().list_hover);
@@ -156,7 +158,10 @@ impl Osier {
                                 let hash = commit.hash.clone();
                                 let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                 let menu_owner = owner.clone();
-                                let is_selected = selected == Some(ix) || compare == Some(ix);
+                                let in_run = run.contains(&ix);
+                                let run_len = run.len();
+                                let is_selected =
+                                    selected == Some(ix) || compare == Some(ix) || in_run;
                                 let (fade_base, fade_hover) = if is_selected {
                                     (row_selected, row_selected)
                                 } else {
@@ -288,6 +293,12 @@ impl Osier {
                                                 t.open_interactive_rebase(h, w, cx)
                                             }),
                                         ));
+                                    if in_run && run_len >= 2 {
+                                        menu = menu.item(item(
+                                            "Squash selected commits…",
+                                            std::rc::Rc::new(|t, _, w, cx| t.confirm_squash(w, cx)),
+                                        ));
+                                    }
                                     if is_head {
                                         menu = menu.item(item(
                                             "Undo last commit…",
@@ -694,6 +705,7 @@ fn log_menu_kind(label: &str) -> Option<crate::row_actions::RowKind> {
         "Cherry-pick onto current branch…" => K::CherryPick,
         "Compare with working tree" => K::CompareWithWorkingTree,
         "Interactive rebase from here…" => K::InteractiveRebase,
+        "Squash selected commits…" => K::Squash,
         "Undo last commit…" => K::UndoLastCommit,
         "Copy hash" => K::CopyHash,
         "Open on GitHub" => K::OpenOnGithub,

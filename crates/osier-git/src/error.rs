@@ -67,6 +67,10 @@ pub enum GitError {
         detail: String,
     },
 
+    /// An operation's safety checks said no; the text says why, for the user.
+    #[error("{0}")]
+    Refused(String),
+
     #[error("invalid utf-8 in git output ({0})")]
     Utf8(&'static str),
 

@@ -167,6 +167,19 @@ impl Repository {
     }
 }
 
+impl InProgress {
+    /// Lower-case name for messages: "merge", "rebase", ...
+    pub fn label(self) -> &'static str {
+        match self {
+            InProgress::Merge => "merge",
+            InProgress::Rebase => "rebase",
+            InProgress::CherryPick => "cherry-pick",
+            InProgress::Revert => "revert",
+            InProgress::Bisect => "bisect",
+        }
+    }
+}
+
 /// Multi-step git operation left in progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InProgress {

@@ -8,6 +8,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Squash commits from the Log: click the newest, shift-click the oldest (the whole run is
+  highlighted), right-click, Squash selected commits. Refused unless the commits are one
+  straight line on the checked-out branch; the result has exactly the same content, staged
+  work is untouched, later commits are replayed, and the dialog says when the commits are
+  already pushed or other branches and tags still contain them.
 - Changes tab with visual staging of files, hunks and selected lines, discard to trash for
   untracked files, commit box with amend, sign-off, commit and push, and recent messages.
 - Log tab with a commit graph, branch and tag labels, reflog, compare between refs, file
@@ -91,6 +96,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- A shift-click pair in the Log stays on the same commits when new commits arrive.
 - Startup shows the window at once however many projects were open: only the active project opens before the first frame, the rest load in the background in their saved order (446 projects: 1.35 s to 0.14 s).
 - The centre panel keeps its saved width when the window is resized, including right after a tiling compositor opens it.
 - The per-hunk actions button is a boxed plus or minus icon, so it no longer reads as a second diff sign.

@@ -188,6 +188,29 @@ impl Project {
     pub fn commit_at(&self, ix: usize) -> Option<&Commit> {
         self.snapshot.as_ref()?.commits.get(ix)
     }
+
+    /// Rows of the shift-click range when it is one first-parent line of history (what a
+    /// squash would combine), newest first. `None` without a two-commit selection, or when
+    /// the two commits are not on one straight line (the log interleaves branches, so the
+    /// rows between them are not necessarily that line).
+    pub fn squash_run(&self) -> Option<Vec<usize>> {
+        let (a, b) = (self.selected_commit?, self.compare_commit?);
+        if a == b {
+            return None;
+        }
+        let commits = &self.snapshot.as_ref()?.commits;
+        let (newer, older) = (&commits.get(a.min(b))?.hash, &commits.get(a.max(b))?.hash);
+        let run = osier_git::ops::squash::first_parent_run(
+            commits
+                .iter()
+                .map(|c| (c.hash.as_str(), c.parents.as_slice())),
+            newer,
+            older,
+        )?;
+        run.iter()
+            .map(|h| commits.iter().position(|c| &c.hash == h))
+            .collect()
+    }
 }
 
 /// Files in the order the Changes tab shows them: conflicted, staged, unstaged, untracked.
