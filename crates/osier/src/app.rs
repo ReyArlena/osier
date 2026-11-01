@@ -3696,6 +3696,40 @@ mod tests {
     }
 
     #[gpui::test]
+    fn shift_click_range_of_several_stays_on_its_commits(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        for s in ["a", "b", "c", "d", "e"] {
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        // Rows 1 to 3: d, c, b.
+        h.click(cx, "log-row:1");
+        h.click_with(cx, "log-row:3", gpui::Modifiers::shift());
+        let run = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                let p = o.active_project().unwrap();
+                p.squash_run()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|ix| p.commit_at(ix).unwrap().subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(run(&h, cx), ["d", "c", "b"]);
+        for s in ["f", "g"] {
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert_eq!(log_subjects(&h, cx)[..2], ["g", "f"]);
+        assert_eq!(
+            run(&h, cx),
+            ["d", "c", "b"],
+            "the same three commits, two rows lower"
+        );
+    }
+
+    #[gpui::test]
     fn ui_squash_a_shift_click_range(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         for s in ["a", "b", "c", "d"] {
