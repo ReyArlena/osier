@@ -75,6 +75,34 @@ impl Paths {
     }
 }
 
+/// The home directory, every way this process may see it: `$HOME` and the system's idea of
+/// it, each also with symlinks resolved (on Fedora Atomic, for one, `/home` links to
+/// `/var/home`). Duplicates removed; empty entries and `/` skipped.
+pub fn home_dirs() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut add = |p: PathBuf| {
+        let p: PathBuf = p.components().collect();
+        if p.as_os_str().is_empty() || p == Path::new("/") || out.contains(&p) {
+            return;
+        }
+        out.push(p);
+    };
+    let mut seeds = Vec::new();
+    if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        seeds.push(PathBuf::from(home));
+    }
+    if let Some(dirs) = directories::BaseDirs::new() {
+        seeds.push(dirs.home_dir().to_path_buf());
+    }
+    for seed in seeds {
+        if let Ok(real) = std::fs::canonicalize(&seed) {
+            add(real);
+        }
+        add(seed);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

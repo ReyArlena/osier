@@ -233,7 +233,7 @@ impl Osier {
             let result = std::fs::write(&path, text);
             let _ = this.update_in(cx, |_, window, cx| match result {
                 Ok(()) => window.push_notification(
-                    Notification::success(format!("Wrote {}", path.display())),
+                    Notification::success(format!("Wrote {}", crate::format::tilde(&path))),
                     cx,
                 ),
                 Err(e) => window.push_notification(

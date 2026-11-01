@@ -107,6 +107,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Paths under the home folder show as `~/...` however the home is spelled (symlinked homes such as `/var/home`, `$HOME` with a trailing slash or unset), and `/home/reynolds` is no longer shortened as if it were under `/home/rey`.
 - The diff now refreshes when the file it shows is edited again while already modified, and no longer reloads (losing its scroll) when an unrelated file changes.
 - A shift-click pair in the Log stays on the same commits when new commits arrive.
 - Startup shows the window at once however many projects were open: only the active project opens before the first frame, the rest load in the background in their saved order (446 projects: 1.35 s to 0.14 s).

@@ -58,16 +58,46 @@ pub fn iso_date(unix: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// Replace the home directory prefix with `~`.
+/// The path with the home directory shown as `~`: `/home/rey/Work/app` is `~/Work/app`.
+/// Whole path components only (`/home/reynolds` is not under `/home/rey`). The home is
+/// looked up once, every way it can be spelled (`osier_config::paths::home_dirs`); a path
+/// that only matches once its own symlinks are resolved is resolved once and remembered.
 pub fn tilde(path: &Path) -> String {
-    let s = path.to_string_lossy();
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = home.to_string_lossy();
-        if let Some(rest) = s.strip_prefix(home.as_ref()) {
-            return format!("~{rest}");
-        }
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+    static HOMES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    static RESOLVED: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+    let homes = HOMES.get_or_init(osier_config::paths::home_dirs);
+    if let Some(short) = tilde_with(path, homes) {
+        return short;
     }
-    s.into_owned()
+    let cache = RESOLVED.get_or_init(Default::default);
+    if let Ok(mut cache) = cache.lock() {
+        if let Some(hit) = cache.get(path) {
+            return hit.clone();
+        }
+        let shown = std::fs::canonicalize(path)
+            .ok()
+            .and_then(|real| tilde_with(&real, homes))
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        if cache.len() < 4096 {
+            cache.insert(path.to_path_buf(), shown.clone());
+        }
+        return shown;
+    }
+    path.to_string_lossy().into_owned()
+}
+
+fn tilde_with(path: &Path, homes: &[std::path::PathBuf]) -> Option<String> {
+    homes.iter().find_map(|home| {
+        let rest = path.strip_prefix(home).ok()?;
+        Some(if rest.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", rest.to_string_lossy())
+        })
+    })
 }
 
 /// "1 change", "3 changes": a count with its noun, singular for one.
@@ -99,6 +129,22 @@ mod tests {
         assert_eq!(iso_date(0), "1970-01-01");
         assert_eq!(iso_date(1_704_067_200), "2024-01-01");
         assert_eq!(iso_date(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn tilde_matches_whole_components_and_any_spelling_of_home() {
+        use std::path::PathBuf;
+        let homes = [PathBuf::from("/home/rey"), PathBuf::from("/var/home/rey")];
+        let t = |p: &str| tilde_with(Path::new(p), &homes);
+        assert_eq!(
+            t("/home/rey/Work/api-server").as_deref(),
+            Some("~/Work/api-server")
+        );
+        assert_eq!(t("/var/home/rey/Work/app").as_deref(), Some("~/Work/app"));
+        assert_eq!(t("/home/rey").as_deref(), Some("~"));
+        assert_eq!(t("/home/rey/").as_deref(), Some("~"));
+        assert_eq!(t("/home/reynolds/x"), None, "not a prefix of a longer name");
+        assert_eq!(t("/opt/app"), None);
     }
 
     #[test]
