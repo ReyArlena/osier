@@ -18,6 +18,8 @@ use osier_git::{GitRunner, Repository};
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub status: RepoStatus,
+    /// Commits on local branches that no remote branch has yet (Log graph marking).
+    pub unpushed: std::collections::HashSet<String>,
     pub branches: Vec<Branch>,
     pub tags: Vec<osier_git::refs::Tag>,
     pub commits: Vec<Commit>,
@@ -261,6 +263,7 @@ pub fn load_snapshot(
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     let recent_messages = osier_git::log::recent_messages(repo, 5).unwrap_or_default();
+    let unpushed = osier_git::log::unpushed(repo, 5000).unwrap_or_default();
     // A broken .gitmodules must not take the whole snapshot down.
     let submodules = osier_git::submodule::list(repo).unwrap_or_else(|e| {
         tracing::debug!(error = %e, "submodule listing unavailable");
@@ -279,6 +282,7 @@ pub fn load_snapshot(
         worktrees,
         submodules,
         recent_messages,
+        unpushed,
         identity,
         in_progress: repo.in_progress(),
     })

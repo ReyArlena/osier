@@ -8,6 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- The Log graph marks commits that are not on any remote yet: dimmed by default, or drawn
+  in another colour (Settings > Git > Log, `git.log_unpushed = "dim" | "colour"`).
 - Squash commits from the Log: click the newest, shift-click the oldest (the whole run is
   highlighted), right-click, Squash selected commits. Refused unless the commits are one
   straight line on the checked-out branch; the result has exactly the same content, staged

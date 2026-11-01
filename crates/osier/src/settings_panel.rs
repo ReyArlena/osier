@@ -792,6 +792,33 @@ fn git_page(view: &Entity<Osier>) -> SettingPage {
                 )
                 .default_value("left".to_string()),
             ),
+            SettingItem::new(
+                "Commits not pushed yet",
+                SettingField::dropdown(
+                    vec![
+                        ("dim".into(), "Dim".into()),
+                        ("colour".into(), "Change colour".into()),
+                    ],
+                    get(view, |o| {
+                        match o.settings.git.log_unpushed {
+                            osier_config::settings::UnpushedStyle::Dim => "dim",
+                            osier_config::settings::UnpushedStyle::Colour => "colour",
+                        }
+                        .into()
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.git.log_unpushed = if v.as_ref() == "colour" {
+                            osier_config::settings::UnpushedStyle::Colour
+                        } else {
+                            osier_config::settings::UnpushedStyle::Dim
+                        }
+                    }),
+                )
+                .default_value("dim".to_string()),
+            )
+            .description(
+                "How the Log graph shows commits that are on a local branch but no remote yet.",
+            ),
         ]))
         .group(SettingGroup::new().title("Prompts and viewer").items(vec![
             SettingItem::new(

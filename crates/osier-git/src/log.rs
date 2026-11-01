@@ -94,6 +94,42 @@ pub fn log(repo: &Repository, options: &LogOptions) -> Result<Vec<Commit>> {
     }
 }
 
+/// Commits on local branches that no remote branch contains yet ("not pushed"), up to
+/// `limit`. Empty when the repository has no remote-tracking branches at all: with nowhere to
+/// push, nothing counts as unpushed.
+pub fn unpushed(repo: &Repository, limit: usize) -> Result<std::collections::HashSet<String>> {
+    let remotes = repo.git([
+        "for-each-ref",
+        "--count=1",
+        "--format=%(refname)",
+        "refs/remotes",
+    ])?;
+    if remotes.stdout_str()?.trim().is_empty() {
+        return Ok(Default::default());
+    }
+    let out = repo.runner().run_allowing(
+        Some(repo.workdir()),
+        [
+            "rev-list",
+            &format!("--max-count={limit}"),
+            "--branches",
+            "--not",
+            "--remotes",
+        ],
+        &[0, 128],
+    )?;
+    if out.record.status != Some(0) {
+        return Ok(Default::default());
+    }
+    Ok(out
+        .stdout_str()?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Full messages of the last `n` commits on HEAD, newest first, duplicates removed. Empty on
 /// an unborn branch (git exits 128 there).
 pub fn recent_messages(repo: &Repository, n: usize) -> Result<Vec<String>> {
@@ -176,6 +212,26 @@ fn parse_decorations(d: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unpushed_lists_local_only_commits_and_nothing_without_remotes() {
+        let t = crate::testing::TempRepo::new();
+        t.commit_file("a.txt", "a\n", "a");
+        t.commit_file("a.txt", "b\n", "b");
+        assert!(
+            unpushed(&t.repo(), 100).unwrap().is_empty(),
+            "no remote: nothing unpushed"
+        );
+        t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "HEAD"]);
+        assert!(unpushed(&t.repo(), 100).unwrap().is_empty());
+        let c = t.commit_file("a.txt", "c\n", "c");
+        t.git(["checkout", "-qb", "feature"]);
+        let d = t.commit_file("d.txt", "d\n", "d");
+        let got = unpushed(&t.repo(), 100).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!(got.contains(c.trim()) && got.contains(d.trim()));
+    }
     use crate::testing::TempRepo;
 
     #[test]

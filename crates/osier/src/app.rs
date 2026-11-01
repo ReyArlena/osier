@@ -3755,6 +3755,22 @@ mod tests {
     }
 
     #[gpui::test]
+    fn snapshot_knows_which_commits_are_not_pushed(cx: &mut TestAppContext) {
+        let repo = repo_with_upstream(2, false);
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |o, _| {
+            let s = o.active_project().unwrap().snapshot.as_ref().unwrap();
+            let marked: Vec<&str> = s
+                .commits
+                .iter()
+                .filter(|c| s.unpushed.contains(&c.hash))
+                .map(|c| c.subject.as_str())
+                .collect();
+            assert_eq!(marked, ["local 1", "local 0"]);
+        });
+    }
+
+    #[gpui::test]
     fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "first");

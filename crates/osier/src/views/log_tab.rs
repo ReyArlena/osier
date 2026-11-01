@@ -57,6 +57,15 @@ impl Osier {
         }
         let commits = Arc::new(snapshot.commits.clone());
         let graph = Arc::new(snapshot.graph.clone());
+        let unpushed = Arc::new(snapshot.unpushed.clone());
+        let unpushed_paint = match self.settings.git.log_unpushed {
+            osier_config::settings::UnpushedStyle::Dim => {
+                crate::graph::UnpushedPaint::Dim(cx.theme().background)
+            }
+            osier_config::settings::UnpushedStyle::Colour => {
+                crate::graph::UnpushedPaint::Colour(cx.theme().warning)
+            }
+        };
         let selected = project.selected_commit;
         let compare = project.compare_commit;
         // A shift-click range on one line of history: highlighted whole, squashable.
@@ -147,6 +156,14 @@ impl Osier {
                                     graph[ix - 1].edges.clone()
                                 } else {
                                     Vec::new()
+                                };
+                                let marks = crate::graph::UnpushedMarks {
+                                    paint: unpushed_paint,
+                                    this: unpushed.contains(&commit.hash),
+                                    prev: ix
+                                        .checked_sub(1)
+                                        .filter(|p| unpushed.contains(&commits[*p].hash))
+                                        .map(|p| graph[p].lane),
                                 };
                                 let owner = owner.clone();
                                 let subject = if commit.subject.is_empty() {
@@ -352,6 +369,7 @@ impl Osier {
                                                 max_lanes,
                                                 colors,
                                                 commit.is_merge(),
+                                                marks,
                                             ))
                                             .child(subject_with_refs(
                                                 ix,

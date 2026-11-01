@@ -15,6 +15,34 @@ pub fn lane_colors(cx: &App) -> [Hsla; 5] {
     [t.chart_1, t.chart_2, t.chart_3, t.chart_4, t.chart_5]
 }
 
+/// How commits that are not on any remote are drawn (Settings > Git > Log).
+#[derive(Debug, Clone, Copy)]
+pub enum UnpushedPaint {
+    /// Faded towards this background colour. Mixed, not transparent: a see-through node
+    /// would show the lane line through it.
+    Dim(Hsla),
+    Colour(Hsla),
+}
+
+impl UnpushedPaint {
+    fn apply(self, color: Hsla) -> Hsla {
+        match self {
+            UnpushedPaint::Dim(background) => background.blend(color.opacity(0.4)),
+            UnpushedPaint::Colour(c) => c,
+        }
+    }
+}
+
+/// Which parts of a row belong to unpushed commits: this row's node and its links to its
+/// parents (`this`), and the links arriving from the previous row's commit (`prev`: that
+/// row's lane, when it is unpushed). Lanes that only pass through are left alone.
+#[derive(Debug, Clone, Copy)]
+pub struct UnpushedMarks {
+    pub paint: UnpushedPaint,
+    pub this: bool,
+    pub prev: Option<usize>,
+}
+
 /// Canvas element for a row: incoming edges from the previous row, outgoing edges, node.
 pub fn graph_cell(
     row: GraphRow,
@@ -22,6 +50,7 @@ pub fn graph_cell(
     width_lanes: usize,
     colors: [Hsla; 5],
     is_merge: bool,
+    marks: UnpushedMarks,
 ) -> impl IntoElement {
     let width = px(LANE_WIDTH * width_lanes.max(1) as f32);
     canvas(
@@ -67,7 +96,9 @@ pub fn graph_cell(
                     );
                 }
                 if let Ok(path) = b.build() {
-                    window.paint_path(path, edge_color(e));
+                    let c = edge_color(e);
+                    let marked = marks.prev == Some(e.from);
+                    window.paint_path(path, if marked { marks.paint.apply(c) } else { c });
                 }
             }
             // Bottom half: first halves of edges leaving this row.
@@ -86,7 +117,9 @@ pub fn graph_cell(
                     );
                 }
                 if let Ok(path) = b.build() {
-                    window.paint_path(path, edge_color(e));
+                    let c = edge_color(e);
+                    let marked = marks.this && e.from == row.lane;
+                    window.paint_path(path, if marked { marks.paint.apply(c) } else { c });
                 }
             }
             // Node.
@@ -97,10 +130,15 @@ pub fn graph_cell(
             });
             let center = point(x_of(row.lane), mid);
             let node = Bounds::new(point(center.x - r, center.y - r), size(r * 2., r * 2.));
+            let node_color = if marks.this {
+                marks.paint.apply(color(row.lane))
+            } else {
+                color(row.lane)
+            };
             window.paint_quad(quad(
                 node,
                 r,
-                color(row.lane),
+                node_color,
                 px(0.),
                 Hsla::transparent_black(),
                 BorderStyle::default(),

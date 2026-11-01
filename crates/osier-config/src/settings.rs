@@ -221,6 +221,18 @@ pub struct Git {
     pub show_command_log: bool,
     /// Where the Log puts branch and tag badges: before the subject or at the end of the line.
     pub log_badges: LogBadges,
+    /// How the Log graph marks commits that are not on any remote yet.
+    pub log_unpushed: UnpushedStyle,
+}
+
+/// `dim` fades unpushed commits in the graph, `colour` draws them in another colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UnpushedStyle {
+    #[default]
+    Dim,
+    #[serde(alias = "color")]
+    Colour,
 }
 
 /// `left` puts ref badges before the commit subject, `right` at the end of the line.
@@ -238,6 +250,7 @@ impl Default for Git {
             log_page_size: 500,
             show_command_log: false,
             log_badges: LogBadges::Left,
+            log_unpushed: UnpushedStyle::Dim,
         }
     }
 }
@@ -380,6 +393,15 @@ mod tests {
         assert_eq!(v.markdown_mode_for("notes.md"), MarkdownMode::Code);
         assert_eq!(extension(".bashrc"), None);
         assert_eq!(extension("a/b.c/README"), None);
+    }
+
+    #[test]
+    fn unpushed_style_defaults_to_dim_and_reads_colour_or_color() {
+        assert_eq!(Settings::default().git.log_unpushed, UnpushedStyle::Dim);
+        for v in ["colour", "color"] {
+            let s: Settings = toml::from_str(&format!("[git]\nlog_unpushed = \"{v}\"\n")).unwrap();
+            assert_eq!(s.git.log_unpushed, UnpushedStyle::Colour);
+        }
     }
 
     #[test]
