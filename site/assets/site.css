@@ -390,7 +390,9 @@ kbd,
 
 .hero h1 {
   margin: 0;
-  font-size: clamp(2.9rem, 8.2vw, 6.4rem);
+  /* Never wider than the page: "A keyboard-driven" plus the caret, the longest rotating
+     line, is about 8.9em, so phones get a slightly smaller heading instead of a wrap. */
+  font-size: min(clamp(2.9rem, 8.2vw, 6.4rem), calc((100vw - 2 * var(--gutter)) / 9.2));
   line-height: 1.02;
   letter-spacing: -0.045em;
   font-weight: 800;
