@@ -61,6 +61,8 @@ All notable changes to Osier are documented here. The format follows
   the latest commit, other tabs show what to pick. Clicking a stash shows its changes. A
   merge, rebase or cherry-pick that stops on conflicts switches to Changes and shows the
   first conflicted file.
+- Tabs keep their diff's scroll position, expanded sections and selected lines; coming back
+  reuses the view without running git unless its content changed.
 - New application icon.
 - Log: branch and tag badges can sit before the subject (default) or at the end of the line,
   where the subject fades out under them like sidebar names (Settings > Git > Log,
@@ -105,6 +107,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The diff now refreshes when the file it shows is edited again while already modified, and no longer reloads (losing its scroll) when an unrelated file changes.
 - A shift-click pair in the Log stays on the same commits when new commits arrive.
 - Startup shows the window at once however many projects were open: only the active project opens before the first frame, the rest load in the background in their saved order (446 projects: 1.35 s to 0.14 s).
 - The centre panel keeps its saved width when the window is resized, including right after a tiling compositor opens it.

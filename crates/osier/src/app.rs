@@ -133,6 +133,10 @@ pub struct Osier {
     pub(crate) command_log_visible: bool,
     pub(crate) expanded_command: Option<u64>,
     pub(crate) diff: Entity<DiffState>,
+    /// `Project::content_key` of what `diff` was loaded for.
+    diff_key: Option<String>,
+    /// Redraws on conflict choices and line selection in `diff`; swapped with it per tab.
+    diff_subscription: Option<Subscription>,
     /// Files in the diff pane, for the header counts.
     pub(crate) diff_files: usize,
     /// Our own parse of the same patch, for building hunk and line patches.
@@ -377,6 +381,8 @@ impl Osier {
             tab_check_pending: false,
             expanded_command: None,
             diff,
+            diff_subscription: None,
+            diff_key: None,
             diff_files: 0,
             diff_model: std::rc::Rc::new(Vec::new()),
             diff_loading: false,
@@ -434,15 +440,7 @@ impl Osier {
         };
         this.apply_appearance(cx);
         let diff_entity = this.diff.clone();
-        this._subscriptions
-            .push(cx.subscribe(&diff_entity, |_, _, ev: &DiffEvent, cx| {
-                if matches!(
-                    ev,
-                    DiffEvent::ConflictResolved(..) | DiffEvent::SelectionChanged(_)
-                ) {
-                    cx.notify();
-                }
-            }));
+        this.diff_subscription = Some(Self::subscribe_diff(&diff_entity, cx));
         this._subscriptions
             .push(cx.observe_window_appearance(window, |this, _, cx| {
                 if this.settings.appearance.mode == ThemeMode::System {
@@ -1310,18 +1308,16 @@ impl Osier {
         let mut reload = false;
         match result {
             Ok(snapshot) => {
-                // Reload the diff only when the working tree or HEAD moved. Reloading resets the
-                // diff view's scroll position, so avoid it for no-op refreshes.
-                let status_changed = project
-                    .snapshot
-                    .as_ref()
-                    .is_none_or(|old| old.status != snapshot.status);
-                reload = match &project.selection {
-                    Selection::None | Selection::Commit { .. } => false,
-                    Selection::File { .. } | Selection::Compare { .. } => status_changed,
-                    Selection::WorkFile { rev: None, .. } => status_changed,
-                    Selection::WorkFile { .. } | Selection::Patch { .. } => false,
-                };
+                // Refs moved: part of the content key of compares by name (see the reload
+                // decision at the end).
+                let refs_changed = project.snapshot.as_ref().is_none_or(|old| {
+                    old.branches != snapshot.branches
+                        || old.commits.first().map(|c| &c.hash)
+                            != snapshot.commits.first().map(|c| &c.hash)
+                });
+                if refs_changed {
+                    project.content_rev += 1;
+                }
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
                     project.selected_commit = snapshot.commits.iter().position(|c| &c.hash == hash);
@@ -1406,6 +1402,13 @@ impl Osier {
             }
             cx.notify();
             return;
+        }
+        // Reload the visible diff only when what it shows changed: the file it shows was
+        // edited (even when git status stays the same), the index or the refs moved, or the
+        // selection itself changed. Other files changing leave it, and its scroll, alone.
+        if is_active {
+            let p = &self.projects[ix];
+            reload |= self.diff_key.as_deref() != Some(p.content_key(&p.selection).as_str());
         }
         if is_active && reload {
             self.reload_selection(cx);
@@ -1677,6 +1680,7 @@ impl Osier {
     /// Load the diff for the active project's selection into the diff pane.
     pub(crate) fn reload_selection(&mut self, cx: &mut Context<Self>) {
         self.blame = None;
+        self.diff_key = self.active_project().map(|p| p.content_key(&p.selection));
         self.diff_revision += 1;
         let revision = self.diff_revision;
         let context = self.settings.diff.context_lines;
@@ -1826,12 +1830,41 @@ impl Osier {
     }
 
     /// Keep the active project's open editor and blame with it while another is active.
+    /// Its tabs' cached diff views are dropped (selections stay): only the active project
+    /// keeps diff views, so memory stays bounded however many projects are open.
     fn park_pane(&mut self) {
         let (editor, blame) = (self.editor.take(), self.blame.take());
         if let Some(p) = self.active_project_mut() {
             p.parked_editor = editor;
             p.parked_blame = blame;
+            for pane in p.panes.values_mut() {
+                pane.diff = None;
+            }
         }
+    }
+
+    fn subscribe_diff(diff: &Entity<DiffState>, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe(diff, |_, _, ev: &DiffEvent, cx| {
+            if matches!(
+                ev,
+                DiffEvent::ConflictResolved(..) | DiffEvent::SelectionChanged(_)
+            ) {
+                cx.notify();
+            }
+        })
+    }
+
+    /// An empty diff view with the current layout and context settings.
+    fn new_diff_view(&self, cx: &mut Context<Self>) -> (Entity<DiffState>, Subscription) {
+        let mode = self.diff.read(cx).mode();
+        let context = self.settings.diff.context_lines as usize;
+        let state = cx.new(|cx| {
+            DiffState::new([], cx)
+                .with_mode(mode)
+                .with_context_lines(Some(context))
+        });
+        let subscription = Self::subscribe_diff(&state, cx);
+        (state, subscription)
     }
 
     /// Make the right pane match the current tab: each tab keeps its own selection (and
@@ -1848,10 +1881,29 @@ impl Osier {
             }
             return;
         };
+        let switching = self.projects[ix].pane_tab != Some(tab);
+        // The outgoing tab's diff view, kept unless it was still loading (never reuse a
+        // half-loaded view).
+        let leaving_diff = (switching && !self.diff_loading).then(|| {
+            let (fresh, fresh_sub) = self.new_diff_view(cx);
+            crate::project::DiffCache {
+                state: std::mem::replace(&mut self.diff, fresh),
+                subscription: self
+                    .diff_subscription
+                    .replace(fresh_sub)
+                    .unwrap_or_else(|| Self::subscribe_diff(&self.diff, cx)),
+                model: std::mem::take(&mut self.diff_model),
+                files: self.diff_files,
+                error: self.diff_error.take(),
+                too_large: self.diff_too_large.take(),
+                viewer: self.viewer.take(),
+                key: self.diff_key.clone().unwrap_or_default(),
+            }
+        });
+        let mut restored_diff = None;
         let p = &mut self.projects[ix];
         let mut editor = self.editor.take().or_else(|| p.parked_editor.take());
         let mut blame = self.blame.take().or_else(|| p.parked_blame.take());
-        let switching = p.pane_tab != Some(tab);
         if switching {
             if let Some(old) = p.pane_tab {
                 let hash_at = |ix: Option<usize>| {
@@ -1865,6 +1917,7 @@ impl Osier {
                     picked: std::mem::take(&mut p.picked),
                     editor: editor.take(),
                     blame: blame.take(),
+                    diff: leaving_diff,
                 };
                 p.panes.insert(old, pane);
             }
@@ -1881,9 +1934,32 @@ impl Osier {
             p.pane_tab = Some(tab);
             editor = restored.editor;
             blame = restored.blame;
+            // Reuse the tab's diff view (scroll and all) unless its content has moved.
+            let key = p.content_key(&p.selection);
+            restored_diff = restored.diff.filter(|d| d.key == key);
             self.diff_force_large = false;
         }
-        if switching || reload {
+        let reused = if let Some(cache) = restored_diff {
+            let mode = self.diff.read(cx).mode();
+            self.diff_key = Some(cache.key);
+            self.diff = cache.state;
+            self.diff_subscription = Some(cache.subscription);
+            self.diff_model = cache.model;
+            self.diff_files = cache.files;
+            self.diff_error = cache.error;
+            self.diff_too_large = cache.too_large;
+            self.viewer = cache.viewer;
+            self.diff_loading = false;
+            // A load still running for the tab that was left must not land here.
+            self.diff_revision += 1;
+            if self.diff.read(cx).mode() != mode {
+                self.diff.update(cx, |d, cx| d.set_mode(mode, cx));
+            }
+            true
+        } else {
+            false
+        };
+        if (switching && !reused) || reload {
             self.reload_selection(cx);
         }
         self.editor = editor;
@@ -4155,6 +4231,78 @@ mod tests {
         h.act(cx, |o, w, cx| o.activate(0, w, cx));
         h.read(cx, |o, _| {
             assert_eq!(o.editor.as_ref().map(|e| e.path.as_str()), Some("a.txt"))
+        });
+    }
+
+    #[gpui::test]
+    fn a_tab_gets_its_own_diff_view_back_unless_the_content_moved(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        repo.write("a.txt", "changed\n");
+        let h = Harness::open(cx, &repo);
+        let view = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |o, _| o.diff.entity_id());
+        let changes_view = view(&h, cx);
+        h.click(cx, "tab-log");
+        let log_view = view(&h, cx);
+        assert_ne!(log_view, changes_view, "each tab has its own view");
+        // Back and forth with nothing changed: the same views, scroll and all.
+        h.click(cx, "tab-changes");
+        assert_eq!(view(&h, cx), changes_view);
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+        h.click(cx, "tab-log");
+        assert_eq!(view(&h, cx), log_view);
+        // The working tree moves while Changes is away: its diff is loaded fresh.
+        repo.write("a.txt", "changed again\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert_eq!(view(&h, cx), log_view, "a fixed commit stays as it was");
+        h.click(cx, "tab-changes");
+        assert_ne!(view(&h, cx), changes_view, "reloaded");
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+    }
+
+    #[gpui::test]
+    fn the_shown_diff_follows_edits_to_its_file_and_ignores_other_files(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        repo.write("a.txt", "one\n");
+        repo.write("b.txt", "other\n");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:a.txt");
+        let loads = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |o, _| o.diff_revision);
+        let added = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                o.diff_model.iter().map(|f| f.added()).sum::<usize>()
+            })
+        };
+        assert_eq!(added(&h, cx), 1);
+        // Same status (a.txt stays modified), new content: the diff follows.
+        let before = loads(&h, cx);
+        repo.write("a.txt", "one\ntwo\nthree\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert!(loads(&h, cx) > before, "reloaded");
+        assert_eq!(added(&h, cx), 3);
+        // Another file changes: the shown diff (and its scroll) is left alone.
+        let before = loads(&h, cx);
+        repo.write("b.txt", "other, edited\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert_eq!(loads(&h, cx), before, "not reloaded");
+    }
+
+    #[gpui::test]
+    fn switching_project_drops_the_cached_diff_views(cx: &mut TestAppContext) {
+        let (h, _a, _b, _first, _second) = two_projects(cx);
+        h.act(cx, |o, w, cx| o.activate(0, w, cx));
+        h.click(cx, "tab-log");
+        h.click(cx, "tab-branches");
+        h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            assert!(p.panes.values().any(|pane| pane.diff.is_some()));
+        });
+        h.act(cx, |o, w, cx| o.activate(1, w, cx));
+        h.read(cx, |o, _| {
+            assert!(o.projects[0].panes.values().all(|pane| pane.diff.is_none()));
         });
     }
 

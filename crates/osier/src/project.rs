@@ -97,6 +97,9 @@ pub struct Project {
     pub pane_tab: Option<crate::app::Tab>,
     /// What the right pane showed on each other tab, restored when that tab comes back.
     pub panes: std::collections::HashMap<crate::app::Tab, TabPane>,
+    /// Bumped whenever a refresh sees the refs move (branches or HEAD); part of
+    /// `content_key` for selections that name refs.
+    pub content_rev: u64,
     /// The open editor and blame while another project is active.
     pub parked_editor: Option<crate::edit_pane::FileEditor>,
     pub parked_blame: Option<crate::blame_view::BlameView>,
@@ -120,6 +123,32 @@ pub struct TabPane {
     /// An open editor keeps its text: switching tabs never loses edits.
     pub editor: Option<crate::edit_pane::FileEditor>,
     pub blame: Option<crate::blame_view::BlameView>,
+    /// The tab's diff view as it was left (scroll, expanded sections, selected lines), kept
+    /// for the active project only.
+    pub diff: Option<DiffCache>,
+}
+
+/// A tab's loaded diff view, reused when the tab comes back and its content cannot have
+/// changed (see `Osier::sync_pane`).
+pub struct DiffCache {
+    pub state: gpui_kit::Entity<gpui_kit::component::diff::DiffState>,
+    pub subscription: gpui_kit::Subscription,
+    pub model: std::rc::Rc<Vec<osier_git::diff::DiffFile>>,
+    pub files: usize,
+    pub error: Option<String>,
+    pub too_large: Option<u64>,
+    pub viewer: Option<crate::viewer::Viewer>,
+    /// `Project::content_key` of what it shows, when it was loaded.
+    pub key: String,
+}
+
+impl std::fmt::Debug for DiffCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiffCache")
+            .field("files", &self.files)
+            .field("key", &self.key)
+            .finish()
+    }
 }
 
 /// The slow part of opening a project (finding the repository, starting its file watcher),
@@ -173,6 +202,7 @@ impl Project {
             picked: Vec::new(),
             pane_tab: None,
             panes: Default::default(),
+            content_rev: 0,
             parked_editor: None,
             parked_blame: None,
             log_page_size,
@@ -243,6 +273,34 @@ impl Project {
             _ => {}
         }
         pane
+    }
+
+    /// What the right pane's content for `selection` depends on, cheap to compute: the
+    /// selection itself, plus the file's size and modified time and the index's for
+    /// working-tree files, plus the refs for compares by name. A loaded diff is stale when
+    /// this changes; fixed commits and patches never go stale.
+    pub fn content_key(&self, selection: &Selection) -> String {
+        fn stamp(path: &Path) -> Option<(u64, u128)> {
+            let meta = std::fs::metadata(path).ok()?;
+            let modified = meta
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?;
+            Some((meta.len(), modified.as_nanos()))
+        }
+        let work = |path: &str| stamp(&self.repo.workdir().join(path));
+        let index = stamp(&self.repo.git_dir().join("index"));
+        match selection {
+            Selection::File { path, .. } => format!(
+                "{selection:?}|{}|{:?}|{index:?}",
+                self.content_rev,
+                work(path)
+            ),
+            Selection::WorkFile { path, rev: None } => format!("{selection:?}|{:?}", work(path)),
+            Selection::Compare { .. } => format!("{selection:?}|{}", self.content_rev),
+            _ => format!("{selection:?}"),
+        }
     }
 
     /// Row of a commit in the loaded log page.
