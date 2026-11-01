@@ -470,7 +470,8 @@ kbd,
   gap: 10px;
   min-width: 0;
   padding: 0 16px;
-  height: 46px;
+  /* 44 + the box's 1px borders = 46, the height of .btn beside it. */
+  height: 44px;
   font-size: 13.5px;
   color: var(--subtext1);
   white-space: nowrap;
