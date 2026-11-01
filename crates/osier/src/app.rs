@@ -59,6 +59,19 @@ pub fn init(cx: &mut App) {
     crate::keymap::init(cx);
 }
 
+/// The status bar message for projects that could not be reopened at startup.
+fn reopen_error(failures: &[String]) -> String {
+    format!(
+        "Could not reopen {}: {}",
+        if failures.len() == 1 {
+            "a project".to_string()
+        } else {
+            format!("{} projects", failures.len())
+        },
+        failures.join("; ")
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Changes,
@@ -511,28 +524,27 @@ impl Osier {
                 this.state_dirty = true;
             }));
 
-        // Restore open projects, then the CLI argument on top. Failures go to the status bar:
+        // Restore open projects, then the CLI argument on top. Only the project that was
+        // active opens here, so the window shows it at once however many are open; the rest
+        // open in the background (`restore_in_background`). Failures go to the status bar:
         // toasts need the window root, which does not exist yet during construction.
         let restore: Vec<PathBuf> = this.state.open_projects.clone();
         // Opening marks each project active in the state; keep the one saved last session.
         let saved_active = this.state.active_project.clone();
-        let mut failures = Vec::new();
-        for p in restore {
-            if let Err(e) = this.open_project(&p, false, cx) {
-                failures.push(e);
-            }
+        let first = saved_active
+            .clone()
+            .filter(|p| restore.contains(p))
+            .or_else(|| restore.first().cloned());
+        if let Some(p) = &first
+            && let Err(e) = this.open_project(p, false, cx)
+        {
+            this.global_error = Some(reopen_error(&[e]));
         }
-        if !failures.is_empty() {
-            this.global_error = Some(format!(
-                "Could not reopen {}: {}",
-                if failures.len() == 1 {
-                    "a project".to_string()
-                } else {
-                    format!("{} projects", failures.len())
-                },
-                failures.join("; ")
-            ));
-        }
+        let rest: Vec<PathBuf> = restore
+            .into_iter()
+            .filter(|p| Some(p) != first.as_ref())
+            .collect();
+        this.restore_in_background(rest, window, cx);
         if let Some(active) = saved_active
             && let Some(ix) = this.projects.iter().position(|p| p.path == active)
         {
@@ -951,15 +963,9 @@ impl Osier {
             }
             return Ok(ix);
         }
-        let watch_runner =
-            self.runner
-                .clone()
-                .with_sink(Arc::new(crate::command_log::FailuresOnly(
-                    self.sink.clone(),
-                )));
         match Project::open(
             self.runner.clone(),
-            watch_runner,
+            self.watch_runner(),
             path,
             self.settings.git.log_page_size,
         ) {
@@ -986,6 +992,127 @@ impl Osier {
                 Err(format!("{}: {error}", crate::format::tilde(path)))
             }
         }
+    }
+
+    /// The runner for file watchers' own git calls: only failures reach the command log.
+    fn watch_runner(&self) -> GitRunner {
+        self.runner
+            .clone()
+            .with_sink(Arc::new(crate::command_log::FailuresOnly(
+                self.sink.clone(),
+            )))
+    }
+
+    /// Open the saved projects other than the active one without blocking the window: git
+    /// discovery and watcher start run on the background executor in small chunks, and each
+    /// chunk joins the sidebar in its saved order as it lands. Projects closed or opened by
+    /// hand in the meantime are left alone.
+    fn restore_in_background(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        const CHUNK: usize = 16;
+        if paths.is_empty() {
+            return;
+        }
+        let (runner, watch_runner) = (self.runner.clone(), self.watch_runner());
+        cx.spawn_in(window, async move |this, cx| {
+            let mut failures = Vec::new();
+            for chunk in paths.chunks(CHUNK) {
+                let chunk = chunk.to_vec();
+                let (runner, watch_runner) = (runner.clone(), watch_runner.clone());
+                let prepared = cx
+                    .background_spawn(async move {
+                        chunk
+                            .into_iter()
+                            .map(|p| {
+                                let r = Project::prepare(runner.clone(), watch_runner.clone(), &p);
+                                (p, r)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .await;
+                let Ok(failed) = this.update_in(cx, |this, window, cx| {
+                    this.install_restored(prepared, window, cx)
+                }) else {
+                    return;
+                };
+                failures.extend(failed);
+            }
+            if !failures.is_empty() {
+                let _ = this.update(cx, |this, cx| {
+                    this.global_error = Some(reopen_error(&failures));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Add projects prepared by `restore_in_background`. Returns the failures, for the
+    /// status bar.
+    fn install_restored(
+        &mut self,
+        prepared: Vec<(PathBuf, Result<crate::project::Prepared, String>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        let mut changed_state = false;
+        for (path, result) in prepared {
+            // Closed while it was loading, or opened by hand.
+            if !self.state.open_projects.contains(&path)
+                || self.projects.iter().any(|p| p.path == path)
+            {
+                continue;
+            }
+            let prepared = match result {
+                Ok(p) => p,
+                Err(error) => {
+                    tracing::warn!(%error, path = %path.display(), "cannot reopen repository");
+                    self.state.forget_recent(&path);
+                    self.state.close(&path);
+                    changed_state = true;
+                    failures.push(format!("{}: {error}", crate::format::tilde(&path)));
+                    continue;
+                }
+            };
+            let project = Project::from_prepared(prepared, self.settings.git.log_page_size);
+            if self.projects.iter().any(|p| p.path == project.path) {
+                continue;
+            }
+            // Saved order: before the first open project that comes later in the list.
+            let order = |p: &Path| {
+                self.state
+                    .open_projects
+                    .iter()
+                    .position(|q| q == p)
+                    .unwrap_or(usize::MAX)
+            };
+            let rank = order(&path);
+            let ix = self
+                .projects
+                .iter()
+                .position(|p| order(&p.path) > rank)
+                .unwrap_or(self.projects.len());
+            self.projects.insert(ix, project);
+            if let Some(active) = self.active
+                && ix <= active
+            {
+                self.active = Some(active + 1);
+            }
+            self.refresh_project(ix, cx);
+        }
+        if changed_state {
+            self.save_state();
+        }
+        if self.active.is_none() && !self.projects.is_empty() {
+            self.activate(0, window, cx);
+        }
+        cx.notify();
+        failures
     }
 
     /// Open from a user action: failures become a warning toast.
@@ -3435,6 +3562,52 @@ mod tests {
                 o.active,
                 Some(1),
                 "the saved active project, not the last opened"
+            );
+            let order: Vec<&std::path::Path> =
+                o.projects.iter().map(|p| p.path.as_path()).collect();
+            assert_eq!(order, [a.path(), b.path(), c.path()], "saved order kept");
+        });
+    }
+
+    #[gpui::test]
+    fn startup_opens_the_active_project_first_and_the_rest_in_the_background(
+        cx: &mut TestAppContext,
+    ) {
+        let repos: Vec<TempRepo> = (0..20)
+            .map(|n| {
+                let r = TempRepo::new();
+                r.commit_file("a.txt", &format!("{n}\n"), "first");
+                r
+            })
+            .collect();
+        let gone = std::env::temp_dir().join("osier-test-no-such-repo");
+        let mut open_projects: Vec<std::path::PathBuf> =
+            repos.iter().map(|r| r.path().to_path_buf()).collect();
+        open_projects.insert(5, gone.clone());
+        let state = State {
+            open_projects,
+            active_project: Some(repos[12].path().into()),
+            ..State::default()
+        };
+        let h = Harness::open_with(cx, state, None);
+        h.read(cx, |o, _| {
+            let paths: Vec<&std::path::Path> =
+                o.projects.iter().map(|p| p.path.as_path()).collect();
+            let want: Vec<&std::path::Path> = repos.iter().map(|r| r.path()).collect();
+            assert_eq!(
+                paths, want,
+                "all twenty, in saved order, missing one dropped"
+            );
+            assert_eq!(o.active, Some(12));
+            assert!(
+                !o.state.open_projects.contains(&gone),
+                "missing repo forgotten"
+            );
+            let error = o.global_error.clone().unwrap_or_default();
+            assert!(error.starts_with("Could not reopen a project"), "{error}");
+            assert!(
+                o.projects.iter().all(|p| p.snapshot.is_some()),
+                "all loaded"
             );
         });
     }

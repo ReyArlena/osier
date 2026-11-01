@@ -96,6 +96,13 @@ pub struct Project {
     last_refresh: Instant,
 }
 
+/// The slow part of opening a project (finding the repository, starting its file watcher),
+/// which is safe to build off the UI thread. [`Project::from_prepared`] finishes it.
+pub struct Prepared {
+    repo: Repository,
+    watch: Option<crate::repo_watch::RepoWatch>,
+}
+
 impl Project {
     /// `watch_runner` drives the file watcher's own git calls; it should log only failures.
     pub fn open(
@@ -104,10 +111,29 @@ impl Project {
         path: &Path,
         log_page_size: usize,
     ) -> Result<Self, String> {
+        Ok(Self::from_prepared(
+            Self::prepare(runner, watch_runner, path)?,
+            log_page_size,
+        ))
+    }
+
+    /// Find the repository at `path` and start watching it. Runs git; call it off the UI
+    /// thread when opening many projects.
+    pub fn prepare(
+        runner: GitRunner,
+        watch_runner: GitRunner,
+        path: &Path,
+    ) -> Result<Prepared, String> {
         let repo = Repository::discover(runner, path).map_err(|e| e.to_string())?;
+        let watch = crate::repo_watch::RepoWatch::start(repo.with_runner(watch_runner));
+        Ok(Prepared { repo, watch })
+    }
+
+    pub fn from_prepared(prepared: Prepared, log_page_size: usize) -> Self {
+        let Prepared { repo, watch } = prepared;
         let path = repo.workdir().to_path_buf();
         let name = repo.name();
-        let mut project = Self {
+        Self {
             path,
             name,
             repo,
@@ -121,12 +147,10 @@ impl Project {
             log_page_size,
             log_path: None,
             task: Task::ready(()),
-            watch: None,
+            watch,
             dirty_since: None,
             last_refresh: Instant::now(),
-        };
-        project.watch = crate::repo_watch::RepoWatch::start(project.repo.with_runner(watch_runner));
-        Ok(project)
+        }
     }
 
     /// Drain watcher events. Returns true when a refresh is due (debounced).
