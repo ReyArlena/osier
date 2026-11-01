@@ -1,20 +1,22 @@
-//! Squash a run of consecutive commits on the current branch into one.
+//! Squash selected commits on the current branch into one.
 //!
 //! Safety, in order:
-//! - [`plan`] refuses anything that is not a plain line of history on the checked-out branch:
-//!   detached HEAD, an operation in progress, commits off the branch, merge commits in the
-//!   range or after it, or (when later commits must be replayed) uncommitted changes to
-//!   tracked files.
-//! - The squashed commit is built with `commit-tree` from the newest commit's tree, so its
-//!   content is exactly what the branch had. The oldest commit's author is kept and
-//!   `commit.gpgsign` is honoured.
-//! - When the newest selected commit is HEAD, the branch moves with a compare-and-swap
-//!   `update-ref`; the working tree and the index are not touched, so staged changes stay
-//!   staged and out of the squash. Otherwise the later commits are replayed with
-//!   `rebase --onto`, which cannot conflict (the new base has the same tree); if it fails
-//!   anyway it is aborted and the branch is left as it was.
-//! - [`squash`] re-checks that HEAD has not moved since the plan was made.
-//! - The old commits stay in the reflog.
+//! - [`plan`] refuses anything that is not on the checked-out branch's own line of history:
+//!   detached HEAD, an operation in progress, commits off the branch (or only on a branch
+//!   merged into it), merge commits anywhere from the oldest selected commit up to HEAD, or
+//!   (when commits must be replayed) uncommitted changes to tracked files.
+//! - Neighbouring commits: the squashed commit is built with `commit-tree` from the newest
+//!   commit's tree, so its content is exactly what the branch had. When the newest is HEAD
+//!   the branch moves with a compare-and-swap `update-ref`; the working tree and the index
+//!   are not touched, so staged changes stay staged and out of the squash. Otherwise the
+//!   later commits are replayed with `rebase --onto`, which cannot conflict (the new base has
+//!   the same tree); if it fails anyway it is aborted.
+//! - Separated commits: an interactive rebase moves the later selected commits next to the
+//!   oldest one and melds them (`fixup`), sets the message, then replays the commits that
+//!   were in between. Moving commits past others can conflict; then the rebase is aborted
+//!   and the branch is exactly as it was.
+//! - The oldest commit's author is kept and commit signing is honoured. [`squash`] re-checks
+//!   that HEAD has not moved since the plan was made. The old commits stay in the reflog.
 
 use std::collections::HashSet;
 
@@ -26,13 +28,16 @@ use crate::repo::Repository;
 pub struct SquashPlan {
     /// The commits to squash, newest first.
     pub commits: Vec<String>,
+    /// Commits between the selected ones, newest first: they stay, replayed after the
+    /// squashed commit. Empty when the selection is one unbroken run.
+    pub between: Vec<String>,
     /// Parent of the oldest commit; `None` when the oldest is the root commit.
     pub base: Option<String>,
     /// HEAD when the plan was made.
     pub head: String,
     /// Branch being rewritten, without `refs/heads/`.
     pub branch: String,
-    /// Commits after the newest selected one that will be replayed on top.
+    /// Commits after the newest selected one, replayed on top unchanged.
     pub replay: usize,
     /// Remote branches (e.g. `origin/main`) that already contain some of these commits:
     /// squashing rewrites published history and needs a force push.
@@ -43,16 +48,15 @@ pub struct SquashPlan {
     pub message: String,
 }
 
-fn refused(reason: impl Into<String>) -> GitError {
-    GitError::Refused(reason.into())
+impl SquashPlan {
+    /// True when the selected commits sit next to each other (no commits in between).
+    pub fn contiguous(&self) -> bool {
+        self.between.is_empty()
+    }
 }
 
-/// Exit status of a git command that answers yes (0) or no (1).
-fn yes(repo: &Repository, args: &[&str]) -> Result<bool> {
-    let out = repo
-        .runner()
-        .run_allowing(Some(repo.workdir()), args, &[0, 1])?;
-    Ok(out.record.status == Some(0))
+fn refused(reason: impl Into<String>) -> GitError {
+    GitError::Refused(reason.into())
 }
 
 fn rev_parse(repo: &Repository, rev: &str) -> Result<String> {
@@ -63,23 +67,8 @@ fn rev_parse(repo: &Repository, rev: &str) -> Result<String> {
         .to_string())
 }
 
-/// `hash parent...` lines of `git rev-list --first-parent --parents <range>`, newest first.
-fn chain(repo: &Repository, range: &str) -> Result<Vec<(String, Vec<String>)>> {
-    let out = repo.git(["rev-list", "--first-parent", "--parents", range])?;
-    Ok(out
-        .stdout_str()?
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| {
-            let mut parts = l.split_whitespace().map(str::to_string);
-            let hash = parts.next().unwrap_or_default();
-            (hash, parts.collect())
-        })
-        .collect())
-}
-
-/// Check that the commits between `a` and `b` (either order, both included) can be squashed.
-pub fn plan(repo: &Repository, a: &str, b: &str) -> Result<SquashPlan> {
+/// Check that `selected` (any order) can be squashed into one commit.
+pub fn plan(repo: &Repository, selected: &[String]) -> Result<SquashPlan> {
     if let Some(op) = repo.in_progress() {
         return Err(refused(format!(
             "Finish or abort the {} in progress first.",
@@ -100,80 +89,67 @@ pub fn plan(repo: &Repository, a: &str, b: &str) -> Result<SquashPlan> {
         .trim_start_matches("refs/heads/")
         .to_string();
     let head = rev_parse(repo, "HEAD")?;
-    let (a, b) = (rev_parse(repo, a)?, rev_parse(repo, b)?);
-    if a == b {
+    let mut wanted: HashSet<String> = HashSet::new();
+    for rev in selected {
+        wanted.insert(rev_parse(repo, rev)?);
+    }
+    if wanted.len() < 2 {
         return Err(refused("Select at least two commits to squash."));
     }
-    let (older, newer) = if yes(repo, &["merge-base", "--is-ancestor", &a, &b])? {
-        (a, b)
-    } else if yes(repo, &["merge-base", "--is-ancestor", &b, &a])? {
-        (b, a)
-    } else {
-        return Err(refused(
-            "These commits are on different lines of history and cannot be squashed together.",
-        ));
-    };
-    if !yes(repo, &["merge-base", "--is-ancestor", &newer, "HEAD"])? {
+
+    // The branch's own line, HEAD backwards along first parents, until every selected
+    // commit has been seen.
+    let out = repo.git(["rev-list", "--first-parent", "--parents", "HEAD"])?;
+    let text = out.stdout_str()?;
+    let mut line: Vec<(String, Vec<String>)> = Vec::new();
+    let mut found = 0;
+    for l in text.lines().filter(|l| !l.is_empty()) {
+        let mut parts = l.split_whitespace().map(str::to_string);
+        let hash = parts.next().unwrap_or_default();
+        let parents: Vec<String> = parts.collect();
+        let hit = wanted.contains(&hash);
+        line.push((hash, parents));
+        if hit {
+            found += 1;
+            if found == wanted.len() {
+                break;
+            }
+        }
+    }
+    if found < wanted.len() {
         return Err(refused(format!(
-            "Only commits on the current branch ({branch}) can be squashed."
+            "Only commits on {branch}'s own line of history can be squashed; the selection \
+             includes commits from another branch."
         )));
     }
-
-    // The selection: newer back to older along first parents, no merges.
-    let mut commits = Vec::new();
-    let mut expect = newer.clone();
-    for (hash, parents) in chain(repo, &format!("{older}..{newer}"))? {
-        if hash != expect || parents.len() != 1 {
-            return Err(refused(
-                "The selection includes a merge, or is not one straight line of commits.",
-            ));
-        }
-        commits.push(hash);
-        expect = parents[0].clone();
-    }
-    if expect != older {
+    if line.iter().any(|(_, parents)| parents.len() > 1) {
         return Err(refused(
-            "The selection is not one straight line of commits.",
+            "There are merge commits among or after the selected commits; they cannot be \
+             replayed safely.",
         ));
     }
-    let older_parents: Vec<String> = repo
-        .git(["rev-list", "--parents", "-n", "1", &older])?
-        .stdout_str()?
-        .split_whitespace()
-        .skip(1)
-        .map(str::to_string)
+
+    let positions: Vec<usize> = line
+        .iter()
+        .enumerate()
+        .filter(|(_, (h, _))| wanted.contains(h))
+        .map(|(ix, _)| ix)
         .collect();
-    if older_parents.len() > 1 {
-        return Err(refused(
-            "The oldest selected commit is a merge; merges cannot be squashed.",
-        ));
-    }
-    commits.push(older.clone());
-    let base = older_parents.into_iter().next();
-
-    // Later commits on the branch, replayed on top: a straight line, no merges.
-    let mut replay = 0;
-    let mut expect_parent = newer.clone();
-    let later = chain(repo, &format!("{newer}..HEAD"))?;
-    for (_, parents) in later.iter().rev() {
-        if parents.len() != 1 || parents[0] != expect_parent {
-            return Err(refused(
-                "There are merge commits after the selection; they cannot be replayed safely.",
-            ));
-        }
-        replay += 1;
-        expect_parent = later[later.len() - replay].0.clone();
-    }
-    if replay > 0 {
+    let (newest_ix, oldest_ix) = (positions[0], positions[positions.len() - 1]);
+    let commits: Vec<String> = positions.iter().map(|&ix| line[ix].0.clone()).collect();
+    let between: Vec<String> = (newest_ix..oldest_ix)
+        .filter(|ix| !wanted.contains(&line[*ix].0))
+        .map(|ix| line[ix].0.clone())
+        .collect();
+    let base = line[oldest_ix].1.first().cloned();
+    let replay = newest_ix;
+    let rewritten = replay + between.len();
+    if rewritten > 0 {
         let dirty = repo.git(["status", "--porcelain", "--untracked-files=no"])?;
         if !dirty.stdout_str()?.trim().is_empty() {
             return Err(refused(format!(
-                "Commit or stash your changes first: the {} after the selection have to be replayed.",
-                if replay == 1 {
-                    "commit".to_string()
-                } else {
-                    format!("{replay} commits")
-                }
+                "Commit or stash your changes first: {} have to be replayed.",
+                count(rewritten, "other commit")
             )));
         }
     }
@@ -181,12 +157,13 @@ pub fn plan(repo: &Repository, a: &str, b: &str) -> Result<SquashPlan> {
     // Refs that already contain the oldest selected commit keep the old history after the
     // squash: remote branches (published, needs a force push) and other local branches and
     // tags (they keep pointing at the old commits).
+    let oldest = line[oldest_ix].0.clone();
     let containing = |prefix: &str| -> Result<Vec<String>> {
         let out = repo.git([
             "for-each-ref",
             "--format=%(refname:short)",
             "--contains",
-            older.as_str(),
+            oldest.as_str(),
             prefix,
         ])?;
         Ok(out
@@ -205,6 +182,7 @@ pub fn plan(repo: &Repository, a: &str, b: &str) -> Result<SquashPlan> {
     let message = messages(repo, &commits)?;
     Ok(SquashPlan {
         commits,
+        between,
         base,
         head,
         branch,
@@ -213,6 +191,15 @@ pub fn plan(repo: &Repository, a: &str, b: &str) -> Result<SquashPlan> {
         other_refs,
         message,
     })
+}
+
+/// "1 commit", "3 commits".
+pub(crate) fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
 }
 
 /// Messages of `commits` (newest first), oldest first, joined by blank lines.
@@ -248,6 +235,9 @@ pub fn squash(repo: &Repository, plan: &SquashPlan, message: &str) -> Result<Str
     let (Some(newest), Some(oldest)) = (plan.commits.first(), plan.commits.last()) else {
         return Err(refused("Nothing to squash."));
     };
+    if !plan.contiguous() {
+        return squash_separated(repo, plan, message);
+    }
     let tree = rev_parse(repo, &format!("{newest}^{{tree}}"))?;
     let author = repo.git(["show", "-s", "--format=%an%x00%ae%x00%aI", oldest])?;
     let author = author.stdout_str()?.trim_end().to_string();
@@ -306,30 +296,57 @@ pub fn squash(repo: &Repository, plan: &SquashPlan, message: &str) -> Result<Str
     Ok(new)
 }
 
-/// Hashes of the first-parent line from `newer` back to `older` within `commits` (a log
-/// page: each entry is `(hash, parents)`), both included; `None` when `older` is not on
-/// that line or a merge is in the way. The UI uses it to highlight what a squash would take.
-pub fn first_parent_run<'a>(
-    commits: impl IntoIterator<Item = (&'a str, &'a [String])>,
-    newer: &str,
-    older: &str,
-) -> Option<Vec<String>> {
-    let parents: std::collections::HashMap<&str, &[String]> = commits.into_iter().collect();
-    let mut run = vec![newer.to_string()];
-    let mut seen = HashSet::new();
-    let mut at = newer;
-    while at != older {
-        let p = parents.get(at)?;
-        if p.len() != 1 || !seen.insert(at) {
-            return None;
-        }
-        at = p[0].as_str();
-        run.push(at.to_string());
+/// Separated commits: move the later ones next to the oldest, meld them, set the message,
+/// replay the rest. Aborted on any failure, leaving the branch as it was.
+fn squash_separated(repo: &Repository, plan: &SquashPlan, message: &str) -> Result<String> {
+    let Some(oldest) = plan.commits.last() else {
+        return Err(refused("Nothing to squash."));
+    };
+    let dir = tempfile::Builder::new().prefix("osier-squash-").tempdir()?;
+    let message_file = dir.path().join("message");
+    std::fs::write(&message_file, format!("{}\n", message.trim_end()))?;
+    // Oldest first: the oldest selected commit, the other selected ones melded into it, the
+    // message, then everything else from the oldest up to HEAD in its original order.
+    let out = repo.git([
+        "rev-list",
+        "--reverse",
+        "--first-parent",
+        &format!("{oldest}..HEAD"),
+    ])?;
+    let later: Vec<String> = out
+        .stdout_str()?
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    let selected: HashSet<&String> = plan.commits.iter().collect();
+    let mut todo = format!("pick {oldest}\n");
+    for h in later.iter().filter(|h| selected.contains(h)) {
+        todo.push_str(&format!("fixup {h}\n"));
     }
-    if parents.get(older).is_some_and(|p| p.len() > 1) {
-        return None;
+    todo.push_str(&format!(
+        "exec git commit --amend --no-verify -F '{}'\n",
+        message_file.to_string_lossy().replace('\'', "'\\''")
+    ));
+    for h in later.iter().filter(|h| !selected.contains(h)) {
+        todo.push_str(&format!("pick {h}\n"));
     }
-    Some(run)
+    let base = plan.base.clone().unwrap_or_else(|| "--root".to_string());
+    if let Err(error) = crate::ops::rebase_interactive::run_todo(repo, &base, &todo, &dir) {
+        let _ = repo.git(["rebase", "--abort"]);
+        return Err(match error {
+            GitError::Conflict(_) => refused(
+                "Moving these commits next to each other conflicts with the commits between \
+                 them, so nothing was changed. Squash neighbouring commits instead, or use \
+                 Interactive rebase to reorder and resolve the conflict by hand.",
+            ),
+            other => other,
+        });
+    }
+    // The squashed commit sits where the oldest was: count back from HEAD past the replayed
+    // commits that were between or after.
+    let back = later.len() - (plan.commits.len() - 1);
+    rev_parse(repo, &format!("HEAD~{back}"))
 }
 
 #[cfg(test)]
@@ -354,11 +371,17 @@ mod tests {
         rev_parse(&t.repo(), &format!("{rev}^{{tree}}")).unwrap()
     }
 
-    fn rev(t: &TempRepo, r: &str) -> String {
-        rev_parse(&t.repo(), r).unwrap()
+    fn sel(t: &TempRepo, revs: &[&str]) -> Vec<String> {
+        revs.iter()
+            .map(|r| rev_parse(&t.repo(), r).unwrap())
+            .collect()
     }
 
-    /// a, b, c, d, e on main.
+    fn plan_of(t: &TempRepo, revs: &[&str]) -> Result<SquashPlan> {
+        plan(&t.repo(), &sel(t, revs))
+    }
+
+    /// a, b, c, d, e on main, each in its own file.
     fn five() -> TempRepo {
         let t = TempRepo::new();
         for (n, s) in ["a", "b", "c", "d", "e"].iter().enumerate() {
@@ -373,8 +396,9 @@ mod tests {
         let tree_before = tree(&t, "HEAD");
         t.write("a.txt", "staged change\n");
         t.git(["add", "a.txt"]);
-        let p = plan(&t.repo(), &rev(&t, "HEAD"), &rev(&t, "HEAD~2")).unwrap();
+        let p = plan_of(&t, &["HEAD", "HEAD~2", "HEAD~1"]).unwrap();
         assert_eq!(p.commits.len(), 3);
+        assert!(p.contiguous());
         assert_eq!(p.replay, 0);
         assert_eq!(p.message, "c\n\nd\n\ne");
         assert!(p.published.is_empty() && p.other_refs.is_empty());
@@ -384,19 +408,63 @@ mod tests {
         assert_eq!(tree(&t, "HEAD"), tree_before, "same content");
         let staged = t.git(["diff", "--cached", "--name-only"]);
         assert_eq!(staged.trim(), "a.txt", "staged work stays staged");
-        assert_eq!(rev(&t, "HEAD~1"), p.base.clone().unwrap());
+        assert_eq!(
+            rev_parse(&t.repo(), "HEAD~1").unwrap(),
+            p.base.clone().unwrap()
+        );
     }
 
     #[test]
     fn squashes_in_the_middle_and_replays_the_rest() {
         let t = five();
         let tree_before = tree(&t, "HEAD");
-        let p = plan(&t.repo(), &rev(&t, "HEAD~3"), &rev(&t, "HEAD~2")).unwrap();
+        let p = plan_of(&t, &["HEAD~3", "HEAD~2"]).unwrap();
         assert_eq!(p.replay, 2);
         squash(&t.repo(), &p, "b and c").unwrap();
         assert_eq!(subjects(&t), ["e", "d", "b and c", "a"]);
         assert_eq!(tree(&t, "HEAD"), tree_before);
         assert!(t.repo().in_progress().is_none());
+    }
+
+    #[test]
+    fn squashes_separated_commits_and_keeps_the_ones_between() {
+        let t = five();
+        let tree_before = tree(&t, "HEAD");
+        // b and d, with c between them and e after.
+        let p = plan_of(&t, &["HEAD~1", "HEAD~3"]).unwrap();
+        assert!(!p.contiguous());
+        assert_eq!(p.between.len(), 1);
+        assert_eq!(p.replay, 1);
+        assert_eq!(p.message, "b\n\nd");
+        let new = squash(&t.repo(), &p, "b and d").unwrap();
+        assert_eq!(subjects(&t), ["e", "c", "b and d", "a"]);
+        assert_eq!(rev_parse(&t.repo(), "HEAD~2").unwrap(), new);
+        assert_eq!(tree(&t, "HEAD"), tree_before, "same content at the top");
+        let files = t.git(["show", "--name-only", "--format=", &new]);
+        let mut files: Vec<&str> = files.lines().filter(|l| !l.is_empty()).collect();
+        files.sort_unstable();
+        assert_eq!(
+            files,
+            ["b.txt", "d.txt"],
+            "only the selected commits' changes"
+        );
+        assert!(t.repo().in_progress().is_none());
+    }
+
+    #[test]
+    fn separated_commits_that_conflict_are_left_alone() {
+        let t = TempRepo::new();
+        t.commit_file("f.txt", "1\n", "one");
+        t.commit_file("f.txt", "2\n", "two");
+        t.commit_file("f.txt", "3\n", "three");
+        let before = head(&t);
+        // one and three both rewrite f.txt with two in between: moving three down conflicts.
+        let p = plan_of(&t, &["HEAD", "HEAD~2"]).unwrap();
+        let e = squash(&t.repo(), &p, "x").unwrap_err().to_string();
+        assert!(e.contains("conflicts"), "{e}");
+        assert_eq!(head(&t), before, "branch unchanged");
+        assert!(t.repo().in_progress().is_none(), "rebase aborted");
+        assert_eq!(subjects(&t), ["three", "two", "one"]);
     }
 
     #[test]
@@ -412,59 +480,64 @@ mod tests {
             "First Author <first@example.com>",
         ]);
         t.commit_file("b.txt", "b\n", "second");
-        let p = plan(&t.repo(), "HEAD", "HEAD~1").unwrap();
+        t.commit_file("c.txt", "c\n", "third");
+        let p = plan_of(&t, &["HEAD~1", "HEAD~2"]).unwrap();
         assert_eq!(p.base, None);
-        squash(&t.repo(), &p, "everything").unwrap();
-        assert_eq!(subjects(&t), ["everything"]);
-        let author = t.git(["show", "-s", "--format=%an <%ae>", "HEAD"]);
+        squash(&t.repo(), &p, "first two").unwrap();
+        assert_eq!(subjects(&t), ["third", "first two"]);
+        let author = t.git(["show", "-s", "--format=%an <%ae>", "HEAD~1"]);
         assert_eq!(author.trim(), "First Author <first@example.com>");
+        // Separated, including the root.
+        let t = five();
+        let p = plan_of(&t, &["HEAD~4", "HEAD~2"]).unwrap();
+        assert_eq!(p.base, None);
+        squash(&t.repo(), &p, "a and c").unwrap();
+        assert_eq!(subjects(&t), ["e", "d", "b", "a and c"]);
     }
 
     #[test]
     fn refuses_unsafe_selections() {
         let t = five();
-        let r = |a: &str, b: &str| plan(&t.repo(), a, b).unwrap_err().to_string();
-        assert!(r("HEAD", "HEAD").contains("at least two"));
-        // A merge in the range.
+        let r = |revs: &[&str]| plan_of(&t, revs).unwrap_err().to_string();
+        assert!(r(&["HEAD", "HEAD"]).contains("at least two"));
+        // A merge among the selection, and merges after it.
         t.git(["checkout", "-qb", "side", "HEAD~1"]);
         t.commit_file("side.txt", "s\n", "side");
         t.git(["checkout", "-q", "main"]);
         t.git(["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
         t.commit_file("f.txt", "f\n", "f");
+        assert!(r(&["HEAD", "HEAD~1"]).contains("merge"));
+        assert!(r(&["HEAD~4", "HEAD~3"]).contains("merge"));
+        // A commit that only reached the branch through the merge.
         assert!(
-            r("HEAD", "HEAD~3").contains("merge"),
+            r(&["side", "HEAD~2"]).contains("own line"),
             "{}",
-            r("HEAD", "HEAD~3")
+            r(&["side", "HEAD~2"])
         );
-        // Merges after the selection.
-        assert!(r("HEAD~4", "HEAD~3").contains("merge"));
-        // Two lines of history (side branched off before e).
-        assert!(
-            r("side", "HEAD~2").contains("different lines"),
-            "{}",
-            r("side", "HEAD~2")
-        );
-        // A branch merged in: the merge sits after the selection.
-        assert!(r("side", "HEAD~4").contains("merge"));
         // Not on the current branch at all.
         t.git(["checkout", "-qb", "other", "HEAD~2"]);
         t.commit_file("o.txt", "o\n", "o1");
         t.commit_file("o.txt", "o2\n", "o2");
         t.git(["checkout", "-q", "main"]);
-        assert!(r("other", "other~1").contains("current branch"));
+        assert!(r(&["other", "other~1"]).contains("another branch"));
         // Detached HEAD.
         t.git(["checkout", "-q", "--detach", "HEAD"]);
-        assert!(r("HEAD", "HEAD~1").contains("detached"));
+        assert!(r(&["HEAD", "HEAD~1"]).contains("detached"));
     }
 
     #[test]
     fn refuses_to_replay_over_local_changes_and_after_head_moves() {
         let t = five();
         t.write("a.txt", "local edit\n");
-        let e = plan(&t.repo(), "HEAD~3", "HEAD~2").unwrap_err().to_string();
+        let e = plan_of(&t, &["HEAD~3", "HEAD~2"]).unwrap_err().to_string();
         assert!(e.contains("Commit or stash"), "{e}");
+        let e = plan_of(&t, &["HEAD", "HEAD~2"]).unwrap_err().to_string();
+        assert!(
+            e.contains("Commit or stash"),
+            "separated needs a rebase: {e}"
+        );
         // At HEAD local changes are fine.
-        let p = plan(&t.repo(), "HEAD", "HEAD~1").unwrap();
+        let p = plan_of(&t, &["HEAD", "HEAD~1"]).unwrap();
         t.git(["checkout", "-q", "--", "a.txt"]);
         t.commit_file("g.txt", "g\n", "g");
         let e = squash(&t.repo(), &p, "x").unwrap_err().to_string();
@@ -473,34 +546,18 @@ mod tests {
     }
 
     #[test]
-    fn reports_published_commits() {
+    fn reports_published_commits_and_other_refs() {
         let t = five();
         t.add_bare_origin();
         t.git(["push", "-q", "-u", "origin", "HEAD"]);
         t.commit_file("f.txt", "f\n", "f");
-        let p = plan(&t.repo(), "HEAD", "HEAD~1").unwrap();
+        let p = plan_of(&t, &["HEAD", "HEAD~1"]).unwrap();
         assert_eq!(p.published, ["origin/main"]);
         t.git(["branch", "keep", "HEAD~2"]);
         t.git(["tag", "v1", "HEAD~1"]);
-        let p = plan(&t.repo(), "HEAD~1", "HEAD~2").unwrap();
+        let p = plan_of(&t, &["HEAD~1", "HEAD~2"]).unwrap();
         assert_eq!(p.other_refs, ["keep", "v1"]);
-        let p = plan(&t.repo(), "HEAD", "HEAD").map(|_| ()).unwrap_err();
-        assert!(matches!(p, GitError::Refused(_)));
-    }
-
-    #[test]
-    fn first_parent_run_follows_one_line() {
-        let c = |p: &[&str]| p.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let (pd, pc, pb) = (c(&["c"]), c(&["b"]), c(&["a"]));
-        let commits = vec![
-            ("d", pd.as_slice()),
-            ("c", pc.as_slice()),
-            ("b", pb.as_slice()),
-        ];
-        assert_eq!(
-            first_parent_run(commits.clone(), "d", "b").unwrap(),
-            ["d", "c", "b"]
-        );
-        assert_eq!(first_parent_run(commits, "b", "d"), None);
+        let e = plan_of(&t, &["HEAD", "HEAD"]).map(|_| ()).unwrap_err();
+        assert!(matches!(e, GitError::Refused(_)));
     }
 }

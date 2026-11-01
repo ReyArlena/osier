@@ -10,11 +10,13 @@ All notable changes to Osier are documented here. The format follows
 
 - The Log graph marks commits that are not on any remote yet: dimmed by default, or drawn
   in another colour (Settings > Git > Log, `git.log_unpushed = "dim" | "colour"`).
-- Squash commits from the Log: click the newest, shift-click the oldest (the whole run is
-  highlighted), right-click, Squash selected commits. Refused unless the commits are one
-  straight line on the checked-out branch; the result has exactly the same content, staged
-  work is untouched, later commits are replayed, and the dialog says when the commits are
-  already pushed or other branches and tags still contain them.
+- Multi-select in the Log: shift-click picks a range, ctrl-click adds or removes single
+  commits. Picks follow their commits when new ones arrive.
+- Squash commits from the Log: pick them, right-click, Squash selected commits. Neighbouring
+  commits combine with exactly the same content and staged work untouched; separated ones
+  move together first (aborted, with nothing changed, if that conflicts). Refused for
+  commits off the branch's own line or with merges in the way; the dialog says when the
+  commits are already pushed or other branches and tags still contain them.
 - Changes tab with visual staging of files, hunks and selected lines, discard to trash for
   untracked files, commit box with amend, sign-off, commit and push, and recent messages.
 - Log tab with a commit graph, branch and tag labels, reflog, compare between refs, file

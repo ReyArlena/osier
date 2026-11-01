@@ -1,5 +1,5 @@
-//! Squash in the Log: shift-click the newest and oldest commits of a run, right-click one of
-//! them, "Squash selected commits…". The checks live in `osier_git::ops::squash`; this file
+//! Squash in the Log: pick commits (shift-click a range, ctrl-click single ones), right-click
+//! one of them, "Squash selected commits…". The checks live in `osier_git::ops::squash`; this file
 //! plans off the UI thread, asks for the message in a dialog that says what will happen, and
 //! selects the new commit afterwards.
 
@@ -24,27 +24,21 @@ impl Osier {
         let Some(project) = self.active_project() else {
             return;
         };
-        let run = project.squash_run().filter(|r| r.len() >= 2);
-        let ends = run.as_ref().and_then(|r| {
-            Some((
-                project.commit_at(*r.first()?)?.hash.clone(),
-                project.commit_at(*r.last()?)?.hash.clone(),
-            ))
-        });
-        let Some((newer, older)) = ends else {
+        let picked = project.picked.clone();
+        if picked.len() < 2 {
             window.push_notification(
                 Notification::warning("Nothing to squash").message(
-                    "Click the newest commit, then shift-click the oldest one to squash a run \
-                     of commits on one line of history.",
+                    "Pick at least two commits: shift-click selects a range, ctrl-click adds \
+                     single commits.",
                 ),
                 cx,
             );
             return;
-        };
+        }
         let repo = project.repo.clone();
         cx.spawn_in(window, async move |this, cx| {
             let plan = cx
-                .background_spawn(async move { squash::plan(&repo, &newer, &older) })
+                .background_spawn(async move { squash::plan(&repo, &picked) })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match plan {
                 Ok(plan) => this.open_squash_dialog(plan, window, cx),
@@ -75,6 +69,14 @@ impl Osier {
              exactly as it is; the old commits stay in the reflog.",
             plan.branch
         )];
+        if !plan.between.is_empty() {
+            notes.push(format!(
+                "They are not next to each other: the later ones move down next to the oldest, \
+                 and the {} between them stay, after the squashed commit. If moving them \
+                 conflicts, nothing is changed.",
+                crate::format::count(plan.between.len(), "commit")
+            ));
+        }
         if plan.replay > 0 {
             notes.push(format!(
                 "{} after them will be replayed on top, unchanged.",

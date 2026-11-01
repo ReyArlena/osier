@@ -1310,6 +1310,10 @@ impl Osier {
                 if let Selection::Commit { hash } = &project.selection {
                     project.selected_commit = snapshot.commits.iter().position(|c| &c.hash == hash);
                 }
+                // Picked commits are hashes; drop the ones that are gone (squashed, reset away).
+                project
+                    .picked
+                    .retain(|h| snapshot.commits.iter().any(|c| &c.hash == h));
                 // Keep a shift-click pair on the same commits too: the rows are indices, and
                 // a new commit at the top moves every row down by one.
                 if project.compare_commit.is_some() {
@@ -1419,6 +1423,7 @@ impl Osier {
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::File { path, area };
             p.selected_commit = None;
+            p.picked.clear();
         }
         self.reload_selection(cx);
         cx.notify();
@@ -1435,6 +1440,7 @@ impl Osier {
         if let Some(p) = self.active_project_mut() {
             p.selection = Selection::WorkFile { path, rev };
             p.selected_commit = None;
+            p.picked.clear();
         }
         self.reload_selection(cx);
         cx.notify();
@@ -1456,6 +1462,7 @@ impl Osier {
                 since_merge_base,
             };
             p.selected_commit = None;
+            p.picked.clear();
         }
         self.reload_selection(cx);
         cx.notify();
@@ -1467,14 +1474,13 @@ impl Osier {
         let Some(p) = self.active_project_mut() else {
             return;
         };
-        let Some(commit) = p.commit_at(ix) else {
+        let Some(hash) = p.commit_at(ix).map(|c| c.hash.clone()) else {
             return;
         };
-        p.selection = Selection::Commit {
-            hash: commit.hash.clone(),
-        };
+        p.selection = Selection::Commit { hash: hash.clone() };
         p.selected_commit = Some(ix);
         p.compare_commit = None;
+        p.picked = vec![hash];
         self.log_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
         self.reload_selection(cx);
         cx.notify();
@@ -1506,6 +1512,84 @@ impl Osier {
             };
         }
         self.reload_selection(cx);
+        cx.notify();
+    }
+
+    /// Shift-click: pick every row from the selected commit to `ix`, and compare the two ends.
+    pub(crate) fn select_range(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(anchor) = self.active_project().and_then(|p| p.selected_commit) else {
+            self.select_commit(ix, cx);
+            return;
+        };
+        self.compare_with_selected(ix, cx);
+        if let Some(p) = self.active_project_mut()
+            && let Some(s) = &p.snapshot
+        {
+            let rows = anchor.min(ix)..=anchor.max(ix);
+            p.picked = s.commits[rows].iter().map(|c| c.hash.clone()).collect();
+        }
+        cx.notify();
+    }
+
+    /// Ctrl-click: add or remove one commit. Two picked compare like shift-click; with more,
+    /// the diff shows the clicked commit (or the last one left after removing).
+    pub(crate) fn toggle_pick(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(p) = self.active_project_mut() else {
+            return;
+        };
+        let Some(hash) = p.commit_at(ix).map(|c| c.hash.clone()) else {
+            return;
+        };
+        if p.picked.is_empty() {
+            self.select_commit(ix, cx);
+            return;
+        }
+        let mut picked = p.picked.clone();
+        if let Some(pos) = picked.iter().position(|h| *h == hash) {
+            if picked.len() == 1 {
+                return;
+            }
+            picked.remove(pos);
+        } else {
+            picked.push(hash.clone());
+        }
+        let row_of = |p: &Project, h: &str| {
+            p.snapshot
+                .as_ref()
+                .and_then(|s| s.commits.iter().position(|c| c.hash == h))
+        };
+        match picked.len() {
+            1 => {
+                if let Some(row) = row_of(p, &picked[0]) {
+                    self.select_commit(row, cx);
+                }
+            }
+            2 => {
+                let (Some(a), Some(b)) = (row_of(p, &picked[0]), row_of(p, &picked[1])) else {
+                    return;
+                };
+                p.selected_commit = Some(a);
+                self.compare_with_selected(b, cx);
+                if let Some(p) = self.active_project_mut() {
+                    p.picked = picked;
+                }
+            }
+            _ => {
+                let show = if picked.contains(&hash) {
+                    hash
+                } else {
+                    picked[picked.len() - 1].clone()
+                };
+                let row = row_of(p, &show);
+                p.picked = picked;
+                p.selected_commit = row;
+                p.compare_commit = None;
+                p.selection = Selection::Commit { hash: show };
+                self.diff_force_large = false;
+                self.editor = None;
+                self.reload_selection(cx);
+            }
+        }
         cx.notify();
     }
 
@@ -3709,9 +3793,9 @@ mod tests {
         let run = |h: &Harness, cx: &mut TestAppContext| {
             h.read(cx, |o, _| {
                 let p = o.active_project().unwrap();
-                p.squash_run()
-                    .unwrap_or_default()
-                    .into_iter()
+                let mut rows: Vec<usize> = p.picked_rows().into_iter().collect();
+                rows.sort_unstable();
+                rows.into_iter()
                     .map(|ix| p.commit_at(ix).unwrap().subject.clone())
                     .collect::<Vec<_>>()
             })
@@ -3741,10 +3825,7 @@ mod tests {
         h.click(cx, "log-row:0");
         h.click_with(cx, "log-row:2", gpui::Modifiers::shift());
         h.read(cx, |o, _| {
-            assert_eq!(
-                o.active_project().unwrap().squash_run(),
-                Some(vec![0, 1, 2])
-            )
+            assert_eq!(o.active_project().unwrap().picked.len(), 3)
         });
         h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
         assert!(h.has_settings(cx), "squash dialog open");
@@ -3777,15 +3858,57 @@ mod tests {
         repo.commit_file("b.txt", "x\n", "b");
         let h = Harness::open(cx, &repo);
         h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
-        // b and side: rows 0 and 1, not one line of history.
-        h.act(cx, |o, _, cx| o.select_commit(0, cx));
-        h.act(cx, |o, _, cx| o.compare_with_selected(1, cx));
+        // b and side: rows 0 and 1, picked with ctrl-click; side is on another branch.
+        h.click(cx, "log-row:0");
+        h.click_with(cx, "log-row:1", gpui::Modifiers::control());
         h.read(cx, |o, _| {
-            assert_eq!(o.active_project().unwrap().squash_run(), None)
+            assert_eq!(o.active_project().unwrap().picked.len(), 2)
         });
         h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
         assert!(!h.has_settings(cx), "no dialog");
         assert_eq!(log_subjects(&h, cx).len(), 3, "nothing changed");
+    }
+
+    #[gpui::test]
+    fn ui_ctrl_click_picks_separate_commits_and_squashes_them(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        for s in ["a", "b", "c", "d", "e"] {
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        // Rows: e d c b a. Pick d and b (c between), then toggle a in and out again.
+        h.click(cx, "log-row:1");
+        h.click_with(cx, "log-row:3", gpui::Modifiers::control());
+        h.click_with(cx, "log-row:4", gpui::Modifiers::control());
+        h.click_with(cx, "log-row:4", gpui::Modifiers::control());
+        h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            let mut rows: Vec<usize> = p.picked_rows().into_iter().collect();
+            rows.sort_unstable();
+            assert_eq!(rows, [1, 3], "d and b, not c between them");
+        });
+        // New commits do not move the picks.
+        repo.commit_file("f.txt", "x\n", "f");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            let mut rows: Vec<usize> = p.picked_rows().into_iter().collect();
+            rows.sort_unstable();
+            assert_eq!(rows, [2, 4]);
+        });
+        h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
+        assert!(h.has_settings(cx), "squash dialog open");
+        h.click(cx, "dialog-ok");
+        assert_eq!(log_subjects(&h, cx), ["f", "e", "c", "b", "a"]);
+        h.read(cx, |o, _| {
+            let s = o.active_project().unwrap().snapshot.as_ref().unwrap();
+            assert_eq!(
+                s.commits[3].body.trim(),
+                "d",
+                "b's subject, d's message below"
+            );
+        });
     }
 
     #[gpui::test]

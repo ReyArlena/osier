@@ -89,6 +89,9 @@ pub struct Project {
     pub selected_commit: Option<usize>,
     /// Second commit of a two-commit compare picked in the Log (shift/ctrl-click).
     pub compare_commit: Option<usize>,
+    /// Commits picked in the Log, by hash: one on click, a range on shift-click, toggled one
+    /// at a time on ctrl-click. Hashes, not rows, so new commits arriving do not move it.
+    pub picked: Vec<String>,
     pub log_page_size: usize,
     /// When set, the Log shows this file's history (`log --follow`).
     pub log_path: Option<String>,
@@ -146,6 +149,7 @@ impl Project {
             selection: Selection::None,
             selected_commit: None,
             compare_commit: None,
+            picked: Vec::new(),
             log_page_size,
             log_path: None,
             task: Task::ready(()),
@@ -191,26 +195,25 @@ impl Project {
         self.snapshot.as_ref()?.commits.get(ix)
     }
 
-    /// Rows of the shift-click range when it is one first-parent line of history (what a
-    /// squash would combine), newest first. `None` without a two-commit selection, or when
-    /// the two commits are not on one straight line (the log interleaves branches, so the
-    /// rows between them are not necessarily that line).
-    pub fn squash_run(&self) -> Option<Vec<usize>> {
-        let (a, b) = (self.selected_commit?, self.compare_commit?);
-        if a == b {
-            return None;
+    /// Log rows of the picked commits, for highlighting. Falls back to the single selected
+    /// commit (and a compare partner) when nothing is picked.
+    pub fn picked_rows(&self) -> std::collections::HashSet<usize> {
+        let Some(snapshot) = &self.snapshot else {
+            return Default::default();
+        };
+        if self.picked.is_empty() {
+            return self
+                .selected_commit
+                .into_iter()
+                .chain(self.compare_commit)
+                .collect();
         }
-        let commits = &self.snapshot.as_ref()?.commits;
-        let (newer, older) = (&commits.get(a.min(b))?.hash, &commits.get(a.max(b))?.hash);
-        let run = osier_git::ops::squash::first_parent_run(
-            commits
-                .iter()
-                .map(|c| (c.hash.as_str(), c.parents.as_slice())),
-            newer,
-            older,
-        )?;
-        run.iter()
-            .map(|h| commits.iter().position(|c| &c.hash == h))
+        snapshot
+            .commits
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| self.picked.contains(&c.hash))
+            .map(|(ix, _)| ix)
             .collect()
     }
 }

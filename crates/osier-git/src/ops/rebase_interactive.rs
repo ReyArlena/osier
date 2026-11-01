@@ -95,6 +95,17 @@ pub fn run(repo: &Repository, base: &str, items: &[TodoItem]) -> Result<()> {
     }
     let dir = tempfile::Builder::new().prefix("osier-rebase-").tempdir()?;
     let todo_text = render_todo(items, dir.path())?;
+    run_todo(repo, base, &todo_text, &dir)
+}
+
+/// Run `rebase -i <base>` with a todo list written by the caller; files it refers to live in
+/// `dir`. `base` may be `--root`.
+pub(crate) fn run_todo(
+    repo: &Repository,
+    base: &str,
+    todo_text: &str,
+    dir: &tempfile::TempDir,
+) -> Result<()> {
     let todo_path: PathBuf = dir.path().join("todo");
     std::fs::write(&todo_path, todo_text)?;
     let runner = repo

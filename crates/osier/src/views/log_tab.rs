@@ -66,10 +66,9 @@ impl Osier {
                 crate::graph::UnpushedPaint::Colour(cx.theme().warning)
             }
         };
-        let selected = project.selected_commit;
-        let compare = project.compare_commit;
-        // A shift-click range on one line of history: highlighted whole, squashable.
-        let run: Arc<Vec<usize>> = Arc::new(project.squash_run().unwrap_or_default());
+        // Picked commits (click, shift-click range, ctrl-click), highlighted and squashable.
+        let picked_rows = Arc::new(project.picked_rows());
+        let picked_count = project.picked.len();
         // Colours behind a row, for the fade over clipped badges (see `fade.rs`).
         let row_bg = cx.theme().background;
         let row_hover = row_bg.blend(cx.theme().list_hover);
@@ -175,10 +174,8 @@ impl Osier {
                                 let hash = commit.hash.clone();
                                 let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                 let menu_owner = owner.clone();
-                                let in_run = run.contains(&ix);
-                                let run_len = run.len();
-                                let is_selected =
-                                    selected == Some(ix) || compare == Some(ix) || in_run;
+                                let in_pick = picked_rows.contains(&ix);
+                                let is_selected = in_pick;
                                 let (fade_base, fade_hover) = if is_selected {
                                     (row_selected, row_selected)
                                 } else {
@@ -310,7 +307,7 @@ impl Osier {
                                                 t.open_interactive_rebase(h, w, cx)
                                             }),
                                         ));
-                                    if in_run && run_len >= 2 {
+                                    if in_pick && picked_count >= 2 {
                                         menu = menu.item(item(
                                             "Squash selected commits…",
                                             std::rc::Rc::new(|t, _, w, cx| t.confirm_squash(w, cx)),
@@ -348,11 +345,13 @@ impl Osier {
                                     .px_2()
                                     .w_full()
                                     .on_click(move |event, _, cx| {
-                                        // Shift or ctrl-click: compare with the selected commit.
+                                        // Shift-click picks a range, ctrl-click one more.
                                         let m = event.modifiers();
                                         let _ = owner.update(cx, |this, cx| {
-                                            if m.shift || m.control {
-                                                this.compare_with_selected(ix, cx)
+                                            if m.shift {
+                                                this.select_range(ix, cx)
+                                            } else if m.control {
+                                                this.toggle_pick(ix, cx)
                                             } else {
                                                 this.select_commit(ix, cx)
                                             }
