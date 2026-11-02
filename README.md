@@ -1,5 +1,12 @@
 # Osier
 
+[![CI](https://github.com/ReyArlena/osier/actions/workflows/ci.yml/badge.svg)](https://github.com/ReyArlena/osier/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ReyArlena/osier?include_prereleases&sort=semver)](https://github.com/ReyArlena/osier/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational)](#install)
+[![Rust 2024](https://img.shields.io/badge/rust-2024_edition-orange?logo=rust)](https://www.rust-lang.org/)
+[![Website](https://img.shields.io/badge/website-reyarlena.github.io%2Fosier-peach)](https://reyarlena.github.io/osier/)
+
 A fast, native git GUI for Linux. Built in Rust on [gpui](https://www.gpui.rs/) through
 [gpui-kit](https://github.com/longbridge/gpui-kit), with the git workflow of a JetBrains IDE and
 none of the IDE.
