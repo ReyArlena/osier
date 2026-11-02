@@ -108,18 +108,23 @@ impl Osier {
             };
             status.insert(e.path.clone(), c);
         }
-        let mut dirty_dirs: std::collections::BTreeSet<String> = Default::default();
+        // Changed entries inside each folder, at any depth (an untracked folder counts once).
+        let mut dirty_dirs: BTreeMap<String, usize> = BTreeMap::new();
         for p in status.keys() {
             let mut acc = String::new();
-            let parts: Vec<&str> = p.split('/').collect();
+            let parts: Vec<&str> = p.trim_end_matches('/').split('/').collect();
             for part in &parts[..parts.len().saturating_sub(1)] {
                 if !acc.is_empty() {
                     acc.push('/');
                 }
                 acc.push_str(part);
-                dirty_dirs.insert(acc.clone());
+                *dirty_dirs.entry(acc.clone()).or_default() += 1;
             }
         }
+        // Folders are marked like sidebar projects (Settings > Appearance > Sidebar).
+        let changes_dot = self.settings.appearance.changes_indicator
+            == osier_config::settings::ChangesIndicator::Dot;
+        let changes_color = cx.theme().warning;
         // Tracked files and the folders holding them, for "Untrack" in the context menu.
         // `files` lists tracked plus untracked; status names the untracked (whole untracked
         // folders end in `/`).
@@ -246,12 +251,17 @@ impl Osier {
                         let weak = weak.clone();
                         let status = status.clone();
                         let dirty_dirs = dirty_dirs.clone();
-                        move |ix, entry, _selected, _window, _cx| {
+                        move |ix, entry, _selected, _window, cx| {
                             let item = entry.item();
                             let id = item.id.to_string();
                             let is_folder = entry.is_folder();
+                            let changed_inside = if is_folder {
+                                dirty_dirs.get(&id).copied()
+                            } else {
+                                None
+                            };
                             let badge = if is_folder {
-                                dirty_dirs.contains(&id).then_some('•')
+                                None
                             } else {
                                 status.get(&id).copied()
                             };
@@ -275,7 +285,24 @@ impl Osier {
                                         .gap_2()
                                         .items_center()
                                         .min_w_0()
-                                        .child(Icon::new(icon).xsmall())
+                                        .child(match changed_inside {
+                                            // Icon style: the folder icon itself is tinted.
+                                            Some(n) if !changes_dot => super::hint(
+                                                SharedString::from(format!("dirty-icon:{id}")),
+                                                format!(
+                                                    "{} inside",
+                                                    crate::format::count(n, "changed file")
+                                                ),
+                                                "files-change-tooltip",
+                                                cx,
+                                            )
+                                            .test_id(format!("files-dirty:{id}"))
+                                            .child(
+                                                Icon::new(icon).xsmall().text_color(changes_color),
+                                            )
+                                            .into_any_element(),
+                                            _ => Icon::new(icon).xsmall().into_any_element(),
+                                        })
                                         .child(
                                             div()
                                                 .text_sm()
@@ -283,6 +310,31 @@ impl Osier {
                                                 .min_w_0()
                                                 .flex_1()
                                                 .child(item.label.clone()),
+                                        )
+                                        // Dot style: a dot in the sidebar's colour.
+                                        .when_some(
+                                            changed_inside.filter(|_| changes_dot),
+                                            |this, n| {
+                                                this.child(
+                                                    super::hint(
+                                                        SharedString::from(format!(
+                                                            "dirty-dot:{id}"
+                                                        )),
+                                                        format!(
+                                                            "{} inside",
+                                                            crate::format::count(n, "changed file")
+                                                        ),
+                                                        "files-change-tooltip",
+                                                        cx,
+                                                    )
+                                                    .test_id(format!("files-dirty:{id}"))
+                                                    .flex_none()
+                                                    .mx_1()
+                                                    .size(px(6.))
+                                                    .rounded_full()
+                                                    .bg(changes_color),
+                                                )
+                                            },
                                         )
                                         .when_some(badge, |this, b| {
                                             let tag = match b {
@@ -292,12 +344,31 @@ impl Osier {
                                                 }
                                                 'D' => Tag::danger().xsmall().child("D"),
                                                 'U' => Tag::danger().xsmall().child("U"),
-                                                '•' => Tag::secondary().xsmall().child("•"),
                                                 other => Tag::secondary()
                                                     .xsmall()
                                                     .child(other.to_string()),
                                             };
-                                            this.child(tag)
+                                            let meaning = match b {
+                                                'M' => "Modified",
+                                                'A' => "Added",
+                                                '?' => "Untracked (new, not added yet)",
+                                                'D' => "Deleted",
+                                                'U' => "Conflicted",
+                                                'R' => "Renamed",
+                                                'C' => "Copied",
+                                                'T' => "Type changed",
+                                                _ => "Changed",
+                                            };
+                                            this.child(
+                                                super::hint(
+                                                    SharedString::from(format!("status:{id}")),
+                                                    meaning,
+                                                    "files-status-tooltip",
+                                                    cx,
+                                                )
+                                                .flex_none()
+                                                .child(tag),
+                                            )
                                         }),
                                 )
                                 .on_click(move |_, _, cx| {

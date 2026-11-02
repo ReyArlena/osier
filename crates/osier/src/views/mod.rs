@@ -34,16 +34,27 @@ pub(crate) fn time_label(
     unix: i64,
     cx: &App,
 ) -> Stateful<Div> {
-    let full = SharedString::from(crate::format::full_time(unix));
+    hint(id, crate::format::full_time(unix), "time-tooltip", cx).child(text.into())
+}
+
+/// An element with a tooltip after the configured delay (`appearance.tooltip_delay_ms`;
+/// gpui's own element tooltips would use a fixed 500 ms). `test_id` marks the tooltip's
+/// content for UI tests.
+pub(crate) fn hint(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    test_id: &'static str,
+    cx: &App,
+) -> Stateful<Div> {
+    let text = text.into();
     let delay = gpui_kit::base::TooltipDefaults::global(cx).show_delay();
     div()
         .id(id)
-        .child(text.into())
         .tooltip_show_delay(delay)
         .tooltip(move |window, cx| {
-            let full = full.clone();
+            let text = text.clone();
             gpui_kit::component::tooltip::Tooltip::element(move |_, _| {
-                div().test_id("time-tooltip").child(full.clone())
+                div().test_id(test_id).child(text.clone())
             })
             .build(window, cx)
         })

@@ -4337,6 +4337,78 @@ mod tests {
         h.read(cx, |o, _| assert_eq!(o.diff_files, 1, "the stashed file"));
     }
 
+    /// Hover the element with test id `id` until its tooltip shows; the tooltip's text.
+    fn hover_text(h: &Harness, cx: &mut TestAppContext, id: &str, tooltip: &'static str) -> bool {
+        let at = h
+            .bounds(cx, id)
+            .unwrap_or_else(|| panic!("no {id}"))
+            .center();
+        h.visual(cx)
+            .simulate_mouse_move(at, None, gpui::Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+        h.bounds(cx, tooltip).is_some()
+    }
+
+    #[gpui::test]
+    fn ui_files_folder_marker_follows_the_sidebar_style_and_explains_itself(
+        cx: &mut TestAppContext,
+    ) {
+        use osier_config::settings::ChangesIndicator;
+        let repo = TempRepo::new();
+        repo.commit_file("dir/sub/a.txt", "a\n", "first");
+        repo.commit_file("other/c.txt", "c\n", "second");
+        repo.write("dir/sub/a.txt", "changed\n");
+        repo.write("dir/b.txt", "new\n");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-files");
+        // Icon style (the default): the folder icon carries the marker.
+        assert!(h.bounds(cx, "files-dirty:dir").is_some());
+        assert!(
+            h.bounds(cx, "files-dirty:other").is_none(),
+            "clean folder unmarked"
+        );
+        assert!(hover_text(
+            &h,
+            cx,
+            "files-dirty:dir",
+            "files-change-tooltip"
+        ));
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.settings.appearance.changes_indicator,
+                ChangesIndicator::Icon
+            )
+        });
+        // Dot style: a dot in the sidebar's colour, same tooltip.
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.changes_indicator = ChangesIndicator::Dot;
+            cx.notify();
+        });
+        h.visual(cx).simulate_mouse_move(
+            gpui::point(gpui::px(1.), gpui::px(1.)),
+            None,
+            gpui::Modifiers::none(),
+        );
+        cx.run_until_parked();
+        assert!(hover_text(
+            &h,
+            cx,
+            "files-dirty:dir",
+            "files-change-tooltip"
+        ));
+        let count = h.read(cx, |o, _| {
+            let s = o.active_project().unwrap().snapshot.as_ref().unwrap();
+            s.status
+                .entries
+                .iter()
+                .filter(|e| e.path.starts_with("dir/"))
+                .count()
+        });
+        assert_eq!(count, 2, "two changed files inside dir");
+    }
+
     #[gpui::test]
     fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
         let repo = TempRepo::new();

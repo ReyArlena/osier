@@ -107,6 +107,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Files tab folders with changes are marked like sidebar projects (tinted icon or dot, in the same colour, per Settings > Appearance > Sidebar) instead of a grey tag; hovering the marker says how many changed files are inside, and status letters say what they mean.
 - Paths under the home folder show as `~/...` however the home is spelled (symlinked homes such as `/var/home`, `$HOME` with a trailing slash or unset), and `/home/reynolds` is no longer shortened as if it were under `/home/rey`.
 - The diff now refreshes when the file it shows is edited again while already modified, and no longer reloads (losing its scroll) when an unrelated file changes.
 - A shift-click pair in the Log stays on the same commits when new commits arrive.
