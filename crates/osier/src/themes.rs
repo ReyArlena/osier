@@ -284,8 +284,40 @@ pub fn apply(name: &str, appearance: &Appearance, cx: &mut App) -> bool {
             theme.font_size = px(size);
             theme.mono_font_size = px(size);
         }
+        if appearance.high_contrast {
+            high_contrast(theme);
+        }
     });
     true
+}
+
+/// Rebuild the faint selection and hover colours from the primary colour, mixed in more
+/// strongly. Opaque mixes, so nothing shows through.
+fn high_contrast(theme: &mut Theme) {
+    let primary = theme.primary;
+    let bg = theme.background;
+    let mix = |base: gpui_kit::Hsla, amount: f32| base.blend(primary.opacity(amount));
+    // Widgets draw from `tokens`; `Theme::update` reconciles the two copies by comparing
+    // with the state before the edit, which is already high-contrast on a re-apply. Set
+    // both so neither side wins with the theme file's value.
+    macro_rules! set {
+        ($($field:ident = $value:expr;)+) => {$(
+            let value = $value;
+            theme.$field = value;
+            theme.tokens.$field = value.into();
+        )+};
+    }
+    let sidebar = theme.sidebar;
+    set! {
+        list_active = mix(bg, 0.55);
+        list_active_border = primary;
+        list_hover = mix(bg, 0.24);
+        table_active = mix(bg, 0.55);
+        table_hover = mix(bg, 0.24);
+        accent = mix(bg, 0.42);
+        sidebar_accent = mix(sidebar, 0.58);
+        sidebar_border = mix(sidebar, 0.35);
+    }
 }
 
 #[cfg(test)]

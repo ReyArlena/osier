@@ -451,6 +451,18 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 })
                 .disabled(!dux_available),
                 SettingItem::new(
+                    "Higher contrast",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.high_contrast),
+                        set(view, |o, v: bool, _| o.settings.appearance.high_contrast = v),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "Selections, hovers and the sidebar highlight in a stronger tint of the \
+                     theme's main colour, like the switches.",
+                ),
+                SettingItem::new(
                     "Mode",
                     SettingField::dropdown(
                         vec![

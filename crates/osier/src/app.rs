@@ -4410,6 +4410,41 @@ mod tests {
     }
 
     #[gpui::test]
+    fn higher_contrast_strengthens_selections_and_switches_back_cleanly(cx: &mut TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        // The colours widgets actually draw with (`tokens`), not only the plain fields.
+        let colors = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |_, cx| {
+                let t = cx.theme();
+                (
+                    t.tokens.list_active.color,
+                    t.tokens.sidebar_accent.color,
+                    t.tokens.list_hover.color,
+                )
+            })
+        };
+        let normal = colors(&h, cx);
+        // Applied twice, as startup does: the second must not undo the first.
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.high_contrast = true;
+            o.apply_appearance(cx);
+            o.apply_appearance(cx);
+        });
+        let strong = colors(&h, cx);
+        assert_ne!(strong.0, normal.0);
+        assert_ne!(strong.1, normal.1);
+        assert_eq!((strong.0.a, strong.1.a, strong.2.a), (1., 1., 1.), "opaque");
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.high_contrast = false;
+            o.apply_appearance(cx);
+        });
+        assert_eq!(colors(&h, cx), normal, "off is the theme as it was");
+    }
+
+    #[gpui::test]
     fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "first");

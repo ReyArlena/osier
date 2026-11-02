@@ -120,6 +120,7 @@ re-read when it changes. Every key is optional.
 
 ```toml
 [appearance]
+high_contrast = false         # stronger selection and hover colours
 mode = "system"               # dark | light | system (the default follows the desktop)
 system_fallback = "dark"      # system mode when the desktop states no preference
 dark_theme = "Catppuccin Mocha"

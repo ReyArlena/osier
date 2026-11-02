@@ -63,6 +63,9 @@ pub struct Appearance {
     pub row_menu_buttons: bool,
     /// How long the pointer rests on something before its tooltip shows, in milliseconds.
     pub tooltip_delay_ms: u32,
+    /// Selections, hovers and the sidebar highlight in a stronger tint of the theme's
+    /// primary colour (like the switches), for more contrast. Off: the theme as designed.
+    pub high_contrast: bool,
 }
 
 /// What System mode shows when the desktop has no light/dark preference.
@@ -97,6 +100,7 @@ impl Default for Appearance {
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
             tooltip_delay_ms: 0,
+            high_contrast: false,
         }
     }
 }
