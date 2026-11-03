@@ -122,6 +122,23 @@ impl Osier {
                     })
                     .child(div().flex_1())
                     .child(
+                        Button::new("toggle-commit-details")
+                            .test_id("toggle-commit-details")
+                            .ghost()
+                            .xsmall()
+                            .icon(if self.commit_details_visible() {
+                                Lucide::PanelBottomClose
+                            } else {
+                                Lucide::PanelBottomOpen
+                            })
+                            .selected(self.commit_details_visible())
+                            .tooltip(match crate::keymap::hint("toggle_commit_details", cx) {
+                                Some(k) => format!("Commit details ({k})"),
+                                None => "Commit details".to_string(),
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_commit_details(cx))),
+                    )
+                    .child(
                         Button::new("toggle-reflog")
                             .test_id("toggle-reflog")
                             .ghost()
@@ -145,286 +162,351 @@ impl Osier {
                     ),
             )
             .child(
-                div().id("log-list").flex_1().min_h_0().child(
-                    uniform_list("commits", count, move |range, _, cx| {
-                        range
-                            .map(|ix| {
-                                let commit = &commits[ix];
-                                let row = graph[ix].clone();
-                                let incoming: Vec<Edge> = if ix > 0 {
-                                    graph[ix - 1].edges.clone()
-                                } else {
-                                    Vec::new()
-                                };
-                                let marks = crate::graph::UnpushedMarks {
-                                    paint: unpushed_paint,
-                                    this: unpushed.contains(&commit.hash),
-                                    prev: ix
-                                        .checked_sub(1)
-                                        .filter(|p| unpushed.contains(&commits[*p].hash))
-                                        .map(|p| graph[p].lane),
-                                };
-                                let owner = owner.clone();
-                                let subject = if commit.subject.is_empty() {
-                                    "(no subject)".to_string()
-                                } else {
-                                    commit.subject.clone()
-                                };
-                                let refs: Vec<String> = commit.refs.clone();
-                                let hash = commit.hash.clone();
-                                let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
-                                let menu_owner = owner.clone();
-                                let in_pick = picked_rows.contains(&ix);
-                                let is_selected = in_pick;
-                                let (fade_base, fade_hover) = if is_selected {
-                                    (row_selected, row_selected)
-                                } else {
-                                    (row_bg, row_hover)
-                                };
-                                let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
-                                    let h = hash.clone();
-                                    let o = menu_owner.clone();
-                                    let item = |label: &str, f: CommitHandler| {
-                                        let h = h.clone();
-                                        let o = o.clone();
-                                        match log_menu_kind(label) {
-                                            Some(kind) => crate::row_actions::menu_item(
-                                                label.to_string(),
-                                                kind,
-                                            ),
-                                            None => PopupMenuItem::new(label.to_string()),
-                                        }
-                                        .on_click(
-                                            move |_, window, cx| {
-                                                let h = h.clone();
-                                                let f = f.clone();
-                                                let _ =
-                                                    o.update(cx, |this, cx| f(this, h, window, cx));
-                                            },
-                                        )
+                self.with_commit_details(
+                    div().id("log-list").size_full().child(
+                        uniform_list("commits", count, move |range, _, cx| {
+                            range
+                                .map(|ix| {
+                                    let commit = &commits[ix];
+                                    let row = graph[ix].clone();
+                                    let incoming: Vec<Edge> = if ix > 0 {
+                                        graph[ix - 1].edges.clone()
+                                    } else {
+                                        Vec::new()
                                     };
-                                    let mut menu = menu
-                                        .item(item(
-                                            "Checkout (detached)",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.checkout_commit(h, w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "New branch here…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.prompt_new_branch(Some(h), w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Tag here…",
-                                            std::rc::Rc::new(|t, h, w, cx| t.prompt_tag(h, w, cx)),
-                                        ))
-                                        .item(item(
-                                            "Copy as patch",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.copy_patch(
-                                                    PatchSource::Commits { hashes: vec![h] },
-                                                    w,
-                                                    cx,
-                                                )
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Save to Patches…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                let name = t
-                                                    .commit_subject(&h)
-                                                    .unwrap_or_else(|| h.clone());
-                                                t.save_patch_prompt(
-                                                    PatchSource::Commits { hashes: vec![h] },
-                                                    name,
-                                                    w,
-                                                    cx,
-                                                )
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Export patch file…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                let name =
-                                                    format!("{}.patch", &h[..h.len().min(7)]);
-                                                t.export_patch(
-                                                    PatchSource::Commits { hashes: vec![h] },
-                                                    name,
-                                                    w,
-                                                    cx,
-                                                )
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Compare with selected commit",
-                                            std::rc::Rc::new(|t, h, _, cx| {
-                                                t.compare_with_hash(h, cx)
-                                            }),
-                                        ))
-                                        .separator()
-                                        .item(item(
-                                            "Reset current branch here (soft)",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.confirm_reset(h, ResetMode::Soft, w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Reset current branch here (mixed)",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.confirm_reset(h, ResetMode::Mixed, w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Reset current branch here (hard)",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.confirm_reset(h, ResetMode::Hard, w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Revert commit…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.confirm_revert(h, w, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Cherry-pick onto current branch…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.confirm_cherry_pick(h, w, cx)
-                                            }),
-                                        ))
-                                        .separator()
-                                        .item(item(
-                                            "Compare with working tree",
-                                            std::rc::Rc::new(|t, h, _, cx| {
-                                                t.select_compare(h, "HEAD".into(), false, cx)
-                                            }),
-                                        ))
-                                        .item(item(
-                                            "Interactive rebase from here…",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.open_interactive_rebase(h, w, cx)
-                                            }),
-                                        ));
-                                    if in_pick && picked_count >= 2 {
-                                        menu = menu.item(item(
-                                            "Squash selected commits…",
-                                            std::rc::Rc::new(|t, _, w, cx| t.confirm_squash(w, cx)),
-                                        ));
-                                    }
-                                    if is_head {
-                                        menu = menu.item(item(
-                                            "Undo last commit…",
-                                            std::rc::Rc::new(|t, _, w, cx| {
-                                                t.confirm_undo_commit(w, cx)
-                                            }),
-                                        ));
-                                    }
-                                    menu.separator()
-                                        .item(item(
-                                            "Copy hash",
-                                            std::rc::Rc::new(|t, h, w, cx| {
-                                                t.copy_to_clipboard(h, w, cx)
-                                            }),
-                                        ))
-                                        .when(on_github, |menu| {
-                                            menu.item(item(
-                                                "Open on GitHub",
-                                                std::rc::Rc::new(|t, h, w, cx| {
-                                                    t.open_commit_on_github(h, w, cx)
-                                                }),
-                                            ))
-                                        })
-                                });
-                                ListItem::new(("commit", ix))
-                                    .test_id(format!("log-row:{ix}"))
-                                    .group("log-row")
-                                    .selected(is_selected)
-                                    .h(px(crate::graph::ROW_HEIGHT))
-                                    .px_2()
-                                    .w_full()
-                                    .on_click(move |event, _, cx| {
-                                        // Shift-click picks a range, ctrl-click one more.
-                                        let m = event.modifiers();
-                                        let _ = owner.update(cx, |this, cx| {
-                                            if m.shift {
-                                                this.select_range(ix, cx)
-                                            } else if m.control {
-                                                this.toggle_pick(ix, cx)
-                                            } else {
-                                                this.select_commit(ix, cx)
+                                    let marks = crate::graph::UnpushedMarks {
+                                        paint: unpushed_paint,
+                                        this: unpushed.contains(&commit.hash),
+                                        prev: ix
+                                            .checked_sub(1)
+                                            .filter(|p| unpushed.contains(&commits[*p].hash))
+                                            .map(|p| graph[p].lane),
+                                    };
+                                    let owner = owner.clone();
+                                    let subject = if commit.subject.is_empty() {
+                                        "(no subject)".to_string()
+                                    } else {
+                                        commit.subject.clone()
+                                    };
+                                    let refs: Vec<String> = commit.refs.clone();
+                                    let hash = commit.hash.clone();
+                                    let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
+                                    let menu_owner = owner.clone();
+                                    let in_pick = picked_rows.contains(&ix);
+                                    let is_selected = in_pick;
+                                    let (fade_base, fade_hover) = if is_selected {
+                                        (row_selected, row_selected)
+                                    } else {
+                                        (row_bg, row_hover)
+                                    };
+                                    let row_menu =
+                                        crate::row_menu::RowMenu::new(move |menu, _, _| {
+                                            let h = hash.clone();
+                                            let o = menu_owner.clone();
+                                            let item = |label: &str, f: CommitHandler| {
+                                                let h = h.clone();
+                                                let o = o.clone();
+                                                match log_menu_kind(label) {
+                                                    Some(kind) => crate::row_actions::menu_item(
+                                                        label.to_string(),
+                                                        kind,
+                                                    ),
+                                                    None => PopupMenuItem::new(label.to_string()),
+                                                }
+                                                .on_click(move |_, window, cx| {
+                                                    let h = h.clone();
+                                                    let f = f.clone();
+                                                    let _ = o.update(cx, |this, cx| {
+                                                        f(this, h, window, cx)
+                                                    });
+                                                })
+                                            };
+                                            let mut menu = menu
+                                                .item(item(
+                                                    "Checkout (detached)",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.checkout_commit(h, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "New branch here…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.prompt_new_branch(Some(h), w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Tag here…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.prompt_tag(h, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Copy as patch",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.copy_patch(
+                                                            PatchSource::Commits {
+                                                                hashes: vec![h],
+                                                            },
+                                                            w,
+                                                            cx,
+                                                        )
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Save to Patches…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        let name = t
+                                                            .commit_subject(&h)
+                                                            .unwrap_or_else(|| h.clone());
+                                                        t.save_patch_prompt(
+                                                            PatchSource::Commits {
+                                                                hashes: vec![h],
+                                                            },
+                                                            name,
+                                                            w,
+                                                            cx,
+                                                        )
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Export patch file…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        let name = format!(
+                                                            "{}.patch",
+                                                            &h[..h.len().min(7)]
+                                                        );
+                                                        t.export_patch(
+                                                            PatchSource::Commits {
+                                                                hashes: vec![h],
+                                                            },
+                                                            name,
+                                                            w,
+                                                            cx,
+                                                        )
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Compare with selected commit",
+                                                    std::rc::Rc::new(|t, h, _, cx| {
+                                                        t.compare_with_hash(h, cx)
+                                                    }),
+                                                ))
+                                                .separator()
+                                                .item(item(
+                                                    "Reset current branch here (soft)",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.confirm_reset(h, ResetMode::Soft, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Reset current branch here (mixed)",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.confirm_reset(h, ResetMode::Mixed, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Reset current branch here (hard)",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.confirm_reset(h, ResetMode::Hard, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Revert commit…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.confirm_revert(h, w, cx)
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Cherry-pick onto current branch…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.confirm_cherry_pick(h, w, cx)
+                                                    }),
+                                                ))
+                                                .separator()
+                                                .item(item(
+                                                    "Compare with working tree",
+                                                    std::rc::Rc::new(|t, h, _, cx| {
+                                                        t.select_compare(
+                                                            h,
+                                                            "HEAD".into(),
+                                                            false,
+                                                            cx,
+                                                        )
+                                                    }),
+                                                ))
+                                                .item(item(
+                                                    "Interactive rebase from here…",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.open_interactive_rebase(h, w, cx)
+                                                    }),
+                                                ));
+                                            if in_pick && picked_count >= 2 {
+                                                menu = menu.item(item(
+                                                    "Squash selected commits…",
+                                                    std::rc::Rc::new(|t, _, w, cx| {
+                                                        t.confirm_squash(w, cx)
+                                                    }),
+                                                ));
                                             }
+                                            if is_head {
+                                                menu = menu.item(item(
+                                                    "Undo last commit…",
+                                                    std::rc::Rc::new(|t, _, w, cx| {
+                                                        t.confirm_undo_commit(w, cx)
+                                                    }),
+                                                ));
+                                            }
+                                            menu.separator()
+                                                .item(item(
+                                                    "Copy hash",
+                                                    std::rc::Rc::new(|t, h, w, cx| {
+                                                        t.copy_to_clipboard(h, w, cx)
+                                                    }),
+                                                ))
+                                                .when(on_github, |menu| {
+                                                    menu.item(item(
+                                                        "Open on GitHub",
+                                                        std::rc::Rc::new(|t, h, w, cx| {
+                                                            t.open_commit_on_github(h, w, cx)
+                                                        }),
+                                                    ))
+                                                })
                                         });
-                                    })
-                                    .child(
-                                        h_flex()
-                                            .size_full()
-                                            .gap_2()
-                                            .items_center()
-                                            .child(graph_cell(
-                                                row,
-                                                incoming,
-                                                max_lanes,
-                                                colors,
-                                                commit.is_merge(),
-                                                marks,
-                                            ))
-                                            .child(subject_with_refs(
-                                                ix,
-                                                subject,
-                                                refs,
-                                                badges_right,
-                                                (fade_base, fade_hover),
-                                                cx,
-                                            ))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(muted)
-                                                    .flex_none()
-                                                    .max_w(px(110.))
-                                                    .truncate()
-                                                    .child(commit.author_name.clone()),
-                                            )
-                                            .child(
-                                                super::relative_time_label(
-                                                    ("commit-time", ix),
-                                                    commit.committed_at,
+                                    ListItem::new(("commit", ix))
+                                        .test_id(format!("log-row:{ix}"))
+                                        .group("log-row")
+                                        .selected(is_selected)
+                                        .h(px(crate::graph::ROW_HEIGHT))
+                                        .px_2()
+                                        .w_full()
+                                        .on_click(move |event, _, cx| {
+                                            // Shift-click picks a range, ctrl-click one more.
+                                            let m = event.modifiers();
+                                            let _ = owner.update(cx, |this, cx| {
+                                                if m.shift {
+                                                    this.select_range(ix, cx)
+                                                } else if m.control {
+                                                    this.toggle_pick(ix, cx)
+                                                } else {
+                                                    this.select_commit(ix, cx)
+                                                }
+                                            });
+                                        })
+                                        .child(
+                                            h_flex()
+                                                .size_full()
+                                                .gap_2()
+                                                .items_center()
+                                                .child(graph_cell(
+                                                    row,
+                                                    incoming,
+                                                    max_lanes,
+                                                    colors,
+                                                    commit.is_merge(),
+                                                    marks,
+                                                ))
+                                                .child(subject_with_refs(
+                                                    ix,
+                                                    subject,
+                                                    refs,
+                                                    badges_right,
+                                                    (fade_base, fade_hover),
                                                     cx,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(muted)
+                                                        .flex_none()
+                                                        .max_w(px(110.))
+                                                        .truncate()
+                                                        .child(commit.author_name.clone()),
                                                 )
-                                                .test_id(format!("commit-time:{ix}"))
-                                                .text_xs()
-                                                .text_color(muted)
-                                                .flex_none()
-                                                .w(px(78.))
-                                                .text_right(),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(mono.clone())
+                                                .child(
+                                                    super::relative_time_label(
+                                                        ("commit-time", ix),
+                                                        commit.committed_at,
+                                                        cx,
+                                                    )
+                                                    .test_id(format!("commit-time:{ix}"))
                                                     .text_xs()
                                                     .text_color(muted)
                                                     .flex_none()
-                                                    .child(commit.short_hash().to_string()),
-                                            )
-                                            .child(
-                                                Button::new(("commit-menu", ix))
-                                                    .when(!menu_buttons, |b| b.hidden())
-                                                    .ghost()
-                                                    .xsmall()
-                                                    .icon(Lucide::Ellipsis)
-                                                    .dropdown_menu(row_menu.build()),
-                                            ),
-                                    )
-                                    .context_menu(row_menu.build())
-                                    .into_any_element()
-                            })
-                            .collect()
-                    })
-                    .track_scroll(&self.log_scroll)
-                    .size_full(),
+                                                    .w(px(78.))
+                                                    .text_right(),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .font_family(mono.clone())
+                                                        .text_xs()
+                                                        .text_color(muted)
+                                                        .flex_none()
+                                                        .child(commit.short_hash().to_string()),
+                                                )
+                                                .child(
+                                                    Button::new(("commit-menu", ix))
+                                                        .when(!menu_buttons, |b| b.hidden())
+                                                        .ghost()
+                                                        .xsmall()
+                                                        .icon(Lucide::Ellipsis)
+                                                        .dropdown_menu(row_menu.build()),
+                                                ),
+                                        )
+                                        .context_menu(row_menu.build())
+                                        .into_any_element()
+                                })
+                                .collect()
+                        })
+                        .track_scroll(&self.log_scroll)
+                        .size_full(),
+                    ),
+                    cx,
                 ),
+            )
+            .into_any_element()
+    }
+
+    /// The log list, with the commit details panel under it when shown: a vertical split
+    /// whose details height is remembered.
+    fn with_commit_details(&self, list: impl IntoElement, cx: &mut Context<Self>) -> AnyElement {
+        if !self.commit_details_visible() {
+            return div().flex_1().min_h_0().child(list).into_any_element();
+        }
+        let height = self.state.layout.log_details_height.unwrap_or(220.);
+        div()
+            .flex_1()
+            .min_h_0()
+            .child(
+                gpui_kit::component::resizable::v_resizable("log-split")
+                    .on_resize(cx.listener(
+                        |this,
+                         state: &Entity<gpui_kit::component::resizable::ResizableState>,
+                         _,
+                         cx| {
+                            if let Some(h) = state.read(cx).sizes().get(1) {
+                                this.state.layout.log_details_height = Some(f32::from(*h));
+                                this.state_dirty = true;
+                            }
+                        },
+                    ))
+                    .child(
+                        gpui_kit::component::resizable::resizable_panel()
+                            .size_range(px(80.)..px(4000.))
+                            .child(list),
+                    )
+                    .child(
+                        gpui_kit::component::resizable::resizable_panel()
+                            .size(px(height))
+                            .size_range(px(90.)..px(900.))
+                            .fixed()
+                            .child(
+                                div()
+                                    .size_full()
+                                    .border_t_1()
+                                    .border_color(cx.theme().border)
+                                    .child(self.render_commit_details(cx)),
+                            ),
+                    ),
             )
             .into_any_element()
     }

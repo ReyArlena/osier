@@ -44,6 +44,9 @@ pub struct Layout {
     pub center_width: Option<f32>,
     pub command_log_visible: bool,
     pub command_log_height: Option<f32>,
+    /// The commit details panel under the Log is shown unless hidden.
+    pub log_details_hidden: bool,
+    pub log_details_height: Option<f32>,
 }
 
 const MAX_RECENT: usize = 30;

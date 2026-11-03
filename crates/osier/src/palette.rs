@@ -184,6 +184,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "General",
+            "Toggle commit details",
+            Lucide::PanelBottom,
+            Some("toggle_commit_details"),
+            true,
+            |o, _, cx| o.toggle_commit_details(cx),
+        ),
+        cmd(
+            "General",
             "Toggle dark / light",
             Lucide::SunMoon,
             Some("toggle_theme"),

@@ -30,6 +30,7 @@ gpui_kit::actions!(
         CloseProject,
         ToggleSidebar,
         ToggleCommandLog,
+        ToggleCommitDetails,
         ToggleTheme,
         OpenSettings,
         OpenCommandPalette,
@@ -133,6 +134,10 @@ pub struct Osier {
     pub(crate) command_log_visible: bool,
     pub(crate) expanded_command: Option<u64>,
     pub(crate) diff: Entity<DiffState>,
+    /// Branches containing a commit, for the commit details panel, by hash. Cleared when
+    /// the refs move.
+    pub(crate) commit_branches: std::collections::HashMap<String, Vec<String>>,
+    pub(crate) commit_branches_loading: Option<String>,
     /// `Project::content_key` of what `diff` was loaded for.
     diff_key: Option<String>,
     /// Redraws on conflict choices and line selection in `diff`; swapped with it per tab.
@@ -169,7 +174,7 @@ pub struct Osier {
     pub(crate) amend: bool,
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
-    state_dirty: bool,
+    pub(crate) state_dirty: bool,
     /// Running fetch/pull/push, if any.
     pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
@@ -383,6 +388,8 @@ impl Osier {
             diff,
             diff_subscription: None,
             diff_key: None,
+            commit_branches: Default::default(),
+            commit_branches_loading: None,
             diff_files: 0,
             diff_model: std::rc::Rc::new(Vec::new()),
             diff_loading: false,
@@ -1317,6 +1324,9 @@ impl Osier {
                 });
                 if refs_changed {
                     project.content_rev += 1;
+                    if is_active {
+                        self.commit_branches.clear();
+                    }
                 }
                 // Keep the selected commit by hash across refreshes.
                 if let Selection::Commit { hash } = &project.selection {
@@ -2416,6 +2426,9 @@ impl Render for Osier {
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &ToggleCommandLog, _, cx| this.toggle_command_log(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleCommitDetails, _, cx| this.toggle_commit_details(cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
@@ -4442,6 +4455,39 @@ mod tests {
             o.apply_appearance(cx);
         });
         assert_eq!(colors(&h, cx), normal, "off is the theme as it was");
+    }
+
+    #[gpui::test]
+    fn ui_commit_details_panel_shows_toggles_and_remembers(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.commit_file("b.txt", "b\n", "second");
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "tab-log");
+        assert!(h.bounds(cx, "commit-details").is_some(), "shown by default");
+        let latest = h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .commits[0]
+                .hash
+                .clone()
+        });
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.commit_branches.get(&latest).map(Vec::as_slice),
+                Some(&["main".to_string()][..])
+            )
+        });
+        // The header button hides it, the key brings it back; the choice is saved.
+        h.click(cx, "toggle-commit-details");
+        assert!(h.bounds(cx, "commit-details").is_none());
+        h.read(cx, |o, _| assert!(o.state.layout.log_details_hidden));
+        h.keys(cx, "ctrl-shift-d");
+        assert!(h.bounds(cx, "commit-details").is_some());
+        h.read(cx, |o, _| assert!(!o.state.layout.log_details_hidden));
     }
 
     #[gpui::test]

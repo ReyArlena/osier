@@ -3,6 +3,7 @@
 mod branches;
 mod changes;
 pub(crate) mod command_log;
+mod commit_details;
 mod diff_pane;
 mod files_tab;
 mod log_tab;

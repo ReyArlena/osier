@@ -186,10 +186,48 @@ pub fn parse_remotes(text: &str) -> Result<Vec<Remote>> {
     Ok(list)
 }
 
+/// Local and remote-tracking branches that contain `commit`, sorted (`origin/HEAD` left out).
+pub fn branches_containing(repo: &Repository, commit: &str) -> Result<Vec<String>> {
+    let out = repo.git([
+        "branch",
+        "--all",
+        "--format=%(refname:short)",
+        "--contains",
+        commit,
+    ])?;
+    let mut names: Vec<String> = out
+        .stdout_str()?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('(') && !l.ends_with("/HEAD"))
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::TempRepo;
+
+    #[test]
+    fn branches_containing_lists_local_and_remote_branches() {
+        let t = TempRepo::new();
+        let first = t.commit_file("a.txt", "a\n", "first");
+        t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "HEAD"]);
+        t.git(["branch", "feature"]);
+        let second = t.commit_file("a.txt", "b\n", "second");
+        let mut want = vec!["feature", "main", "origin/main"];
+        want.sort();
+        assert_eq!(branches_containing(&t.repo(), first.trim()).unwrap(), want);
+        assert_eq!(
+            branches_containing(&t.repo(), second.trim()).unwrap(),
+            ["main"]
+        );
+    }
 
     #[test]
     fn parses_branch_lines() {

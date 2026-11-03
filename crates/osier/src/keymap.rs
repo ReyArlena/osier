@@ -172,6 +172,14 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ToggleCommandLog
         ),
         spec!(
+            "toggle_commit_details",
+            "Toggle commit details",
+            "View",
+            ["ctrl-shift-d"],
+            App,
+            ToggleCommitDetails
+        ),
+        spec!(
             "toggle_theme",
             "Toggle dark / light",
             "View",
