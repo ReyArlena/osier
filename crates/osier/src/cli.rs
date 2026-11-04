@@ -6,7 +6,12 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
-    Gui(Option<PathBuf>),
+    /// The GUI, optionally on a repository. Without `--new-instance` a running Osier gets
+    /// the path instead (see `instance.rs`).
+    Gui {
+        path: Option<PathBuf>,
+        new_instance: bool,
+    },
     /// `osier --credential-helper --account <login> --host <host> <get|store|erase>`
     CredentialHelper {
         account: String,
@@ -57,8 +62,14 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
         {
             Mode::Askpass(p.to_string())
         }
-        Some(p) => Mode::Gui(Some(PathBuf::from(p))),
-        None => Mode::Gui(None),
+        _ => {
+            let new_instance = args.iter().any(|a| a == "--new-instance");
+            let path = args
+                .iter()
+                .find(|a| a.as_str() != "--new-instance")
+                .map(PathBuf::from);
+            Mode::Gui { path, new_instance }
+        }
     }
 }
 
@@ -93,7 +104,9 @@ pub fn run_credential_helper(account: &str, host: &str, operation: &str) -> i32 
     }
 }
 
-pub const HELP: &str = "osier [path]              open the GUI (optionally on a repository)
+pub const HELP: &str =
+    "osier [path]              open a repository; a running Osier opens it and comes to the front
+osier --new-instance [path]   start a separate window instead
 osier --version [--verbose]   (verbose adds git version, display backend and paths)
 osier --credential-helper --account <login> --host <host> <get|store|erase>
 osier --askpass <prompt>   (also used by ssh and git through SSH_ASKPASS / GIT_ASKPASS)";
@@ -108,8 +121,15 @@ mod tests {
 
     #[test]
     fn parses_modes() {
-        assert_eq!(p(&[]), Mode::Gui(None));
-        assert_eq!(p(&["/tmp/x"]), Mode::Gui(Some(PathBuf::from("/tmp/x"))));
+        let gui = |path: Option<&str>, new_instance: bool| Mode::Gui {
+            path: path.map(PathBuf::from),
+            new_instance,
+        };
+        assert_eq!(p(&[]), gui(None, false));
+        assert_eq!(p(&["/tmp/x"]), gui(Some("/tmp/x"), false));
+        assert_eq!(p(&["--new-instance"]), gui(None, true));
+        assert_eq!(p(&["--new-instance", "/tmp/x"]), gui(Some("/tmp/x"), true));
+        assert_eq!(p(&["/tmp/x", "--new-instance"]), gui(Some("/tmp/x"), true));
         assert_eq!(
             p(&[
                 "--credential-helper",

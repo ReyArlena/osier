@@ -1433,6 +1433,13 @@ impl Osier {
                     .timer(Duration::from_millis(400))
                     .await;
                 let alive = this.update_in(cx, |this, window, cx| {
+                    // Another `osier <path>` handed its path over.
+                    for request in crate::instance::take_requests() {
+                        if let crate::instance::Request::Open(path) = request {
+                            this.open_project_notify(&path, window, cx);
+                        }
+                        window.activate_window();
+                    }
                     // Live updates for ignored files only while the Files tab lists them.
                     let watch_all = this.tab == Tab::Files && this.show_ignored;
                     let active = this.active;

@@ -21,6 +21,7 @@ mod graph;
 mod hunk_ops;
 mod ignore_ops;
 mod inline_code;
+mod instance;
 mod keymap;
 mod ops;
 mod palette;
@@ -67,7 +68,23 @@ fn init_logging() {
 fn main() {
     let mode = cli::parse(std::env::args().skip(1));
     let open_arg: Option<PathBuf> = match mode {
-        cli::Mode::Gui(path) => path,
+        cli::Mode::Gui { path, new_instance } => {
+            // Absolute before handing off: the running instance has another working dir.
+            let path = path.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+            if !new_instance
+                && let Some(socket) = osier_config::Paths::discover()
+                    .ok()
+                    .and_then(|p| instance::socket_path(p.state_dir()))
+                && instance::hand_off(&socket, path.as_deref())
+            {
+                match &path {
+                    Some(p) => println!("Opened {} in the running Osier.", p.display()),
+                    None => println!("Osier is already running; brought it to the front."),
+                }
+                return;
+            }
+            path
+        }
         cli::Mode::CredentialHelper {
             account,
             host,
@@ -121,6 +138,12 @@ fn main() {
         tracing::error!(%error, "config.toml is invalid, using defaults");
         osier_config::Settings::default()
     });
+    // Become the instance others hand their paths to (unless one is already listening).
+    if let Some(socket) = instance::socket_path(paths.state_dir())
+        && let Err(error) = instance::serve(&socket)
+    {
+        tracing::warn!(%error, "cannot listen for other osier invocations");
+    }
     let state = osier_config::State::load(&paths).unwrap_or_else(|error| {
         tracing::error!(%error, "state.toml is invalid, starting fresh");
         osier_config::State::default()

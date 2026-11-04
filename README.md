@@ -66,7 +66,9 @@ A Flatpak manifest draft is in `packaging/flatpak/`.
 ## Usage
 
 ```
-osier [path]      open a repository (or start with the last session)
+osier [path]      open a repository (or start with the last session); if Osier is
+                  already running, it opens the repository there and comes to the front
+osier --new-instance [path]   start a separate window instead
 osier --version --verbose
 ```
 

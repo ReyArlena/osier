@@ -8,6 +8,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- `osier <path>` while Osier is running opens the repository in that window and brings it to the front (a socket in `$XDG_RUNTIME_DIR/osier`); `osier --new-instance` starts a separate window.
 - Commit details under the Log (`ctrl-shift-d` or the header button): the message on the left; hash with copy, author, dates, committer when different, parents, refs and the branches containing the commit on the right. Resizable; shown or hidden and its height are remembered.
 - Higher contrast (Settings > Appearance > Theme, `appearance.high_contrast`, off by default): selections, hovers and the sidebar highlight in a stronger tint of the theme's main colour, for every theme.
 - The Log graph marks commits that are not on any remote yet: dimmed by default, or drawn

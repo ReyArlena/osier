@@ -16,7 +16,7 @@ if ! command -v grim >/dev/null 2>&1; then
     exit 1
 fi
 
-./target/debug/osier "$@" > scratch/run.log 2>&1 &
+./target/debug/osier --new-instance "$@" > scratch/run.log 2>&1 &
 pid=$!
 sleep "$wait_seconds"
 grim scratch/shot.png
