@@ -1,6 +1,8 @@
 //! Fetch, pull, push and remote management. Network operations stream progress and can be
 //! cancelled.
 
+use std::path::{Path, PathBuf};
+
 use crate::error::{GitError, Result};
 use crate::repo::Repository;
 use crate::runner::{CancelToken, GitRunner, Progress};
@@ -16,7 +18,11 @@ pub struct RemoteContext {
 
 impl RemoteContext {
     fn runner(&self, repo: &Repository) -> GitRunner {
-        let mut runner = repo.runner().clone();
+        self.with_env(repo.runner())
+    }
+
+    fn with_env(&self, base: &GitRunner) -> GitRunner {
+        let mut runner = base.clone();
         for (k, v) in &self.env {
             runner = runner.with_env(k.clone(), v.clone());
         }
@@ -51,6 +57,81 @@ fn run(
         },
     )?;
     Ok(out.record.stderr)
+}
+
+#[derive(Debug, Clone)]
+pub struct CloneOptions {
+    pub url: String,
+    /// The new working directory. It must not exist yet, or be an empty directory.
+    pub target: PathBuf,
+    pub recurse_submodules: bool,
+}
+
+/// `git clone` into a new directory. Refuses a target that already has files in it, so a
+/// clone can never mix into or replace existing work. git removes what it created when the
+/// clone fails or is cancelled.
+pub fn clone(
+    runner: &GitRunner,
+    options: &CloneOptions,
+    ctx: &RemoteContext,
+    on_progress: impl FnMut(Progress) + Send + 'static,
+) -> Result<String> {
+    if options.url.trim().is_empty() {
+        return Err(GitError::Refused("No repository address to clone.".into()));
+    }
+    // An address starting with `-` would read as an option (the `--` below also guards it).
+    if options.url.trim_start().starts_with('-') {
+        return Err(GitError::Refused(format!(
+            "{} is not a repository address.",
+            options.url
+        )));
+    }
+    check_empty_target(&options.target)?;
+    let mut args = ctx.config_args();
+    args.extend(["clone".to_string(), "--progress".to_string()]);
+    if options.recurse_submodules {
+        args.push("--recurse-submodules".into());
+    }
+    args.push("--".into());
+    args.push(options.url.trim().to_string());
+    args.push(options.target.to_string_lossy().into_owned());
+    let mut on_progress = on_progress;
+    let out = ctx
+        .with_env(runner)
+        .run_streaming(None, args, ctx.cancel.clone(), move |line| {
+            if let Some(p) = Progress::parse(line) {
+                on_progress(p);
+            }
+        })?;
+    Ok(out.record.stderr)
+}
+
+/// A clone or new repository may only go where nothing is yet: a missing path or an empty
+/// directory.
+pub fn check_empty_target(target: &Path) -> Result<()> {
+    if !target.is_absolute() {
+        return Err(GitError::Refused(format!(
+            "{} is not an absolute path.",
+            target.display()
+        )));
+    }
+    match std::fs::read_dir(target) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                return Err(GitError::Refused(format!(
+                    "{} already exists and is not empty.",
+                    target.display()
+                )));
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Err(GitError::Refused(format!(
+            "{} already exists and is a file.",
+            target.display()
+        ))),
+        Err(e) => Err(GitError::Io(e)),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -529,5 +610,109 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn clone_into_a_new_directory_and_refuse_a_full_one() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.bare_clone();
+        let dest = tempfile::tempdir().unwrap();
+        let target = dest.path().join("copy");
+        let options = CloneOptions {
+            url: bare.to_string_lossy().into_owned(),
+            target: target.clone(),
+            recurse_submodules: true,
+        };
+        clone(
+            &t.runner(),
+            &options,
+            &RemoteContext::default(),
+            no_progress,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(target.join("a.txt")).unwrap(),
+            "a\n"
+        );
+
+        // Again into the same, now full, directory: refused before git runs.
+        let err = clone(
+            &t.runner(),
+            &options,
+            &RemoteContext::default(),
+            no_progress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitError::Refused(m) if m.contains("not empty")));
+
+        // An empty existing directory is fine.
+        let empty = dest.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        let options = CloneOptions {
+            target: empty.clone(),
+            recurse_submodules: false,
+            ..options
+        };
+        clone(
+            &t.runner(),
+            &options,
+            &RemoteContext::default(),
+            no_progress,
+        )
+        .unwrap();
+        assert!(empty.join("a.txt").exists());
+    }
+
+    #[test]
+    fn a_failed_clone_leaves_nothing_behind() {
+        let t = TempRepo::new();
+        let dest = tempfile::tempdir().unwrap();
+        let target = dest.path().join("missing");
+        let options = CloneOptions {
+            url: dest
+                .path()
+                .join("no-such-repo")
+                .to_string_lossy()
+                .into_owned(),
+            target: target.clone(),
+            recurse_submodules: false,
+        };
+        assert!(
+            clone(
+                &t.runner(),
+                &options,
+                &RemoteContext::default(),
+                no_progress
+            )
+            .is_err()
+        );
+        assert!(!target.exists());
+        let options = CloneOptions {
+            url: "--upload-pack=touch /tmp/x".into(),
+            ..options
+        };
+        let err = clone(
+            &t.runner(),
+            &options,
+            &RemoteContext::default(),
+            no_progress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitError::Refused(_)));
+        let options = CloneOptions {
+            url: "/tmp/repo".into(),
+            target: "relative/dir".into(),
+            recurse_submodules: false,
+        };
+        assert!(matches!(
+            clone(
+                &t.runner(),
+                &options,
+                &RemoteContext::default(),
+                no_progress
+            ),
+            Err(GitError::Refused(_))
+        ));
     }
 }
