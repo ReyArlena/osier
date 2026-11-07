@@ -1,7 +1,14 @@
-//! Live tests against GitHub. Ignored unless `OSIER_LIVE_TESTS=1`; they need the gh accounts
-//! on the developer's machine and network access. Tokens never leave the helper process.
+//! Live tests against GitHub. Ignored unless `OSIER_LIVE_TESTS=1`; they need gh accounts on
+//! the developer's machine and network access. Tokens never leave the helper process.
 //!
-//! Run: `OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`
+//! Set up in the environment:
+//! - `OSIER_LIVE_REPO`: https URL of a private repository the owner account can push to
+//!   (the push test creates and deletes an `osier-live-<secs>` branch there)
+//! - `OSIER_LIVE_OWNER`: the gh login that owns it
+//! - `OSIER_LIVE_OTHER`: optional, a second gh login without access; the refusal test is
+//!   skipped without it
+//!
+//! Run: `OSIER_LIVE_TESTS=1 OSIER_LIVE_REPO=... OSIER_LIVE_OWNER=... cargo test -p osier --test live -- --ignored`
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -9,10 +16,27 @@ use std::path::Path;
 
 use osier_git::{GitError, GitRunner, MemorySink};
 
-const TESTING_REPO: &str = "https://github.com/ReyArlena/oser-testing-repository.git";
-
 fn live() -> bool {
     std::env::var_os("OSIER_LIVE_TESTS").is_some()
+}
+
+fn setting(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// The private testing repository (`OSIER_LIVE_REPO`).
+fn testing_repo() -> String {
+    setting("OSIER_LIVE_REPO").expect("set OSIER_LIVE_REPO to the testing repository's https URL")
+}
+
+/// The gh login that owns the testing repository (`OSIER_LIVE_OWNER`).
+fn owner() -> String {
+    setting("OSIER_LIVE_OWNER").expect("set OSIER_LIVE_OWNER to the gh login that owns it")
+}
+
+/// A second gh login without access (`OSIER_LIVE_OTHER`), if one is configured.
+fn other_account() -> Option<String> {
+    setting("OSIER_LIVE_OTHER")
 }
 
 /// `git ls-remote` with Osier as the only credential helper for `account`.
@@ -25,7 +49,7 @@ fn ls_remote_as(account: &str) -> Result<(), GitError> {
         args.push("-c".into());
         args.push(format!("{k}={v}"));
     }
-    args.extend(["ls-remote".into(), "--heads".into(), TESTING_REPO.into()]);
+    args.extend(["ls-remote".into(), "--heads".into(), testing_repo()]);
     let result = runner.run(None, &args).map(|_| ());
     // The command log must never contain a token.
     for rec in sink.records() {
@@ -42,7 +66,9 @@ fn owner_account_can_read_the_private_testing_repo() {
     if !live() {
         return;
     }
-    ls_remote_as("ReyArlena").expect("ReyArlena owns the testing repository");
+    let owner = owner();
+    ls_remote_as(&owner)
+        .unwrap_or_else(|e| panic!("{owner} should read the testing repository: {e}"));
 }
 
 #[test]
@@ -51,7 +77,11 @@ fn other_account_is_refused_so_account_choice_matters() {
     if !live() {
         return;
     }
-    match ls_remote_as("other-account") {
+    let Some(other) = other_account() else {
+        eprintln!("skipped: set OSIER_LIVE_OTHER to a gh login without access to the repository");
+        return;
+    };
+    match ls_remote_as(&other) {
         Err(GitError::AuthRequired(_)) => {}
         Err(GitError::Failed { record, .. })
             if record.stderr.contains("not found") || record.stderr.contains("403") => {}
@@ -67,8 +97,10 @@ fn gh_accounts_are_discovered() {
     }
     let accounts = osier_auth::gh::accounts().expect("gh auth status");
     let logins: Vec<&str> = accounts.iter().map(|a| a.login.as_str()).collect();
-    assert!(logins.contains(&"ReyArlena"), "{logins:?}");
-    assert!(logins.contains(&"other-account"), "{logins:?}");
+    assert!(logins.contains(&owner().as_str()), "{logins:?}");
+    if let Some(other) = other_account() {
+        assert!(logins.contains(&other.as_str()), "{logins:?}");
+    }
 }
 
 /// A runner whose every command carries Osier's credential helper for `account`, the way
@@ -101,7 +133,7 @@ fn push_round_trip_on_the_testing_repo_as_owner() {
     if !live() {
         return;
     }
-    let ctx = context_for("ReyArlena");
+    let ctx = context_for(&owner());
     let sink = MemorySink::new();
     let runner = GitRunner::new(sink.clone());
     let dir = tempfile::tempdir().expect("tempdir");
@@ -110,14 +142,14 @@ fn push_round_trip_on_the_testing_repo_as_owner() {
     args.extend([
         "clone".to_string(),
         "-q".into(),
-        TESTING_REPO.into(),
+        testing_repo(),
         dest.to_string_lossy().into_owned(),
     ]);
     runner.run(None, &args).expect("clone as owner");
     let repo = osier_git::Repository::discover(runner.clone(), &dest).expect("repo");
     repo.git(["config", "user.name", "Osier live test"])
         .unwrap();
-    repo.git(["config", "user.email", "reyarlena@gmail.com"])
+    repo.git(["config", "user.email", "osier-live-test@example.invalid"])
         .unwrap();
 
     let secs = std::time::SystemTime::now()

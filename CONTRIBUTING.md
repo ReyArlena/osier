@@ -68,6 +68,7 @@ throwaway one.
 ## Testing against real remotes
 
 The unit and integration tests use temporary repositories and local bare remotes only. Live
-tests (`OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`) need the
-maintainer's GitHub accounts and a private testing repository; they are not expected to pass
-elsewhere.
+tests (`OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`) need gh accounts
+and a private repository you can push to: set `OSIER_LIVE_REPO` (its https URL) and
+`OSIER_LIVE_OWNER` (the gh login that owns it), and optionally `OSIER_LIVE_OTHER` (a second
+login without access, for the refusal test). See the top of `crates/osier/tests/live.rs`.
