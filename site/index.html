@@ -128,7 +128,8 @@
         <span>Linux &middot; Wayland &amp; X11</span>
         <span>Git 2.30+</span>
         <span>MIT licence</span>
-        <a href="#install">Arch, Flatpak and source installs</a>
+        <!-- Reinstate with the AUR and Flatpak cards: <a href="#install">Arch, Flatpak and source installs</a> -->
+        <a href="#install">Script and source installs</a>
       </p>
 
       <figure class="shot hero-shot reveal">
@@ -496,7 +497,8 @@
           </div>
         </div>
         <!-- /vendor: script -->
-        <!-- vendor: aur -->
+        <!-- Hidden until the AUR and Flatpak packages are published; reinstate later.
+        vendor: aur
         <div class="install-card reveal">
           <header><svg class="icon"><use href="#i-package"/></svg><h3>Arch Linux (AUR)</h3></header>
           <p>Prebuilt as <code>osier-bin</code>, or <code>osier</code> to build from source.
@@ -506,8 +508,8 @@
             <button class="copy" type="button" aria-label="Copy AUR command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
           </div>
         </div>
-        <!-- /vendor: aur -->
-        <!-- vendor: flatpak -->
+        /vendor: aur
+        vendor: flatpak
         <div class="install-card reveal">
           <header><svg class="icon"><use href="#i-layers"/></svg><h3>Flatpak</h3></header>
           <p>Sandboxed, from Flathub, for any distribution.</p>
@@ -516,7 +518,8 @@
             <button class="copy" type="button" aria-label="Copy Flatpak command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>
           </div>
         </div>
-        <!-- /vendor: flatpak -->
+        /vendor: flatpak
+        -->
         <!-- vendor: source -->
         <div class="install-card reveal">
           <header><svg class="icon"><use href="#i-git-fork"/></svg><h3>From source</h3></header>
@@ -547,7 +550,7 @@
         <details>
           <summary>Is Osier free?<svg class="icon"><use href="#i-plus"/></svg></summary>
           <p>Yes. It's open source under the MIT licence, with no paid tier and nothing to sign
-            up for. If it saves you time, you can <a href="https://github.com/sponsors/ReyArlena">sponsor development</a>.</p>
+            up for.<!-- Reinstate with the sponsor page: If it saves you time, you can <a href="https://github.com/sponsors/ReyArlena">sponsor development</a>. --></p>
         </details>
         <details>
           <summary>Does it run on macOS or Windows?<svg class="icon"><use href="#i-plus"/></svg></summary>
@@ -625,8 +628,9 @@
       <div>
         <h4>Community</h4>
         <ul>
-          <!-- Sponsor page: not set up yet -->
+          <!-- Sponsor page: not set up yet, reinstate this item when it exists
           <li><a href="https://github.com/sponsors/ReyArlena"><svg class="icon"><use href="#i-heart"/></svg>Sponsor</a></li>
+          -->
           <!-- Discord server: not set up yet, replace the link when it exists -->
           <li><a href="#" aria-disabled="true" class="pending"><svg class="icon solid"><use href="#i-discord"/></svg>Discord <span class="soon">Soon</span></a></li>
         </ul>
