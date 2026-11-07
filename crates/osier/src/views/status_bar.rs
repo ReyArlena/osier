@@ -18,10 +18,10 @@ impl Osier {
         has_project: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        // The bar's own grey is too faint for text people read: main text in the foreground,
-        // secondary text halfway between.
+        // Main text (branch, running jobs) in the foreground; secondary text in the bar's
+        // grey, a touch lighter.
         let fg = cx.theme().foreground;
-        let muted = cx.theme().muted_foreground.blend(fg.opacity(0.45));
+        let muted = cx.theme().muted_foreground.blend(fg.opacity(0.12));
         let primary = cx.theme().primary;
         let busy = |text: String| {
             h_flex()

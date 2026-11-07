@@ -17,7 +17,8 @@ All notable changes to Osier are documented here. The format follows
 ### Changed
 
 - Higher contrast also strengthens the ref badges in the Log and the palette's submenu badge.
-- Status bar text is easier to read, and running jobs (fetch, pull, push, clone, create)
+- Status bar: the branch and running jobs in full-strength text (the rest a touch lighter
+  grey than before), and running jobs (fetch, pull, push, clone, create)
   show a larger spinner in the theme's main colour.
 - Create new repository finds templates with one GitHub search over the account and its
   organisations instead of reading every repository it can reach.
