@@ -150,3 +150,6 @@ All notable changes to Osier are documented here. The format follows
   Escape before).
 - install.sh: source builds now install the desktop entry and icons, and the entry
   launches the installed binary by its full path.
+- install.sh: when no prebuilt binary fits (or the download fails), the source build uses
+  the latest release tag instead of main; main only while there is no release, or with
+  `OSIER_VERSION=main`.

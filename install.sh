@@ -2,12 +2,14 @@
 # Osier installer: curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh
 #
 # Installs the latest release binary to ~/.local/bin (or $OSIER_PREFIX/bin), with the desktop
-# entry and icons under ~/.local/share. Falls back to building from source with cargo when no
-# prebuilt binary matches this machine. Set OSIER_VERSION=v1.2.3 to pin a release and
-# OSIER_FROM_SOURCE=1 to force a source build.
+# entry and icons under ~/.local/share. Falls back to building that same release from source
+# with cargo when no prebuilt binary matches this machine (or the download fails), and to main
+# only while no release exists. Set OSIER_VERSION=v1.2.3 to pin a release, OSIER_VERSION=main
+# for the latest code, and OSIER_FROM_SOURCE=1 to force a source build.
 set -eu
 
 REPO="ReyArlena/osier"
+REPO_URL="https://github.com/$REPO.git"
 PREFIX="${OSIER_PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -99,8 +101,18 @@ install_desktop() {
   fi
 }
 
+# Newest stable release tag (vX.Y.Z, no pre-releases), read from the repository itself so it
+# works when the GitHub API is rate limited. Prints nothing when there is no release yet.
+latest_tag() {
+  have git || return 0
+  git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+    | sed -n 's|.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' \
+    | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
+}
+
 install_release() {
   [ -n "$target" ] || return 1
+  [ "${OSIER_VERSION:-}" = "main" ] && return 1
   version="$(resolve_version)" || return 1
   plain="${version#v}"
   name="osier-${plain}-${target}"
@@ -129,8 +141,14 @@ install_from_source() {
   fi
   work="$(mktemp -d)"
   trap 'rm -rf "$work"' EXIT
-  ref="${OSIER_VERSION:-main}"
-  git clone --quiet --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$work/src"
+  ref="${OSIER_VERSION:-$(latest_tag)}"
+  if [ -z "$ref" ]; then
+    ref="main"
+    say "No release yet: building the latest code from main"
+  elif [ "$ref" != "main" ]; then
+    say "Building release $ref"
+  fi
+  git clone --quiet --depth 1 --branch "$ref" "$REPO_URL" "$work/src"
   cargo install --locked --path "$work/src/crates/osier" --root "$PREFIX"
   install_desktop "$work/src/packaging"
   say "Installed osier to $BIN_DIR/osier"
