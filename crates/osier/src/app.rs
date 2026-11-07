@@ -130,6 +130,9 @@ pub struct Osier {
     /// The active project changed before its first snapshot: apply the empty-Changes rule
     /// when the snapshot arrives.
     tab_check_pending: bool,
+    /// A project the user just opened (not one switched back to): if it has changes when its
+    /// first snapshot arrives, show the Changes tab.
+    fresh_open: Option<PathBuf>,
     /// Log tab shows the reflog instead of the commit list.
     pub(crate) show_reflog: bool,
     pub(crate) sidebar_visible: bool,
@@ -392,6 +395,7 @@ impl Osier {
             },
             auto_tab: None,
             tab_check_pending: false,
+            fresh_open: None,
             expanded_command: None,
             diff,
             diff_subscription: None,
@@ -1166,8 +1170,17 @@ impl Osier {
     ) {
         use gpui_kit::component::WindowExt as _;
         use gpui_kit::component::notification::Notification;
+        let already_open = self.projects.iter().any(|p| p.path == path);
         match self.open_project(path, true, cx) {
-            Ok(ix) => self.activate(ix, window, cx),
+            Ok(ix) => {
+                if !already_open {
+                    self.fresh_open = Some(self.projects[ix].path.clone());
+                    if self.projects[ix].snapshot.is_some() {
+                        self.switch_tab_for_project();
+                    }
+                }
+                self.activate(ix, window, cx)
+            }
             Err(error) => window.push_notification(
                 Notification::warning("Could not open repository")
                     .message(format!("{error}. It was removed from the recent list.")),
@@ -2018,7 +2031,8 @@ impl Osier {
 
     /// After the active project changed: leave an empty Changes tab for the tab set in
     /// `projects.empty_changes_tab`, or return to Changes when an earlier switch left it and
-    /// this project has something to show. Waits for the first snapshot of a new project.
+    /// this project has something to show; a project just opened with changes always shows
+    /// Changes (`fresh_open`). Waits for the first snapshot of a new project.
     pub(crate) fn switch_tab_for_project(&mut self) {
         use osier_config::settings::EmptyChangesTab as E;
         let Some(empty) = self
@@ -2030,6 +2044,16 @@ impl Osier {
             return;
         };
         self.tab_check_pending = false;
+        // Just opened (fresh or from recents) with changes: show them. Clean ones, and every
+        // switch between open projects, follow the rules below.
+        if let Some(fresh) = self.fresh_open.take()
+            && !empty
+            && self.active_project().is_some_and(|p| p.path == fresh)
+        {
+            self.tab = Tab::Changes;
+            self.auto_tab = None;
+            return;
+        }
         if let Some(auto) = self.auto_tab.take()
             && self.tab == auto
         {
@@ -6576,5 +6600,44 @@ mod tests {
                     .is_some_and(|s| s.status.entries.len() == 2)
             );
         });
+    }
+
+    #[gpui::test]
+    fn opening_a_project_with_changes_shows_them(cx: &mut TestAppContext) {
+        use super::Tab;
+        let (h, a, _b, first, _second) = two_projects(cx);
+        h.click(cx, "tab-branches");
+        // Opened fresh with changes: Changes, whatever tab was showing.
+        let dirty = TempRepo::new();
+        dirty.commit_file("d.txt", "d\n", "first");
+        dirty.write("d.txt", "changed\n");
+        let dirty_path = dirty.path().to_path_buf();
+        h.act(cx, move |o, w, cx| {
+            o.open_project_notify(&dirty_path, w, cx)
+        });
+        assert_eq!(tab(&h, cx), Tab::Changes);
+        // Opened fresh and clean: the tab stays (Branches is never moved).
+        h.click(cx, "tab-branches");
+        let clean = TempRepo::new();
+        clean.commit_file("c.txt", "c\n", "first");
+        let clean_path = clean.path().to_path_buf();
+        h.act(cx, move |o, w, cx| {
+            o.open_project_notify(&clean_path, w, cx)
+        });
+        assert_eq!(tab(&h, cx), Tab::Branches);
+        // Switching back to an open project with changes keeps the old behaviour: Branches.
+        a.write("new.txt", "x\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        let a_path = a.path().to_path_buf();
+        h.act(cx, move |o, w, cx| o.switch_to_project(&a_path, w, cx));
+        assert_eq!(active_name(&h, cx), first);
+        assert_eq!(tab(&h, cx), Tab::Branches);
+        // From the recent list (closed, then reopened) it counts as opening again.
+        h.click(cx, "tab-log");
+        h.act(cx, |o, w, cx| o.close_project(0, w, cx));
+        let a_path = a.path().to_path_buf();
+        h.act(cx, move |o, w, cx| o.switch_to_project(&a_path, w, cx));
+        assert_eq!(active_name(&h, cx), first);
+        assert_eq!(tab(&h, cx), Tab::Changes);
     }
 }

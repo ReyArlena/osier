@@ -8,6 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Opening a project (fresh, from the recent list, `osier <path>` or after a clone) that has
+  changes shows the Changes tab. Switching between open projects keeps its existing rules.
 - Clone repository… (command palette, bindable, no default key): pick a gh account and one of
   the repositories it can reach (its own, its organisations', the ones it collaborates on),
   or "Other…" for any HTTPS or SSH address. The dialog asks for the directory (next to the
