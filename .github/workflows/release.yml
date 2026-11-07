@@ -20,6 +20,9 @@ jobs:
             runner: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags, so build.rs can tell this is exactly the release tag.
+          fetch-depth: 0
       - name: Native dependencies
         run: |
           sudo apt-get update
@@ -32,6 +35,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release -p osier --target ${{ matrix.target }}
+      - name: Check the binary reports the tag's version
+        run: |
+          set -eu
+          want="osier ${GITHUB_REF_NAME}"
+          got="$(target/${{ matrix.target }}/release/osier --version)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::binary reports '$got', expected '$want' (bump the version in Cargo.toml to match the tag)"
+            exit 1
+          fi
       - name: Package
         run: |
           set -eu

@@ -111,7 +111,7 @@ fn main() {
             });
         }
         cli::Mode::Version { verbose } => {
-            println!("osier {}", env!("CARGO_PKG_VERSION"));
+            println!("osier v{}", runtime_info::VERSION);
             if verbose {
                 let paths = osier_config::Paths::discover().ok();
                 let runner = osier_git::GitRunner::new(Arc::new(osier_git::NoopSink));
@@ -131,7 +131,7 @@ fn main() {
         }
     };
     init_logging();
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting osier");
+    tracing::info!(version = runtime_info::VERSION, "starting osier");
 
     let paths = match osier_config::Paths::discover() {
         Ok(p) => p,

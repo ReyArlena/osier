@@ -5,6 +5,10 @@ use std::fmt;
 
 use osier_config::Paths;
 
+/// The exact build: the Cargo version, plus git build metadata when this is not a clean
+/// release tag (see `build.rs`), e.g. `0.1.0` or `0.1.0+12.g4a1b2c3`.
+pub const VERSION: &str = env!("OSIER_BUILD_VERSION");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeInfo {
     pub osier_version: String,
@@ -30,7 +34,7 @@ impl RuntimeInfo {
             "none"
         };
         Self {
-            osier_version: env!("CARGO_PKG_VERSION").to_string(),
+            osier_version: VERSION.to_string(),
             git_version,
             display_backend,
             session_type: env("XDG_SESSION_TYPE"),
@@ -46,8 +50,13 @@ impl RuntimeInfo {
     pub fn rows(&self) -> Vec<(&'static str, String)> {
         let or_unknown = |v: &Option<String>| v.clone().unwrap_or_else(|| "unknown".into());
         vec![
-            ("Osier", self.osier_version.clone()),
-            ("Git", or_unknown(&self.git_version)),
+            ("Osier", format!("v{}", self.osier_version)),
+            (
+                "Git",
+                self.git_version
+                    .as_ref()
+                    .map_or_else(|| "unknown".into(), |v| format!("v{v}")),
+            ),
             ("Display", self.display_backend.to_string()),
             ("Session", or_unknown(&self.session_type)),
             ("Desktop", or_unknown(&self.desktop)),
@@ -76,8 +85,30 @@ mod tests {
     fn prints_every_row() {
         let info = RuntimeInfo::collect(None, Some("2.50.0".into()));
         let text = info.to_string();
-        assert!(text.contains("Git      2.50.0"), "{text}");
+        assert!(text.contains("Git      v2.50.0"), "{text}");
+        assert!(
+            text.contains(&format!("Osier    v{}", super::VERSION)),
+            "{text}"
+        );
         assert!(text.contains("Flatpak"));
         assert_eq!(text.lines().count(), 9);
+        let unknown = RuntimeInfo::collect(None, None).to_string();
+        assert!(unknown.contains("Git      unknown"), "{unknown}");
+    }
+
+    #[test]
+    fn build_version_starts_with_the_cargo_version() {
+        let v = super::VERSION;
+        assert!(v.starts_with(env!("CARGO_PKG_VERSION")), "{v}");
+        let meta = v
+            .strip_prefix(env!("CARGO_PKG_VERSION"))
+            .unwrap_or_default();
+        // Either the plain release version or semver build metadata.
+        assert!(meta.is_empty() || meta.starts_with('+'), "{v}");
+        assert!(
+            meta.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c)),
+            "{v}"
+        );
     }
 }

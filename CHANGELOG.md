@@ -8,6 +8,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Builds between releases say exactly which commit they are in Settings > About and
+  `osier --version` (`v0.1.0+12.g4a1b2c3`: 12 commits after v0.1.0, `-dirty` with
+  uncommitted changes); release builds show the plain version. Versions show with a leading v.
 - Show background tasks (Settings > Appearance, off by default): a spinner and label in the
   status bar while Osier refreshes, checks project status, scans directories, loads GitHub
   lists or looks up diffs, blame and branches.
