@@ -124,6 +124,22 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             OpenRepository
         ),
         spec!(
+            "clone_repository",
+            "Clone repository",
+            "General",
+            [],
+            App,
+            CloneRepository
+        ),
+        spec!(
+            "create_repository",
+            "Create new repository",
+            "General",
+            [],
+            App,
+            CreateRepository
+        ),
+        spec!(
             "close_project",
             "Close project",
             "General",
@@ -725,11 +741,18 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len());
-        // Context-menu actions and the prefix key start unbound; everything else has keys.
+        // Context-menu actions, the prefix key, clone and create start unbound; everything
+        // else has keys.
+        let unbound = [super::PREFIX_KEY, "clone_repository", "create_repository"];
         assert!(
             all.iter()
-                .filter(|a| a.scope != Scope::Row && a.id != super::PREFIX_KEY)
+                .filter(|a| a.scope != Scope::Row && !unbound.contains(&a.id))
                 .all(|a| !a.defaults.is_empty())
+        );
+        assert!(
+            all.iter()
+                .filter(|a| unbound[1..].contains(&a.id))
+                .all(|a| a.defaults.is_empty())
         );
     }
 }

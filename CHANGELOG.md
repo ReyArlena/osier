@@ -8,6 +8,15 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Clone repository… (command palette, bindable, no default key): pick a gh account and one of
+  the repositories it can reach (its own, its organisations', the ones it collaborates on),
+  or "Other…" for any HTTPS or SSH address. The dialog asks for the directory (next to the
+  open project by default, or "Choose directory…"), runs with `--recurse-submodules` unless
+  unticked, shows progress with cancel, opens the clone and remembers the account.
+- Create new repository… (command palette, bindable, no default key): on GitHub for a gh
+  account (owner or organisation, name, description, visibility, template, README,
+  .gitignore and licence, as on github.com), then cloned and opened; or "No remote" for a
+  local `git init` with the same starter files left uncommitted.
 - `osier <path>` while Osier is running opens the repository in that window and brings it to the front (a socket in `$XDG_RUNTIME_DIR/osier`); `osier --new-instance` starts a separate window.
 - Commit details under the Log (`ctrl-shift-d` or the header button): the message on the left; hash with copy, author, dates, committer when different, parents, refs and the branches containing the commit on the right. Resizable; shown or hidden and its height are remembered.
 - Higher contrast (Settings > Appearance > Theme, `appearance.high_contrast`, off by default): selections, hovers and the sidebar highlight in a stronger tint of the theme's main colour, for every theme.

@@ -94,6 +94,19 @@ pub struct RemoteJob {
     rx: mpsc::Receiver<Progress>,
 }
 
+impl RemoteJob {
+    /// A job that is not a fetch, pull or push (clone, create), with its own progress.
+    pub(crate) fn new(label: String, cancel: CancelToken, rx: mpsc::Receiver<Progress>) -> Self {
+        Self {
+            label,
+            phase: "starting".into(),
+            percent: None,
+            cancel,
+            rx,
+        }
+    }
+}
+
 impl std::fmt::Debug for RemoteJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteJob")

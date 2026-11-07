@@ -23,6 +23,7 @@ mod ignore_ops;
 mod inline_code;
 mod instance;
 mod keymap;
+mod new_repo;
 mod ops;
 mod palette;
 mod patch_ops;
@@ -91,6 +92,13 @@ fn main() {
             operation,
         } => {
             std::process::exit(cli::run_credential_helper(&account, &host, &operation));
+        }
+        cli::Mode::GhApi {
+            account,
+            host,
+            args,
+        } => {
+            std::process::exit(cli::run_gh_api(&account, &host, &args));
         }
         cli::Mode::Askpass(prompt) => {
             init_logging();

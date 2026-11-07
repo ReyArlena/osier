@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod gh;
+pub mod hub;
 pub mod remote;
 pub mod ssh;
 

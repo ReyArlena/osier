@@ -27,6 +27,8 @@ gpui_kit::actions!(
         Quit,
         Refresh,
         OpenRepository,
+        CloneRepository,
+        CreateRepository,
         CloseProject,
         ToggleSidebar,
         ToggleCommandLog,
@@ -179,6 +181,12 @@ pub struct Osier {
     pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
     pub(crate) gh_accounts: Vec<osier_auth::GhAccount>,
+    /// GitHub API access for clone and create (`new_repo.rs`); a fake in tests.
+    pub(crate) hub: std::sync::Arc<dyn crate::new_repo::Hub>,
+    /// Repository lists per account (`login@host`), for the clone submenu and templates.
+    pub(crate) hub_repos: std::collections::HashMap<String, Vec<osier_auth::hub::GhRepo>>,
+    /// Accounts whose list `prefetch_hub_repos` is fetching.
+    pub(crate) hub_repos_loading: std::collections::HashSet<String>,
     /// Repositories found under the configured scan directories.
     pub(crate) scanned: Vec<PathBuf>,
     /// Sidebar filter box.
@@ -404,6 +412,9 @@ impl Osier {
             state_dirty: false,
             remote_job: None,
             gh_accounts: Vec::new(),
+            hub: crate::new_repo::default_hub(),
+            hub_repos: std::collections::HashMap::new(),
+            hub_repos_loading: std::collections::HashSet::new(),
             scanned: Vec::new(),
             sidebar_filter,
             sidebar_filter_bounds: Default::default(),
@@ -583,10 +594,13 @@ impl Osier {
         window.defer(cx, move |window, cx| root_focus.focus(window, cx));
         // Dev aid for screenshots: OSIER_OPEN_SETTINGS=1 opens the settings sheet at startup.
         // The sheet needs gpui-kit's root, which exists only after this view is installed.
-        // OSIER_OPEN_PALETTE=root|switch_project opens the command palette on that mode.
+        // OSIER_OPEN_PALETTE=root|switch_project|clone|create opens the command palette on
+        // that mode.
         let palette = match std::env::var("OSIER_OPEN_PALETTE").as_deref() {
             Ok("root") => Some(crate::palette::PaletteMode::Root),
             Ok("switch_project") => Some(crate::palette::PaletteMode::SwitchProject),
+            Ok("clone") => Some(crate::palette::PaletteMode::CloneAccount),
+            Ok("create") => Some(crate::palette::PaletteMode::CreateAccount),
             _ => None,
         };
         if let Some(mode) = palette {
@@ -596,6 +610,25 @@ impl Osier {
                     .await;
                 let _ = this.update_in(cx, |this, window, cx| {
                     this.open_palette_in(mode, window, cx)
+                });
+            })
+            .detach();
+        }
+        // OSIER_OPEN_NEW_REPO=clone|local|github opens the clone ("Other…") or create dialog;
+        // github uses the first gh account once they have loaded.
+        if let Ok(which) = std::env::var("OSIER_OPEN_NEW_REPO") {
+            cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(1500))
+                    .await;
+                let _ = this.update_in(cx, |this, window, cx| match which.as_str() {
+                    "clone" => this.prompt_clone(None, window, cx),
+                    "local" => this.prompt_create(None, window, cx),
+                    "github" => {
+                        let account = this.gh_accounts.first().cloned();
+                        this.prompt_create(account, window, cx)
+                    }
+                    _ => {}
                 });
             })
             .detach();
@@ -2425,6 +2458,12 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh_active(cx)))
             .on_action(cx.listener(|this, _: &OpenRepository, window, cx| {
                 this.prompt_open_repository(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CloneRepository, window, cx| {
+                this.open_palette_in(crate::palette::PaletteMode::CloneAccount, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CreateRepository, window, cx| {
+                this.open_palette_in(crate::palette::PaletteMode::CreateAccount, window, cx)
             }))
             .on_action(cx.listener(|this, _: &CloseProject, window, cx| {
                 if let Some(ix) = this.active {
@@ -6223,6 +6262,319 @@ mod tests {
         });
         h.read(cx, |osier, _| {
             assert!(matches!(osier.viewer, Some(Viewer::Missing)))
+        });
+    }
+
+    // ----- clone and create (`new_repo.rs`) -----
+
+    /// GitHub as the clone and create flows see it, with nothing on the network.
+    #[derive(Default)]
+    struct FakeHub {
+        repos: Vec<osier_auth::hub::GhRepo>,
+        /// Where a created repository can be cloned from (a local bare repo).
+        created_url: String,
+        created: std::sync::Mutex<Option<osier_auth::hub::NewRepo>>,
+    }
+
+    impl crate::new_repo::Hub for FakeHub {
+        fn repos(&self, _: &osier_auth::GhAccount) -> Result<Vec<osier_auth::hub::GhRepo>, String> {
+            Ok(self.repos.clone())
+        }
+        fn orgs(&self, _: &osier_auth::GhAccount) -> Result<Vec<String>, String> {
+            Ok(vec!["acme".into()])
+        }
+        fn gitignore_templates(&self, _: &osier_auth::GhAccount) -> Result<Vec<String>, String> {
+            Ok(vec!["Rust".into(), "Node".into()])
+        }
+        fn licenses(
+            &self,
+            _: &osier_auth::GhAccount,
+        ) -> Result<Vec<osier_auth::hub::License>, String> {
+            Ok(vec![osier_auth::hub::License {
+                key: "mit".into(),
+                name: "MIT License".into(),
+            }])
+        }
+        fn gitignore_template(
+            &self,
+            _: &osier_auth::GhAccount,
+            name: &str,
+        ) -> Result<String, String> {
+            Ok(format!("# {name}\n/target\n"))
+        }
+        fn license_text(
+            &self,
+            _: &osier_auth::GhAccount,
+            _: &str,
+            year: i32,
+            holder: &str,
+        ) -> Result<String, String> {
+            Ok(format!("MIT {year} {holder}\n"))
+        }
+        fn create(
+            &self,
+            _: &osier_auth::GhAccount,
+            new: &osier_auth::hub::NewRepo,
+        ) -> Result<osier_auth::hub::CreatedRepo, String> {
+            *self.created.lock().expect("lock") = Some(new.clone());
+            Ok(osier_auth::hub::CreatedRepo {
+                full_name: format!("{}/{}", new.owner, new.name),
+                clone_url: self.created_url.clone(),
+                html_url: String::new(),
+            })
+        }
+    }
+
+    fn gh_account(login: &str) -> osier_auth::GhAccount {
+        osier_auth::GhAccount {
+            host: "github.com".into(),
+            login: login.into(),
+            active: true,
+            git_protocol: "https".into(),
+            state: "success".into(),
+        }
+    }
+
+    fn with_hub(h: &Harness, cx: &mut TestAppContext, hub: Arc<FakeHub>) {
+        h.act(cx, move |o, _, _| {
+            o.gh_accounts = vec![gh_account("alice")];
+            o.hub = hub;
+        });
+    }
+
+    /// Replace the text of the input with test id `id`.
+    fn retype(h: &Harness, cx: &mut TestAppContext, id: &str, text: &str) {
+        h.click(cx, id);
+        h.keys(cx, "ctrl-a backspace");
+        h.type_text(cx, text);
+    }
+
+    fn active_path(h: &Harness, cx: &mut TestAppContext) -> Option<std::path::PathBuf> {
+        h.read(cx, |o, _| o.active_project().map(|p| p.path.clone()))
+    }
+
+    fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
+        std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok()
+    }
+
+    #[gpui::test]
+    fn ui_clone_a_repository_of_an_account(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let source = TempRepo::new();
+        source.commit_file("hello.txt", "hi\n", "hello");
+        let bare = source.bare_clone();
+        let mut gh_repo = crate::new_repo::tests::repo("alice", "hello");
+        // A local address: no credentials are involved.
+        gh_repo.clone_url = bare.to_string_lossy().into_owned();
+        let hub = Arc::new(FakeHub {
+            repos: vec![gh_repo, crate::new_repo::tests::repo("acme", "other")],
+            ..Default::default()
+        });
+        let h = Harness::open(cx, &repo);
+        with_hub(&h, cx, hub);
+        // The palette entry and its account submenu.
+        h.keys(cx, "ctrl-p");
+        h.type_text(cx, "clone");
+        h.click(cx, "palette-command:Clone repository…");
+        assert!(h.bounds(cx, "palette-choice:alice").is_some());
+        assert!(h.bounds(cx, "palette-choice:Other…").is_some());
+        h.click(cx, "palette-choice:alice");
+        assert!(h.bounds(cx, "palette-choice:hello").is_some());
+        assert!(h.bounds(cx, "palette-choice:other").is_some());
+        // Backspace goes back to the accounts, not the commands.
+        h.keys(cx, "backspace");
+        assert!(h.bounds(cx, "palette-choice:alice").is_some());
+        h.click(cx, "palette-choice:alice");
+        h.type_text(cx, "hel");
+        assert!(h.bounds(cx, "palette-choice:other").is_none());
+        h.keys(cx, "enter");
+        // The directory dialog starts next to the open project.
+        assert!(h.bounds(cx, "clone-form").is_some());
+        assert!(h.bounds(cx, "clone-url").is_none());
+        assert!(h.bounds(cx, "clone-choose-dir").is_some());
+        let dest = tempfile::tempdir().expect("tempdir");
+        retype(&h, cx, "clone-dir", &dest.path().to_string_lossy());
+        h.click(cx, "dialog-ok");
+        let target = dest.path().join("hello");
+        assert!(target.join("hello.txt").exists(), "cloned");
+        let path = active_path(&h, cx).expect("opened");
+        assert!(same_dir(&path, &target));
+        let key = path.to_string_lossy().into_owned();
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.state.accounts.get(&key).map(String::as_str),
+                Some("alice")
+            );
+            assert!(o.remote_job.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn ui_clone_any_address_and_refuse_a_full_directory(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let source = TempRepo::new();
+        source.commit_file("x.txt", "x\n", "x");
+        let bare = source.bare_clone();
+        let h = Harness::open(cx, &repo);
+        with_hub(&h, cx, Arc::new(FakeHub::default()));
+        h.act(cx, |o, w, cx| {
+            o.open_palette_in(crate::palette::PaletteMode::CloneAccount, w, cx)
+        });
+        h.click(cx, "palette-choice:Other…");
+        assert!(h.bounds(cx, "clone-url").is_some());
+        // The address field has focus.
+        h.type_text(cx, &bare.to_string_lossy());
+        let dest = tempfile::tempdir().expect("tempdir");
+        let name = bare
+            .file_name()
+            .map(|n| n.to_string_lossy().trim_end_matches(".git").to_string())
+            .expect("name");
+        std::fs::create_dir(dest.path().join(&name)).expect("mkdir");
+        std::fs::write(dest.path().join(&name).join("keep.txt"), "mine").expect("write");
+        retype(&h, cx, "clone-dir", &dest.path().to_string_lossy());
+        assert!(
+            h.bounds(cx, "new-repo-error").is_some(),
+            "full target flagged"
+        );
+        h.click(cx, "dialog-ok");
+        assert!(h.has_settings(cx), "the dialog stays open");
+        assert_eq!(
+            std::fs::read_to_string(dest.path().join(&name).join("keep.txt")).expect("kept"),
+            "mine"
+        );
+        // Into a fresh directory, without submodules.
+        let fresh = dest.path().join("fresh");
+        std::fs::create_dir(&fresh).expect("mkdir");
+        retype(&h, cx, "clone-dir", &fresh.to_string_lossy());
+        h.click(cx, "clone-recurse");
+        h.click(cx, "dialog-ok");
+        assert!(!h.has_settings(cx));
+        let target = fresh.join(&name);
+        assert!(target.join("x.txt").exists());
+        assert!(same_dir(&active_path(&h, cx).expect("opened"), &target));
+        // No account was picked, so none is remembered.
+        h.read(cx, |o, _| assert!(o.state.accounts.is_empty()));
+    }
+
+    #[gpui::test]
+    fn ui_create_a_local_repository(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        with_hub(&h, cx, Arc::new(FakeHub::default()));
+        h.keys(cx, "ctrl-p");
+        h.type_text(cx, "create new");
+        h.keys(cx, "enter");
+        assert!(h.bounds(cx, "palette-choice:alice").is_some());
+        h.click(cx, "palette-choice:No remote");
+        assert!(h.bounds(cx, "create-form").is_some());
+        // GitHub-only fields are hidden.
+        assert!(h.bounds(cx, "create-owner").is_none());
+        assert!(h.bounds(cx, "create-template").is_none());
+        assert!(h.bounds(cx, "create-gitignore").is_some());
+        // The name field has focus; a bad name is refused.
+        h.type_text(cx, "bad/name");
+        h.click(cx, "dialog-ok");
+        assert!(h.has_settings(cx));
+        assert!(h.bounds(cx, "new-repo-error").is_some());
+        retype(&h, cx, "create-name", "fresh");
+        retype(&h, cx, "create-description", "A new thing");
+        let dest = tempfile::tempdir().expect("tempdir");
+        retype(&h, cx, "create-dir", &dest.path().to_string_lossy());
+        h.click(cx, "dialog-ok");
+        assert!(!h.has_settings(cx));
+        let target = dest.path().join("fresh");
+        assert!(target.join(".git").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(target.join("README.md")).expect("readme"),
+            "# fresh\n\nA new thing\n"
+        );
+        assert!(!target.join(".gitignore").exists(), "None was picked");
+        assert!(same_dir(&active_path(&h, cx).expect("opened"), &target));
+    }
+
+    #[gpui::test]
+    fn ui_create_on_github_then_clone(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        // What GitHub would have made: a repository with a README.
+        let made = TempRepo::new();
+        made.commit_file("README.md", "# shiny\n", "Initial commit");
+        let bare = made.bare_clone();
+        let hub = Arc::new(FakeHub {
+            created_url: bare.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        let h = Harness::open(cx, &repo);
+        with_hub(&h, cx, hub.clone());
+        h.act(cx, |o, w, cx| {
+            o.open_palette_in(crate::palette::PaletteMode::CreateAccount, w, cx)
+        });
+        h.click(cx, "palette-choice:alice");
+        assert!(h.bounds(cx, "create-owner").is_some());
+        assert!(h.bounds(cx, "create-template").is_some());
+        assert!(h.bounds(cx, "create-status").is_none(), "lists loaded");
+        h.type_text(cx, "shiny");
+        let dest = tempfile::tempdir().expect("tempdir");
+        retype(&h, cx, "create-dir", &dest.path().to_string_lossy());
+        h.click(cx, "create-public");
+        h.click(cx, "dialog-ok");
+        let sent = hub.created.lock().expect("lock").clone().expect("created");
+        assert_eq!(sent.owner, "alice");
+        assert_eq!(sent.name, "shiny");
+        assert!(!sent.private && sent.readme && sent.template.is_none());
+        let target = dest.path().join("shiny");
+        assert!(target.join("README.md").exists(), "cloned after creating");
+        let path = active_path(&h, cx).expect("opened");
+        assert!(same_dir(&path, &target));
+        let key = path.to_string_lossy().into_owned();
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.state.accounts.get(&key).map(String::as_str),
+                Some("alice")
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn a_local_repository_gets_the_picked_gitignore_and_licence(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        with_hub(&h, cx, Arc::new(FakeHub::default()));
+        let dest = tempfile::tempdir().expect("tempdir");
+        let target = dest.path().join("tidy");
+        let plan = crate::new_repo::CreatePlan {
+            account: None,
+            lookup: Some(gh_account("alice")),
+            new: osier_auth::hub::NewRepo {
+                name: "tidy".into(),
+                readme: false,
+                gitignore: Some("Rust".into()),
+                license: Some("mit".into()),
+                ..Default::default()
+            },
+            target: target.clone(),
+        };
+        h.act(cx, move |o, w, cx| o.start_create(plan, w, cx));
+        assert_eq!(
+            std::fs::read_to_string(target.join(".gitignore")).expect("gitignore"),
+            "# Rust\n/target\n"
+        );
+        let licence = std::fs::read_to_string(target.join("LICENSE")).expect("licence");
+        assert!(licence.starts_with("MIT 20"), "{licence}");
+        assert!(!target.join("README.md").exists());
+        // Left uncommitted, for review in Changes.
+        h.read(cx, |o, _| {
+            let p = o.active_project().expect("opened");
+            assert!(p.path.ends_with("tidy"));
+            assert!(
+                p.snapshot
+                    .as_ref()
+                    .is_some_and(|s| s.status.entries.len() == 2)
+            );
         });
     }
 }

@@ -28,6 +28,9 @@ none of the IDE.
 - **Patches**: copy files or commits as a patch, apply from clipboard or file with a dry run
   and a three-way fallback, and a patch clipboard that shelves changes and carries them
   between projects.
+- **Clone and create**: clone any repository a gh account can reach (or any address), or
+  create one on GitHub with GitHub's own options (template, README, .gitignore, licence)
+  and open it straight away.
 - **Multiple GitHub accounts** through the [gh CLI](https://cli.github.com/): pick an account
   per project, remember it, and never let a token touch the command line or a log.
 - **Files tab** with code, markdown (rendered or source) and image viewing at any revision.

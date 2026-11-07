@@ -18,6 +18,13 @@ pub enum Mode {
         host: String,
         operation: String,
     },
+    /// `osier --gh-api --account <login> --host <host> -- <gh api args>`: the app's GitHub
+    /// calls as one account (`osier_auth::hub`), so tokens stay out of the app.
+    GhApi {
+        account: String,
+        host: String,
+        args: Vec<String>,
+    },
     /// `osier --askpass "<prompt>"` (ssh and git call it this way)
     Askpass(String),
     /// `--version`, with `--verbose` adding runtime details for bug reports.
@@ -46,6 +53,24 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
                 account,
                 host,
                 operation,
+            }
+        }
+        Some("--gh-api") => {
+            let mut account = String::new();
+            let mut host = String::new();
+            let mut it = args[1..].iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--account" => account = it.next().cloned().unwrap_or_default(),
+                    "--host" => host = it.next().cloned().unwrap_or_default(),
+                    "--" => break,
+                    _ => {}
+                }
+            }
+            Mode::GhApi {
+                account,
+                host,
+                args: it.cloned().collect(),
             }
         }
         Some("--askpass") => Mode::Askpass(args.get(1).cloned().unwrap_or_default()),
@@ -104,11 +129,27 @@ pub fn run_credential_helper(account: &str, host: &str, operation: &str) -> i32 
     }
 }
 
+/// Run `gh api` as one account for the app. Exit code for the process.
+pub fn run_gh_api(account: &str, host: &str, args: &[String]) -> i32 {
+    if account.is_empty() || host.is_empty() {
+        eprintln!("osier --gh-api needs --account and --host");
+        return 2;
+    }
+    match osier_auth::hub::run_as(account, host, args) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("osier --gh-api: {e}");
+            1
+        }
+    }
+}
+
 pub const HELP: &str =
     "osier [path]              open a repository; a running Osier opens it and comes to the front
 osier --new-instance [path]   start a separate window instead
 osier --version [--verbose]   (verbose adds git version, display backend and paths)
 osier --credential-helper --account <login> --host <host> <get|store|erase>
+osier --gh-api --account <login> --host <host> -- <gh api args>   (used by the app)
 osier --askpass <prompt>   (also used by ssh and git through SSH_ASKPASS / GIT_ASKPASS)";
 
 #[cfg(test)]
@@ -157,6 +198,28 @@ mod tests {
         assert_eq!(
             p(&["--version", "--verbose"]),
             Mode::Version { verbose: true }
+        );
+    }
+
+    #[test]
+    fn gh_api_mode_keeps_everything_after_the_separator() {
+        assert_eq!(
+            p(&[
+                "--gh-api",
+                "--account",
+                "alice",
+                "--host",
+                "github.com",
+                "--",
+                "--paginate",
+                "--host",
+                "user/repos"
+            ]),
+            Mode::GhApi {
+                account: "alice".into(),
+                host: "github.com".into(),
+                args: vec!["--paginate".into(), "--host".into(), "user/repos".into()],
+            }
         );
     }
 }
