@@ -51,8 +51,10 @@ Osier needs Linux (Wayland, X11 fallback), `git` 2.30 or newer and a GPU driver 
 curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh
 ```
 
+<!-- Reinstate when the AUR packages are published:
 **Arch Linux**: PKGBUILDs for `osier` and `osier-bin` live in `packaging/aur/` until the
 packages are on the AUR.
+-->
 
 **From source**:
 
@@ -64,7 +66,9 @@ packages are on the AUR.
 cargo install --locked --git https://github.com/ReyArlena/osier osier
 ```
 
+<!-- Reinstate when the Flatpak is published:
 A Flatpak manifest draft is in `packaging/flatpak/`.
+-->
 
 ## Usage
 
