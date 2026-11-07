@@ -184,10 +184,17 @@ pub struct Osier {
     pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
     pub(crate) gh_accounts: Vec<osier_auth::GhAccount>,
+    /// `gh_accounts` has been asked for (whatever the answer); the clone and create
+    /// submenus wait for it.
+    pub(crate) gh_accounts_loaded: bool,
     /// GitHub API access for clone and create (`new_repo.rs`); a fake in tests.
     pub(crate) hub: std::sync::Arc<dyn crate::new_repo::Hub>,
     /// Repository lists per account (`login@host`), for the clone submenu and templates.
     pub(crate) hub_repos: std::collections::HashMap<String, Vec<osier_auth::hub::GhRepo>>,
+    /// Counted background work for the status bar (`background.rs`).
+    pub(crate) background: crate::background::Background,
+    /// `background` version last drawn.
+    background_seen: u64,
     /// Accounts whose list `prefetch_hub_repos` is fetching.
     pub(crate) hub_repos_loading: std::collections::HashSet<String>,
     /// Repositories found under the configured scan directories.
@@ -380,7 +387,7 @@ impl Osier {
             settings,
             state,
             runner,
-            sink,
+            sink: sink.clone(),
             projects: Vec::new(),
             active: None,
             show_reflog: false,
@@ -416,9 +423,12 @@ impl Osier {
             state_dirty: false,
             remote_job: None,
             gh_accounts: Vec::new(),
-            hub: crate::new_repo::default_hub(),
+            gh_accounts_loaded: false,
+            hub: crate::new_repo::default_hub(sink.clone()),
             hub_repos: std::collections::HashMap::new(),
             hub_repos_loading: std::collections::HashSet::new(),
+            background: Default::default(),
+            background_seen: 0,
             scanned: Vec::new(),
             sidebar_filter,
             sidebar_filter_bounds: Default::default(),
@@ -659,7 +669,9 @@ impl Osier {
             return;
         }
         let depth = self.settings.projects.scan_depth.unwrap_or(1);
+        let busy = self.background.begin(crate::background::SCAN_DIRS);
         cx.spawn(async move |this, cx| {
+            let _busy = busy;
             let found = cx
                 .background_spawn(async move { osier_config::scan::scan(&dirs, depth) })
                 .await;
@@ -1479,6 +1491,14 @@ impl Osier {
                     .timer(Duration::from_millis(400))
                     .await;
                 let alive = this.update_in(cx, |this, window, cx| {
+                    // Background work started or finished: redraw the status bar.
+                    let bg = this.background.version();
+                    if bg != this.background_seen {
+                        this.background_seen = bg;
+                        if this.settings.appearance.show_background_tasks {
+                            cx.notify();
+                        }
+                    }
                     // Another `osier <path>` handed its path over.
                     for request in crate::instance::take_requests() {
                         if let crate::instance::Request::Open(path) = request {
@@ -6307,6 +6327,13 @@ mod tests {
         fn orgs(&self, _: &osier_auth::GhAccount) -> Result<Vec<String>, String> {
             Ok(vec!["acme".into()])
         }
+        fn templates(
+            &self,
+            _: &osier_auth::GhAccount,
+            owners: &[String],
+        ) -> Result<Vec<String>, String> {
+            Ok(owners.iter().map(|o| format!("{o}/starter")).collect())
+        }
         fn gitignore_templates(&self, _: &osier_auth::GhAccount) -> Result<Vec<String>, String> {
             Ok(vec!["Rust".into(), "Node".into()])
         }
@@ -6362,6 +6389,7 @@ mod tests {
     fn with_hub(h: &Harness, cx: &mut TestAppContext, hub: Arc<FakeHub>) {
         h.act(cx, move |o, _, _| {
             o.gh_accounts = vec![gh_account("alice")];
+            o.gh_accounts_loaded = true;
             o.hub = hub;
         });
     }
@@ -6639,5 +6667,72 @@ mod tests {
         h.act(cx, move |o, w, cx| o.switch_to_project(&a_path, w, cx));
         assert_eq!(active_name(&h, cx), first);
         assert_eq!(tab(&h, cx), Tab::Changes);
+    }
+
+    #[gpui::test]
+    fn background_tasks_show_only_when_asked(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let guard = h.read(cx, |o, _| o.background.begin(crate::background::GH_LISTS));
+        h.act(cx, |_, _, cx| cx.notify());
+        assert!(h.bounds(cx, "background-tasks").is_none(), "off by default");
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.show_background_tasks = true;
+            cx.notify();
+        });
+        assert!(h.bounds(cx, "background-tasks").is_some());
+        h.read(cx, |o, _| {
+            assert!(
+                o.background_labels()
+                    .contains(&crate::background::GH_LISTS.to_string())
+            )
+        });
+        // Dropping the guard (the work finished or its dialog closed) counts it out.
+        drop(guard);
+        h.act(cx, |_, _, cx| cx.notify());
+        assert!(h.bounds(cx, "background-tasks").is_none());
+    }
+
+    #[gpui::test]
+    fn the_clone_submenu_waits_for_the_gh_accounts(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, w, cx| {
+            o.gh_accounts.clear();
+            o.gh_accounts_loaded = false;
+            o.hub = Arc::new(FakeHub::default());
+            o.open_palette_in(crate::palette::PaletteMode::CloneAccount, w, cx)
+        });
+        assert!(h.bounds(cx, "palette-status").is_some());
+        assert!(h.bounds(cx, "palette-choice:alice").is_none());
+        h.act(cx, |o, _, _| {
+            o.gh_accounts = vec![gh_account("alice")];
+            o.gh_accounts_loaded = true;
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(h.bounds(cx, "palette-status").is_none());
+        assert!(h.bounds(cx, "palette-choice:alice").is_some());
+    }
+
+    #[gpui::test]
+    fn higher_contrast_makes_ref_badges_opaque(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let _h = Harness::open(cx, &repo);
+        cx.update(|cx| {
+            cx.set_global(crate::themes::HighContrast(false));
+            let (bg, _) = crate::themes::badge_tint(cx);
+            assert!(bg.a < 0.5, "faint as the theme intends");
+            cx.set_global(crate::themes::HighContrast(true));
+            let (bg, border) = crate::themes::badge_tint(cx);
+            assert!(
+                bg.a > 0.99 && border.a > 0.99,
+                "opaque with higher contrast"
+            );
+        });
     }
 }

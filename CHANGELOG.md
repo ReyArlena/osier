@@ -8,6 +8,21 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Show background tasks (Settings > Appearance, off by default): a spinner and label in the
+  status bar while Osier refreshes, checks project status, scans directories, loads GitHub
+  lists or looks up diffs, blame and branches.
+- GitHub API calls made for clone and create appear in the git command log (the helper
+  command, status, time and GitHub's error message, such as a rate limit; never a token).
+
+### Changed
+
+- Higher contrast also strengthens the ref badges in the Log and the palette's submenu badge.
+- Status bar text is easier to read, and running jobs (fetch, pull, push, clone, create)
+  show a larger spinner in the theme's main colour.
+- Create new repository finds templates with one GitHub search over the account and its
+  organisations instead of reading every repository it can reach.
+- The clone and create submenus wait for the gh accounts when opened right after startup.
+
 - Opening a project (fresh, from the recent list, `osier <path>` or after a clone) that has
   changes shows the Changes tab. Switching between open projects keeps its existing rules.
 - Clone repository… (command palette, bindable, no default key): pick a gh account and one of

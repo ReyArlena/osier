@@ -33,8 +33,10 @@ impl Osier {
             return;
         };
         self.commit_branches_loading = Some(hash.to_string());
+        let busy = self.background.begin(crate::background::BRANCHES);
         let hash = hash.to_string();
         cx.spawn(async move |this, cx| {
+            let _busy = busy;
             let h = hash.clone();
             let found = cx
                 .background_spawn(async move { osier_git::refs::branches_containing(&repo, &h) })

@@ -39,8 +39,8 @@ pub(crate) struct RecentStatus {
     /// Watch roots the watcher reported, drained by the tick loop.
     touched: Arc<Mutex<BTreeSet<PathBuf>>>,
     /// `(repo, full)`: full = worktree status, otherwise refs only.
-    queue: VecDeque<(PathBuf, bool)>,
-    busy: bool,
+    pub(crate) queue: VecDeque<(PathBuf, bool)>,
+    pub(crate) busy: bool,
     last_sweep: Option<Instant>,
     runner: GitRunner,
 }
@@ -373,6 +373,9 @@ impl Osier {
             && let Some((repo, full)) = self.recent_status.queue.pop_front()
         {
             self.recent_status.busy = true;
+            if self.settings.appearance.show_background_tasks {
+                cx.notify();
+            }
             let runner = self.recent_status.runner.clone();
             cx.spawn(async move |this, cx| {
                 let path = repo.clone();
@@ -393,6 +396,9 @@ impl Osier {
                 tracing::debug!(repo = %repo.display(), full, ms = started.elapsed().as_millis() as u64, "recent status");
                 let _ = this.update(cx, |this, cx| {
                     this.recent_status.busy = false;
+                    if this.settings.appearance.show_background_tasks {
+                        cx.notify();
+                    }
                     if let Some(q) = result {
                         let rs = &mut this.recent_status;
                         let previous = rs.cache.get(&repo).unwrap_or_default();

@@ -538,6 +538,9 @@ impl Osier {
         let choices = Rc::new(self.choices_for(mode));
         let palette =
             cx.new(|cx| Palette::new(owner, commands, mode, projects, choices, window, cx));
+        if Palette::lists_accounts(mode) && !self.gh_accounts_loaded {
+            palette.update(cx, |p, cx| p.wait_for_accounts(window, cx));
+        }
         let focus_on_mount = Rc::new(Cell::new(true));
         window.open_dialog(cx, move |dialog, _, _| {
             let palette = palette.clone();
@@ -656,6 +659,9 @@ impl Palette {
         }
         self.projects = owner.read(cx).entries_for(mode);
         self.choices = Rc::new(owner.read(cx).choices_for(mode));
+        if Self::lists_accounts(mode) && !owner.read(cx).gh_accounts_loaded {
+            self.wait_for_accounts(window, cx);
+        }
         if mode != PaletteMode::CloneRepo {
             return;
         }
@@ -676,7 +682,9 @@ impl Palette {
             None => self.status = Some("Loading repositories…".into()),
         }
         // Always refresh: the cached list shows at once, the new one replaces it.
+        let busy = owner.read(cx).background.begin(crate::background::GH_REPOS);
         self._load = Some(cx.spawn_in(window, async move |this, cx| {
+            let _busy = busy;
             let acc = account.clone();
             let result = cx.background_spawn(async move { hub.repos(&acc) }).await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -703,6 +711,45 @@ impl Palette {
                 this.rebuild_list(window, cx);
             });
         }));
+    }
+
+    fn lists_accounts(mode: PaletteMode) -> bool {
+        matches!(mode, PaletteMode::CloneAccount | PaletteMode::CreateAccount)
+    }
+
+    /// Opened before gh answered at startup: say so, and fill the accounts in when it has.
+    fn wait_for_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.status = Some("Loading GitHub accounts…".into());
+        let mode = self.mode;
+        self._load = Some(cx.spawn_in(window, async move |this, cx| {
+            for _ in 0..200 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(150))
+                    .await;
+                let done = this
+                    .update_in(cx, |this, window, cx| {
+                        if this.mode != mode {
+                            return true;
+                        }
+                        let Some(owner) = this.owner.upgrade() else {
+                            return true;
+                        };
+                        if !owner.read(cx).gh_accounts_loaded {
+                            return false;
+                        }
+                        this.status = None;
+                        this.choices = Rc::new(owner.read(cx).choices_for(mode));
+                        owner.update(cx, |o, cx| o.prefetch_hub_repos(cx));
+                        this.rebuild_list(window, cx);
+                        true
+                    })
+                    .unwrap_or(true);
+                if done {
+                    return;
+                }
+            }
+        }));
+        cx.notify();
     }
 
     /// The badge, with the account once one is picked.
@@ -952,8 +999,12 @@ fn render_query(
             .px_2()
             .py_0p5()
             .rounded(theme.radius)
-            .bg(theme.primary.opacity(0.18))
-            .text_color(theme.primary)
+            .bg(crate::themes::badge_tint(cx).0)
+            .text_color(if crate::themes::high_contrast_on(cx) {
+                theme.foreground
+            } else {
+                theme.primary
+            })
             .text_xs()
             .font_weight(FontWeight::MEDIUM)
             .child(badge)

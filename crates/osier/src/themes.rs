@@ -241,10 +241,35 @@ fn user_theme_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Apply a theme by name, then the user's font overrides. False when the name is unknown.
+/// Whether Higher contrast is on, for views that draw their own tints (badges).
+#[derive(Default)]
+pub struct HighContrast(pub bool);
+
+impl Global for HighContrast {}
+
+pub fn high_contrast_on(cx: &App) -> bool {
+    cx.try_global::<HighContrast>().is_some_and(|h| h.0)
+}
+
+/// Background and border of a primary-tinted badge (ref labels, the palette badge): faint as
+/// the theme intends, or opaque and stronger with Higher contrast.
+pub fn badge_tint(cx: &App) -> (gpui_kit::Hsla, gpui_kit::Hsla) {
+    let theme = gpui_kit::component::ActiveTheme::theme(cx);
+    if high_contrast_on(cx) {
+        (
+            theme.background.blend(theme.primary.opacity(0.42)),
+            theme.primary,
+        )
+    } else {
+        (theme.primary.opacity(0.18), theme.primary.opacity(0.32))
+    }
+}
+
 pub fn apply(name: &str, appearance: &Appearance, cx: &mut App) -> bool {
     let Some(config) = ThemeStore::global(cx).get(name) else {
         return false;
     };
+    cx.set_global(HighContrast(appearance.high_contrast));
     let base = ThemeStore::global(cx)
         .base_fonts
         .clone()

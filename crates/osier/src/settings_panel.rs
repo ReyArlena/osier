@@ -463,6 +463,21 @@ fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                      theme's main colour, like the switches.",
                 ),
                 SettingItem::new(
+                    "Show background tasks",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.show_background_tasks),
+                        set(view, |o, v: bool, _| {
+                            o.settings.appearance.show_background_tasks = v
+                        }),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "A spinner in the status bar while Osier works quietly: re-reading a project after \
+                     a change, checking project status, loading GitHub lists, diffs and branch \
+                     lookups. Fetch, pull, push, clone and create always show.",
+                ),
+                SettingItem::new(
                     "Mode",
                     SettingField::dropdown(
                         vec![

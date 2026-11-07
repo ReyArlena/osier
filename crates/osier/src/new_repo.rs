@@ -43,6 +43,8 @@ use crate::test_ids::TestId as _;
 pub(crate) trait Hub: Send + Sync {
     fn repos(&self, account: &GhAccount) -> Result<Vec<GhRepo>, String>;
     fn orgs(&self, account: &GhAccount) -> Result<Vec<String>, String>;
+    /// Template repositories of `owners` (the account first, then its organisations).
+    fn templates(&self, account: &GhAccount, owners: &[String]) -> Result<Vec<String>, String>;
     fn gitignore_templates(&self, account: &GhAccount) -> Result<Vec<String>, String>;
     fn licenses(&self, account: &GhAccount) -> Result<Vec<License>, String>;
     fn gitignore_template(&self, account: &GhAccount, name: &str) -> Result<String, String>;
@@ -56,31 +58,68 @@ pub(crate) trait Hub: Send + Sync {
     fn create(&self, account: &GhAccount, new: &NewRepo) -> Result<CreatedRepo, String>;
 }
 
-/// The real one: `gh api` as the chosen account, through `osier --gh-api`.
+/// The real one: `gh api` as the chosen account, through `osier --gh-api`. Every call goes
+/// to the git command log like a git command (the helper's argv, never a token).
 #[cfg_attr(test, allow(dead_code))]
-struct GhHub;
+struct GhHub {
+    log: Arc<dyn osier_git::CommandSink>,
+}
 
 #[cfg_attr(test, allow(dead_code))]
-fn exe() -> Result<PathBuf, String> {
-    std::env::current_exe().map_err(|e| format!("cannot find the Osier binary: {e}"))
+impl GhHub {
+    fn with<T>(
+        &self,
+        a: &GhAccount,
+        call: impl FnOnce(&osier_auth::hub::Gh) -> osier_auth::Result<T>,
+    ) -> Result<T, String> {
+        let exe =
+            std::env::current_exe().map_err(|e| format!("cannot find the Osier binary: {e}"))?;
+        let observe = |c: &osier_auth::hub::ApiCall| {
+            // Shown like the git rows: the program by name, not its full path.
+            let mut argv = c.argv.clone();
+            if let Some(first) = argv.first_mut() {
+                *first = "osier".into();
+            }
+            self.log.record(&osier_git::CommandRecord {
+                id: 0,
+                argv,
+                cwd: None,
+                started: c.started,
+                duration: c.duration,
+                status: c.status,
+                expected: c.status == Some(0),
+                stdout_len: c.stdout_len,
+                stderr: c.stderr.clone(),
+            })
+        };
+        let gh = osier_auth::hub::Gh {
+            exe: &exe,
+            login: &a.login,
+            host: &a.host,
+            observer: Some(&observe),
+        };
+        call(&gh).map_err(|e| e.to_string())
+    }
 }
 
 impl Hub for GhHub {
     fn repos(&self, a: &GhAccount) -> Result<Vec<GhRepo>, String> {
-        osier_auth::hub::repos(&exe()?, &a.login, &a.host).map_err(|e| e.to_string())
+        self.with(a, osier_auth::hub::repos)
     }
     fn orgs(&self, a: &GhAccount) -> Result<Vec<String>, String> {
-        osier_auth::hub::orgs(&exe()?, &a.login, &a.host).map_err(|e| e.to_string())
+        self.with(a, osier_auth::hub::orgs)
+    }
+    fn templates(&self, a: &GhAccount, owners: &[String]) -> Result<Vec<String>, String> {
+        self.with(a, |gh| osier_auth::hub::templates(gh, owners))
     }
     fn gitignore_templates(&self, a: &GhAccount) -> Result<Vec<String>, String> {
-        osier_auth::hub::gitignore_templates(&exe()?, &a.login, &a.host).map_err(|e| e.to_string())
+        self.with(a, osier_auth::hub::gitignore_templates)
     }
     fn licenses(&self, a: &GhAccount) -> Result<Vec<License>, String> {
-        osier_auth::hub::licenses(&exe()?, &a.login, &a.host).map_err(|e| e.to_string())
+        self.with(a, osier_auth::hub::licenses)
     }
     fn gitignore_template(&self, a: &GhAccount, name: &str) -> Result<String, String> {
-        osier_auth::hub::gitignore_template(&exe()?, &a.login, &a.host, name)
-            .map_err(|e| e.to_string())
+        self.with(a, |gh| osier_auth::hub::gitignore_template(gh, name))
     }
     fn license_text(
         &self,
@@ -89,11 +128,10 @@ impl Hub for GhHub {
         year: i32,
         holder: &str,
     ) -> Result<String, String> {
-        osier_auth::hub::license_text(&exe()?, &a.login, &a.host, key, year, holder)
-            .map_err(|e| e.to_string())
+        self.with(a, |gh| osier_auth::hub::license_text(gh, key, year, holder))
     }
     fn create(&self, a: &GhAccount, new: &NewRepo) -> Result<CreatedRepo, String> {
-        osier_auth::hub::create(&exe()?, &a.login, &a.host, new).map_err(|e| e.to_string())
+        self.with(a, |gh| osier_auth::hub::create(gh, new))
     }
 }
 
@@ -107,6 +145,9 @@ impl Hub for NoHub {
         Err("no GitHub in tests".into())
     }
     fn orgs(&self, _: &GhAccount) -> Result<Vec<String>, String> {
+        Err("no GitHub in tests".into())
+    }
+    fn templates(&self, _: &GhAccount, _: &[String]) -> Result<Vec<String>, String> {
         Err("no GitHub in tests".into())
     }
     fn gitignore_templates(&self, _: &GhAccount) -> Result<Vec<String>, String> {
@@ -126,14 +167,15 @@ impl Hub for NoHub {
     }
 }
 
-pub(crate) fn default_hub() -> Arc<dyn Hub> {
+pub(crate) fn default_hub(log: Arc<dyn osier_git::CommandSink>) -> Arc<dyn Hub> {
     #[cfg(test)]
     {
+        let _ = log;
         Arc::new(NoHub)
     }
     #[cfg(not(test))]
     {
-        Arc::new(GhHub)
+        Arc::new(GhHub { log })
     }
 }
 
@@ -147,7 +189,9 @@ impl Osier {
                 continue;
             }
             let hub = self.hub.clone();
+            let busy = self.background.begin(crate::background::GH_REPOS);
             cx.spawn(async move |this, cx| {
+                let _busy = busy;
                 let repos = cx
                     .background_spawn(async move { hub.repos(&account) })
                     .await;
@@ -730,7 +774,7 @@ const NO_TEMPLATE: &str = "No template";
 /// One list the create form fills from GitHub, as it arrives.
 enum Loaded {
     Orgs(Vec<String>),
-    Repos(Vec<GhRepo>),
+    Templates(Vec<String>),
     Gitignores(Vec<String>),
     Licenses(Vec<License>),
 }
@@ -753,8 +797,7 @@ struct FormSeed {
     account: Option<GhAccount>,
     lookup: Option<GhAccount>,
     hub: Arc<dyn Hub>,
-    cached_repos: Option<Vec<GhRepo>>,
-    owner_view: WeakEntity<Osier>,
+    background: crate::background::Background,
     parent: PathBuf,
 }
 
@@ -779,8 +822,6 @@ pub(crate) struct CreateForm {
     /// Lists still on their way, and the errors of those that failed.
     pending: usize,
     load_errors: Vec<String>,
-    /// The main view, to cache the account's repository list.
-    owner_view: WeakEntity<Osier>,
     _loads: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -791,8 +832,7 @@ impl CreateForm {
             account,
             lookup,
             hub,
-            cached_repos,
-            owner_view,
+            background,
             parent,
         } = seed;
         let parent = parent.as_path();
@@ -848,7 +888,6 @@ impl CreateForm {
             error: None,
             pending: 0,
             load_errors: Vec::new(),
-            owner_view,
             _loads: Vec::new(),
             _subscriptions,
         };
@@ -870,17 +909,20 @@ impl CreateForm {
             if account.is_some() {
                 let (h, a) = (hub.clone(), source.clone());
                 jobs.push(Box::new(move || h.orgs(&a).map(Loaded::Orgs)));
-                // Only for the templates, and slow for accounts that reach hundreds of
-                // repositories: the other lists do not wait for it.
+                // One search over the account and its organisations, not a read of every
+                // repository it can reach (hundreds for some accounts).
                 let (h, a) = (hub.clone(), source.clone());
-                jobs.push(Box::new(move || match cached_repos {
-                    Some(r) => Ok(Loaded::Repos(r)),
-                    None => h.repos(&a).map(Loaded::Repos),
+                jobs.push(Box::new(move || {
+                    let mut owners = vec![a.login.clone()];
+                    owners.extend(h.orgs(&a).unwrap_or_default());
+                    h.templates(&a, &owners).map(Loaded::Templates)
                 }));
             }
             this.pending = jobs.len();
             for job in jobs {
+                let busy = background.begin(crate::background::GH_LISTS);
                 this._loads.push(cx.spawn_in(window, async move |this, cx| {
+                    let _busy = busy;
                     let loaded = cx.background_spawn(async move { job() }).await;
                     let _ = this.update_in(cx, |this, window, cx| this.fill(loaded, window, cx));
                 }));
@@ -911,19 +953,7 @@ impl CreateForm {
                     set(&self.owner, &login, orgs, window, cx);
                 }
             }
-            Ok(Loaded::Repos(repos)) => {
-                if let Some(a) = &self.account {
-                    let key = account_key(a);
-                    let cache = repos.clone();
-                    let _ = self.owner_view.update(cx, |o, _| {
-                        o.hub_repos.insert(key, cache);
-                    });
-                }
-                let templates = repos
-                    .into_iter()
-                    .filter(|r| r.is_template)
-                    .map(|r| r.full_name)
-                    .collect();
+            Ok(Loaded::Templates(templates)) => {
                 set(&self.template, NO_TEMPLATE, templates, window, cx);
             }
             Ok(Loaded::Gitignores(names)) => set(&self.gitignore, NONE, names, window, cx),
@@ -1191,22 +1221,18 @@ impl Osier {
             .find(|a| a.active)
             .or_else(|| self.gh_accounts.first())
             .cloned();
-        let cached = account
-            .as_ref()
-            .and_then(|a| self.hub_repos.get(&account_key(a)).cloned());
         let hub = self.hub.clone();
         let title: SharedString = match &account {
             Some(a) => format!("Create a repository as {}", a.login).into(),
             None => "Create a local repository".into(),
         };
-        let owner_view = cx.weak_entity();
+        let background = self.background.clone();
         let form = cx.new(|cx| {
             let seed = FormSeed {
                 account,
                 lookup,
                 hub,
-                cached_repos: cached,
-                owner_view,
+                background,
                 parent,
             };
             CreateForm::new(seed, window, cx)

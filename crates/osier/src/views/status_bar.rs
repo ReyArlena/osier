@@ -18,11 +18,27 @@ impl Osier {
         has_project: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+        // The bar's own grey is too faint for text people read: main text in the foreground,
+        // secondary text halfway between.
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground.blend(fg.opacity(0.45));
+        let primary = cx.theme().primary;
+        let busy = |text: String| {
+            h_flex()
+                .gap_1p5()
+                .items_center()
+                .child(
+                    Spinner::new()
+                        .icon(Lucide::LoaderCircle)
+                        .small()
+                        .color(primary),
+                )
+                .child(div().truncate().max_w(px(420.)).child(text))
+        };
+        let background = self.background_labels();
         let project = self.active_project();
         let snapshot = project.and_then(|p| p.snapshot.as_ref());
         let branch = snapshot.map(|s| &s.status.branch);
-        let loading = project.map(|p| p.loading).unwrap_or(false);
         let error = project
             .and_then(|p| p.error.clone())
             .or_else(|| self.global_error.clone());
@@ -40,6 +56,7 @@ impl Osier {
                 h_flex()
                     .gap_1()
                     .text_xs()
+                    .text_color(fg)
                     .items_center()
                     .when(has_project, |this| {
                         this.child(Icon::new(Lucide::GitBranch).xsmall())
@@ -63,8 +80,9 @@ impl Osier {
             )
             .left(
                 h_flex()
-                    .gap_2()
+                    .gap_3()
                     .text_xs()
+                    .text_color(fg)
                     .items_center()
                     .when_some(in_progress, |this, op| {
                         this.child(Tag::warning().xsmall().child(op))
@@ -75,33 +93,21 @@ impl Osier {
                             None => format!("{}: {}", job.label, job.phase),
                         };
                         this.child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(Spinner::new().xsmall())
-                                .child(div().truncate().max_w(px(360.)).child(text))
-                                .child(
-                                    Button::new("cancel-remote")
-                                        .test_id("cancel-remote")
-                                        .ghost()
-                                        .xsmall()
-                                        .label("Cancel")
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| {
-                                                this.cancel_remote_job(cx)
-                                            }),
-                                        ),
-                                ),
+                            busy(text).test_id("remote-job").child(
+                                Button::new("cancel-remote")
+                                    .test_id("cancel-remote")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Cancel")
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.cancel_remote_job(cx)),
+                                    ),
+                            ),
                         )
                     })
-                    .when(loading && self.remote_job.is_none(), |this| {
-                        this.child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(Spinner::new().xsmall())
-                                .child(div().text_color(muted).child("refreshing")),
-                        )
+                    // Quiet work, when `appearance.show_background_tasks` asks for it.
+                    .when(!background.is_empty(), |this| {
+                        this.child(busy(background.join(" · ")).test_id("background-tasks"))
                     })
                     .when_some(error, |this, e| {
                         this.child(

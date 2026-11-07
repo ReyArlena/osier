@@ -661,12 +661,8 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
     } else if is_tag {
         Tag::warning()
     } else {
-        let primary = cx.theme().primary;
-        Tag::custom(
-            primary.opacity(0.18),
-            cx.theme().foreground,
-            primary.opacity(0.32),
-        )
+        let (bg, border) = crate::themes::badge_tint(cx);
+        Tag::custom(bg, cx.theme().foreground, border)
     };
     tag.xsmall().child(text)
 }

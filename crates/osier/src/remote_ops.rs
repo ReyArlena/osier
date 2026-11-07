@@ -123,11 +123,14 @@ struct AccountNeeded {
 
 impl Osier {
     pub(crate) fn load_gh_accounts(&mut self, cx: &mut Context<Self>) {
+        let busy = self.background.begin(crate::background::GH_ACCOUNTS);
         cx.spawn(async move |this, cx| {
+            let _busy = busy;
             let accounts = cx
                 .background_spawn(async move { osier_auth::gh::accounts() })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                this.gh_accounts_loaded = true;
                 match accounts {
                     Ok(list) => this.gh_accounts = list,
                     Err(e) => tracing::info!(error = %e, "gh accounts unavailable"),

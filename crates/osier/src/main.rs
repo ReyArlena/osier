@@ -5,6 +5,7 @@
 mod actions;
 mod app;
 mod askpass;
+mod background;
 mod blame_view;
 mod changes_ops;
 mod cli;
