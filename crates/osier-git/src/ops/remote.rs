@@ -177,6 +177,8 @@ pub struct PullOptions {
     pub remote: Option<String>,
     pub branch: Option<String>,
     pub prune: bool,
+    /// `--autostash`: set uncommitted changes aside and put them back afterwards.
+    pub autostash: bool,
 }
 
 impl Default for PullOptions {
@@ -186,6 +188,7 @@ impl Default for PullOptions {
             remote: None,
             branch: None,
             prune: false,
+            autostash: false,
         }
     }
 }
@@ -204,6 +207,9 @@ pub fn pull(
     });
     if options.prune {
         args.push("--prune".into());
+    }
+    if options.autostash {
+        args.push("--autostash".into());
     }
     if let Some(r) = &options.remote {
         args.push(r.clone());

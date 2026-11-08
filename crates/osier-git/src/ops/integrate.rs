@@ -33,8 +33,13 @@ pub enum MergeMode {
 
 /// Merge `branch` into the current branch. Conflicts surface as [`GitError::Conflict`] and
 /// leave the repository in the merge state for [`continue_in_progress`] / [`abort`].
-pub fn merge(repo: &Repository, branch: &str, mode: MergeMode) -> Result<()> {
+/// `autostash` sets uncommitted changes aside first; git puts them back when the merge ends
+/// (including after a continue or abort).
+pub fn merge(repo: &Repository, branch: &str, mode: MergeMode, autostash: bool) -> Result<()> {
     let mut args = vec!["merge", "--no-edit"];
+    if autostash {
+        args.push("--autostash");
+    }
     match mode {
         MergeMode::Default => {}
         MergeMode::NoFastForward => args.push("--no-ff"),
@@ -45,9 +50,13 @@ pub fn merge(repo: &Repository, branch: &str, mode: MergeMode) -> Result<()> {
     run(repo, &args)
 }
 
-/// Rebase the current branch onto `onto`.
-pub fn rebase(repo: &Repository, onto: &str) -> Result<()> {
-    run(repo, &["rebase", onto])
+/// Rebase the current branch onto `onto`. `autostash` as for [`merge`].
+pub fn rebase(repo: &Repository, onto: &str, autostash: bool) -> Result<()> {
+    if autostash {
+        run(repo, &["rebase", "--autostash", onto])
+    } else {
+        run(repo, &["rebase", onto])
+    }
 }
 
 /// Cherry-pick one or more commits (oldest first). Each becomes its own commit.
@@ -205,6 +214,45 @@ mod tests {
     }
 
     #[test]
+    fn autostash_puts_uncommitted_changes_back() {
+        // keep.txt is edited but not committed; rebase refuses that without autostash.
+        let t = diverged();
+        t.git(["reset", "--hard", "HEAD~1"]);
+        t.write("keep.txt", "edited\n");
+        let repo = t.repo();
+        assert!(rebase(&repo, "feature", false).is_err());
+        rebase(&repo, "feature", true).unwrap();
+        assert_eq!(t.read("keep.txt"), "edited\n");
+        assert_eq!(crate::stash::autostash_count(&repo), 0);
+
+        // A merge that stops for conflicts puts them back on abort.
+        let t = diverged();
+        t.write("keep.txt", "edited\n");
+        let repo = t.repo();
+        assert!(matches!(
+            merge(&repo, "feature", MergeMode::Default, true),
+            Err(GitError::Conflict(_))
+        ));
+        abort(&repo).unwrap();
+        assert_eq!(t.read("keep.txt"), "edited\n");
+        assert_eq!(crate::stash::autostash_count(&repo), 0);
+    }
+
+    #[test]
+    fn autostash_that_clashes_is_left_in_the_stash_list() {
+        // feature changes keep.txt; the uncommitted edit to it cannot go back cleanly.
+        let t = TempRepo::new();
+        t.commit_file("keep.txt", "k\n", "base");
+        t.checkout_new("feature");
+        t.commit_file("keep.txt", "theirs\n", "theirs");
+        t.checkout("main");
+        t.write("keep.txt", "mine\n");
+        let repo = t.repo();
+        let _ = rebase(&repo, "feature", true);
+        assert_eq!(crate::stash::autostash_count(&repo), 1);
+    }
+
+    #[test]
     fn merge_modes_and_conflict_flow() {
         let t = TempRepo::new();
         t.commit_file("a.txt", "a\n", "base");
@@ -212,7 +260,7 @@ mod tests {
         t.commit_file("b.txt", "b\n", "feature");
         t.checkout("main");
         let repo = t.repo();
-        merge(&repo, "feature", MergeMode::FastForwardOnly).unwrap();
+        merge(&repo, "feature", MergeMode::FastForwardOnly, false).unwrap();
         assert_eq!(
             t.git(["rev-list", "--merges", "--count", "HEAD"]).trim(),
             "0"
@@ -223,10 +271,10 @@ mod tests {
         t.checkout("main");
         t.commit_file("d.txt", "d\n", "main work");
         assert!(matches!(
-            merge(&repo, "feature", MergeMode::FastForwardOnly),
+            merge(&repo, "feature", MergeMode::FastForwardOnly, false),
             Err(GitError::NonFastForward(_)) | Err(GitError::Failed { .. })
         ));
-        merge(&repo, "feature", MergeMode::NoFastForward).unwrap();
+        merge(&repo, "feature", MergeMode::NoFastForward, false).unwrap();
         assert_eq!(
             t.git(["rev-list", "--merges", "--count", "HEAD"]).trim(),
             "1"
@@ -235,7 +283,7 @@ mod tests {
         t.checkout("feature");
         t.commit_file("e.txt", "e\n", "even more");
         t.checkout("main");
-        merge(&repo, "feature", MergeMode::Squash).unwrap();
+        merge(&repo, "feature", MergeMode::Squash, false).unwrap();
         let s = status(&repo, StatusOptions::default()).unwrap();
         assert!(
             s.staged().any(|e| e.path == "e.txt"),
@@ -249,7 +297,7 @@ mod tests {
         let t = diverged();
         let repo = t.repo();
         assert!(matches!(
-            merge(&repo, "feature", MergeMode::Default),
+            merge(&repo, "feature", MergeMode::Default, false),
             Err(GitError::Conflict(_))
         ));
         assert_eq!(repo.in_progress(), Some(InProgress::Merge));
@@ -282,7 +330,7 @@ mod tests {
         let t = diverged();
         let repo = t.repo();
         let head = t.head();
-        assert!(merge(&repo, "feature", MergeMode::Default).is_err());
+        assert!(merge(&repo, "feature", MergeMode::Default, false).is_err());
         write_resolution(&repo, "c.txt", "both\n").unwrap();
         mark_resolved(&repo, &["c.txt".into()]).unwrap();
         assert!(
@@ -304,7 +352,10 @@ mod tests {
         let t = diverged();
         let repo = t.repo();
         t.checkout("feature");
-        assert!(matches!(rebase(&repo, "main"), Err(GitError::Conflict(_))));
+        assert!(matches!(
+            rebase(&repo, "main", false),
+            Err(GitError::Conflict(_))
+        ));
         assert_eq!(repo.in_progress(), Some(InProgress::Rebase));
         // During a rebase "theirs" is the commit being replayed (the feature change).
         resolve_with(&repo, &["c.txt".into()], ConflictSide::Theirs).unwrap();
@@ -331,7 +382,7 @@ mod tests {
         t.checkout("main");
         t.commit_file("c.txt", "ours again\n", "ours again");
         t.checkout("feature");
-        assert!(rebase(&repo, "main").is_err());
+        assert!(rebase(&repo, "main", false).is_err());
         skip_in_progress(&repo).unwrap();
         assert_eq!(repo.in_progress(), None);
         assert_eq!(t.read("c.txt"), "ours again\n");

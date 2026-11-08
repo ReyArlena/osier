@@ -332,7 +332,7 @@ fn squash_separated(repo: &Repository, plan: &SquashPlan, message: &str) -> Resu
         todo.push_str(&format!("pick {h}\n"));
     }
     let base = plan.base.clone().unwrap_or_else(|| "--root".to_string());
-    if let Err(error) = crate::ops::rebase_interactive::run_todo(repo, &base, &todo, &dir) {
+    if let Err(error) = crate::ops::rebase_interactive::run_todo(repo, &base, &todo, &dir, false) {
         let _ = repo.git(["rebase", "--abort"]);
         return Err(match error {
             GitError::Conflict(_) => refused(

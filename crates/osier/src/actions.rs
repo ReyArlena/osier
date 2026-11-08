@@ -42,6 +42,25 @@ impl PromptFlag {
         self
     }
 
+    /// For merge, rebase and pull, where git itself sets the changes aside and puts them back.
+    pub fn autostash() -> Self {
+        Self::new("Stash my uncommitted changes while this runs", true).hint(
+            "Your uncommitted changes are set aside first and put back when git finishes. If it \
+             stops for conflicts, they come back once you continue or abort. If they clash with \
+             the incoming changes, those files show conflicts and a full copy stays in the \
+             Stashes tab.",
+        )
+    }
+
+    /// For steps git cannot autostash: the changes are saved, never put back by Osier.
+    pub fn stash_first(default: bool, hint: &'static str) -> Self {
+        Self::new(
+            "Save my uncommitted changes to the Stashes tab first",
+            default,
+        )
+        .hint(hint)
+    }
+
     /// The checkbox for this flag inside a dialog, with its hint underneath.
     pub fn checkbox(&self, ix: usize, cx: &App) -> Checkbox {
         let value = self.value.clone();
@@ -510,16 +529,44 @@ impl Osier {
             ResetMode::Mixed => "Mixed reset",
             ResetMode::Hard => "Hard reset",
         };
-        self.confirm(
+        let body = if mode == ResetMode::Hard && self.has_uncommitted_changes() {
+            format!(
+                "Move the branch to {short}. Later commits leave the branch, and your uncommitted \
+                 changes are thrown away unless you save them below. The later commits can be \
+                 recovered from the reflog for a while."
+            )
+        } else {
+            body
+        };
+        let (flags, save) = if mode == ResetMode::Hard {
+            self.stash_first_flags(
+                true,
+                "They are kept there instead of being lost. Osier does not put them back \
+                 afterwards: apply them from the Stashes tab when you want them again.",
+            )
+        } else {
+            (Vec::new(), Rc::new(Cell::new(false)))
+        };
+        self.confirm_with_flags(
             title,
             body,
             label,
             danger,
+            flags,
             move |this, window, cx| {
                 let h = hash.clone();
+                let save = save.get();
                 this.run_op(
                     format!("Reset to {short}"),
-                    move |repo| reset::reset(repo, &h, mode),
+                    move |repo| {
+                        if save {
+                            stash_before(
+                                repo,
+                                format!("Saved before hard reset to {}", &h[..h.len().min(7)]),
+                            )?;
+                        }
+                        reset::reset(repo, &h, mode)
+                    },
                     window,
                     cx,
                 );
@@ -536,16 +583,25 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let short = hash[..hash.len().min(7)].to_string();
-        self.confirm(
+        let (flags, save) = self.stash_first_flags(false, STASH_FIRST_ONLY_IF_REFUSED);
+        self.confirm_with_flags(
             "Revert commit?",
             format!("A new commit undoing {short} is created on the current branch."),
             "Revert",
             false,
+            flags,
             move |this, window, cx| {
                 let h = hash.clone();
+                let save = save.get();
+                let note = format!("Saved before reverting {short}");
                 this.run_op(
                     format!("Reverted {short}"),
-                    move |repo| reset::revert(repo, &h).map(|_| ()),
+                    move |repo| {
+                        if save {
+                            stash_before(repo, note)?;
+                        }
+                        reset::revert(repo, &h).map(|_| ())
+                    },
                     window,
                     cx,
                 );
@@ -584,10 +640,37 @@ impl Osier {
             MergeMode::FastForwardOnly => format!("Fast-forwarded to {branch}"),
             MergeMode::Squash => format!("Squashed {branch} into the index"),
         };
-        let b = branch.clone();
-        self.run_op(
-            label,
-            move |repo| integrate::merge(repo, &b, mode),
+        if !self.has_uncommitted_changes() {
+            let b = branch.clone();
+            self.run_op(
+                label,
+                move |repo| integrate::merge(repo, &b, mode, false),
+                window,
+                cx,
+            );
+            return;
+        }
+        // Only asks when there is something git might refuse over.
+        let (flags, autostash) = self.autostash_flags();
+        self.confirm_with_flags(
+            format!("Merge {branch}?"),
+            format!(
+                "You have uncommitted changes. Without stashing them, git stops before \
+                 merging if {branch} changes any of the files you have edited."
+            ),
+            "Merge",
+            false,
+            flags,
+            move |this, window, cx| {
+                let b = branch.clone();
+                let autostash = autostash.get();
+                this.run_op(
+                    label.clone(),
+                    move |repo| integrate::merge(repo, &b, mode, autostash),
+                    window,
+                    cx,
+                );
+            },
             window,
             cx,
         );
@@ -604,14 +687,22 @@ impl Osier {
             .and_then(|p| p.snapshot.as_ref())
             .and_then(|s| s.status.branch.head.clone())
             .unwrap_or_else(|| "the current branch".into());
-        self.confirm(
+        let (flags, autostash) = self.autostash_flags();
+        self.confirm_with_flags(
             "Rebase?",
             format!("{current} is replayed on top of {onto}. Its commits get new hashes. If it was already pushed, the next push needs force-with-lease."),
             "Rebase",
             false,
+            flags,
             move |this, window, cx| {
                 let o = onto.clone();
-                this.run_op(format!("Rebased onto {o}"), move |repo| integrate::rebase(repo, &o), window, cx);
+                let autostash = autostash.get();
+                this.run_op(
+                    format!("Rebased onto {o}"),
+                    move |repo| integrate::rebase(repo, &o, autostash),
+                    window,
+                    cx,
+                );
             },
             window,
             cx,
@@ -625,16 +716,25 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let short = hash[..hash.len().min(7)].to_string();
-        self.confirm(
+        let (flags, save) = self.stash_first_flags(false, STASH_FIRST_ONLY_IF_REFUSED);
+        self.confirm_with_flags(
             "Cherry-pick?",
             format!("{short} is applied as a new commit on the current branch."),
             "Cherry-pick",
             false,
+            flags,
             move |this, window, cx| {
                 let h = hash.clone();
+                let save = save.get();
+                let note = format!("Saved before cherry-picking {short}");
                 this.run_op(
                     format!("Cherry-picked {short}"),
-                    move |repo| integrate::cherry_pick(repo, std::slice::from_ref(&h)),
+                    move |repo| {
+                        if save {
+                            stash_before(repo, note)?;
+                        }
+                        integrate::cherry_pick(repo, std::slice::from_ref(&h))
+                    },
                     window,
                     cx,
                 );
@@ -642,6 +742,45 @@ impl Osier {
             window,
             cx,
         );
+    }
+
+    /// Uncommitted changes to tracked files, the ones a stash would set aside. Untracked
+    /// files do not count: git leaves them alone.
+    pub(crate) fn has_uncommitted_changes(&self) -> bool {
+        self.active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .is_some_and(|s| {
+                s.status
+                    .entries
+                    .iter()
+                    .any(|e| e.is_staged() || e.is_unstaged())
+            })
+    }
+
+    /// `[PromptFlag::autostash()]` when there is something to stash, else nothing.
+    pub(crate) fn autostash_flags(&self) -> (Vec<PromptFlag>, Rc<Cell<bool>>) {
+        if self.has_uncommitted_changes() {
+            let flag = PromptFlag::autostash();
+            let value = flag.value.clone();
+            (vec![flag], value)
+        } else {
+            (Vec::new(), Rc::new(Cell::new(false)))
+        }
+    }
+
+    /// `[PromptFlag::stash_first(..)]` when there is something to save, else nothing.
+    fn stash_first_flags(
+        &self,
+        default: bool,
+        hint: &'static str,
+    ) -> (Vec<PromptFlag>, Rc<Cell<bool>>) {
+        if self.has_uncommitted_changes() {
+            let flag = PromptFlag::stash_first(default, hint);
+            let value = flag.value.clone();
+            (vec![flag], value)
+        } else {
+            (Vec::new(), Rc::new(Cell::new(false)))
+        }
     }
 
     pub(crate) fn in_progress(&self) -> Option<InProgress> {
@@ -976,4 +1115,21 @@ impl Osier {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         window.push_notification(format!("Copied {text}"), cx);
     }
+}
+
+/// Hint for the stash-first option where git would mostly cope without it.
+const STASH_FIRST_ONLY_IF_REFUSED: &str = "Only needed if git refuses because the commit \
+     changes files you have edited. Osier does not put them back afterwards: apply them from \
+     the Stashes tab when you want them again.";
+
+/// Save uncommitted changes to tracked files as a stash with `message` (untracked files are
+/// left where they are, as the operations that follow leave them alone too).
+fn stash_before(repo: &osier_git::Repository, message: String) -> osier_git::Result<()> {
+    stash::push(
+        repo,
+        &StashOptions {
+            message: Some(message),
+            ..Default::default()
+        },
+    )
 }

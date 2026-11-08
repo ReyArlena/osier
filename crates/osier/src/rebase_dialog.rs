@@ -60,7 +60,10 @@ impl Osier {
         let items: Rc<RefCell<Vec<TodoItem>>> = Rc::new(RefCell::new(items));
         let weak = cx.entity().downgrade();
         let short = base[..base.len().min(7)].to_string();
+        let (flags, autostash) = self.autostash_flags();
+        let flags = Rc::new(flags);
         window.open_dialog(cx, move |dialog, _, cx| {
+            let autostash = autostash.clone();
             let items = items.clone();
             let weak = weak.clone();
             let base = base.clone();
@@ -189,13 +192,15 @@ impl Osier {
                 .child(
                     v_flex()
                         .gap_3()
+                        .pb_1()
                         .child(
                             div()
                                 .text_sm()
                                 .text_color(muted)
                                 .child("Oldest first, applied top to bottom. Reorder with the arrows, pick an action per commit. Conflicts stop the rebase so you can resolve and continue."),
                         )
-                        .child(rows),
+                        .child(rows)
+                        .children(flags.iter().enumerate().map(|(ix, f)| f.checkbox(ix, cx))),
                 )
                 .button_props(
                     DialogButtonProps::default()
@@ -207,11 +212,12 @@ impl Osier {
                 .on_ok(move |_, window, cx| {
                     let list = items.borrow().clone();
                     let base = base.clone();
+                    let autostash = autostash.get();
                     let _ = weak.update(cx, |this, cx| {
                         let n = list.len();
                         this.run_op(
                             format!("Interactive rebase of {n} commits"),
-                            move |repo| rebase_interactive::run(repo, &base, &list),
+                            move |repo| rebase_interactive::run(repo, &base, &list, autostash),
                             window,
                             cx,
                         );

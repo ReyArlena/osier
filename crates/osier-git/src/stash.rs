@@ -26,6 +26,20 @@ impl StashEntry {
     }
 }
 
+/// How many stash entries git's `--autostash` left behind. It names them `autostash` and
+/// keeps one only when putting the changes back clashed, so a rise after an operation means
+/// the changes are partly in the files (with conflicts) and fully in that stash.
+pub fn autostash_count(repo: &Repository) -> usize {
+    list(repo)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|e| e.message == "autostash" || e.message.ends_with(": autostash"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 pub fn list(repo: &Repository) -> Result<Vec<StashEntry>> {
     let out = repo.git(["stash", "list", "-z", "--format=%gd%x1f%H%x1f%gs%x1f%ct"])?;
     parse(&out.stdout)

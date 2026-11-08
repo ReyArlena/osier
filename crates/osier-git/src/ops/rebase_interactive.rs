@@ -83,7 +83,7 @@ fn shell_quote(s: &str) -> String {
 
 /// Run `rebase -i <base>` with the given list. Conflicts leave the rebase in progress for
 /// the usual continue/skip/abort. The first item cannot be a squash or fixup.
-pub fn run(repo: &Repository, base: &str, items: &[TodoItem]) -> Result<()> {
+pub fn run(repo: &Repository, base: &str, items: &[TodoItem], autostash: bool) -> Result<()> {
     if matches!(
         items.first().map(|i| &i.action),
         Some(TodoAction::Squash | TodoAction::Fixup)
@@ -95,7 +95,7 @@ pub fn run(repo: &Repository, base: &str, items: &[TodoItem]) -> Result<()> {
     }
     let dir = tempfile::Builder::new().prefix("osier-rebase-").tempdir()?;
     let todo_text = render_todo(items, dir.path())?;
-    run_todo(repo, base, &todo_text, &dir)
+    run_todo(repo, base, &todo_text, &dir, autostash)
 }
 
 /// Run `rebase -i <base>` with a todo list written by the caller; files it refers to live in
@@ -105,6 +105,7 @@ pub(crate) fn run_todo(
     base: &str,
     todo_text: &str,
     dir: &tempfile::TempDir,
+    autostash: bool,
 ) -> Result<()> {
     let todo_path: PathBuf = dir.path().join("todo");
     std::fs::write(&todo_path, todo_text)?;
@@ -116,7 +117,11 @@ pub(crate) fn run_todo(
             format!("cp {}", shell_quote(&todo_path.to_string_lossy())),
         )
         .with_env("GIT_EDITOR", "true");
-    let out = runner.run(Some(repo.workdir()), ["rebase", "-i", base]);
+    let out = if autostash {
+        runner.run(Some(repo.workdir()), ["rebase", "-i", "--autostash", base])
+    } else {
+        runner.run(Some(repo.workdir()), ["rebase", "-i", base])
+    };
     // Keep the temp dir alive until git has read the todo (it copies it immediately, but the
     // exec lines reference message files until the rebase finishes). A rebase that stops on a
     // conflict still needs those files later, so leak them into the git dir instead.
@@ -167,7 +172,7 @@ mod tests {
         items[0].action = TodoAction::Reword("two, reworded".into());
         items[2].action = TodoAction::Fixup;
         items[3].action = TodoAction::Drop;
-        run(&repo, &base, &items).unwrap();
+        run(&repo, &base, &items, false).unwrap();
         assert_eq!(subjects(&t), ["one", "two, reworded", "base"]);
         assert!(t.path().join("3.txt").exists(), "fixup kept the change");
         assert!(!t.path().join("4.txt").exists(), "dropped");
@@ -184,12 +189,12 @@ mod tests {
         let repo = t.repo();
         let mut items = commits_since(&repo, &base).unwrap();
         items[0].action = TodoAction::Squash;
-        assert!(run(&repo, &base, &items).is_err());
+        assert!(run(&repo, &base, &items, false).is_err());
 
         let mut items = commits_since(&repo, &base).unwrap();
         items.swap(0, 1);
         assert!(matches!(
-            run(&repo, &base, &items),
+            run(&repo, &base, &items, false),
             Err(GitError::Conflict(_))
         ));
         assert_eq!(repo.in_progress(), Some(crate::repo::InProgress::Rebase));

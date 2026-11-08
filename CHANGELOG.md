@@ -6,6 +6,14 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Merge, rebase, interactive rebase and pulling a diverged branch offer to stash your
+  uncommitted changes while they run (git's autostash), and say so when the changes come
+  back with conflicts.
+- Cherry-pick, revert and hard reset offer to save uncommitted changes to the Stashes tab
+  first. Those are not put back automatically.
+
 ### Changed
 
 - Dialog options have short labels with a plain explanation underneath, instead of

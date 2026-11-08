@@ -105,7 +105,13 @@ impl Osier {
         let head_before = repo.head_oid().ok().flatten();
         cx.spawn_in(window, async move |this, cx| {
             let repo2 = repo.clone();
-            let result = cx.background_spawn(async move { op(&repo2) }).await;
+            let (result, stash_clashed) = cx
+                .background_spawn(async move {
+                    let before = osier_git::stash::autostash_count(&repo2);
+                    let result = op(&repo2);
+                    (result, osier_git::stash::autostash_count(&repo2) > before)
+                })
+                .await;
             let head_after = repo.head_oid().ok().flatten();
             let _ = this.update_in(cx, |this, window, cx| {
                 let summary = match &result {
@@ -145,6 +151,9 @@ impl Osier {
                             cx,
                         );
                     }
+                }
+                if stash_clashed {
+                    window.push_notification(autostash_clash_notice(), cx);
                 }
                 if let Err(e) = history::append(&this.paths, &entry) {
                     tracing::warn!(error = %e, "could not write history");
@@ -237,4 +246,14 @@ impl Osier {
                 })
         });
     }
+}
+
+/// Shown when git could not put stashed changes back cleanly after an operation.
+pub(crate) fn autostash_clash_notice() -> Notification {
+    Notification::warning(
+        "Some of your uncommitted changes clash with the new commits. Those files are marked as \
+         conflicts in Changes, and a full copy of your changes is saved in the Stashes tab as \
+         \"autostash\". Drop that stash once the files look right.",
+    )
+    .title("Your changes were put back with conflicts")
 }

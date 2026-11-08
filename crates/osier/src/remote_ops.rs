@@ -281,16 +281,18 @@ impl Osier {
         let op2 = op.clone();
         cx.spawn_in(window, async move |this, cx| {
             let repo2 = repo.clone();
-            let result = cx
+            let (result, stash_clashed) = cx
                 .background_spawn(async move {
                     let progress = move |p: Progress| {
                         let _ = tx.send(p);
                     };
-                    match &op2 {
+                    let before = osier_git::stash::autostash_count(&repo2);
+                    let result = match &op2 {
                         RemoteOp::Fetch(o) => remote::fetch(&repo2, o, &ctx, progress),
                         RemoteOp::Pull(o) => remote::pull(&repo2, o, &ctx, progress),
                         RemoteOp::Push(o) => remote::push(&repo2, o, &ctx, progress),
-                    }
+                    };
+                    (result, osier_git::stash::autostash_count(&repo2) > before)
                 })
                 .await;
             let head_after = repo.head_oid().ok().flatten();
@@ -311,6 +313,9 @@ impl Osier {
                 }
                 if let Some(ix) = this.projects.iter().position(|p| p.path == path) {
                     this.refresh_project(ix, cx);
+                }
+                if stash_clashed {
+                    window.push_notification(crate::ops::autostash_clash_notice(), cx);
                 }
                 if let Err(error) = result {
                     this.handle_remote_error(op, error, window, cx);
@@ -411,13 +416,16 @@ impl Osier {
             Some("rebase") => 1usize,
             _ => 0,
         }));
+        let (flags, autostash) = self.autostash_flags();
+        let flags = std::rc::Rc::new(flags);
         let weak = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
-            let (choice, weak, options, repo_path) = (
+            let (choice, weak, options, repo_path, autostash) = (
                 choice.clone(),
                 weak.clone(),
                 options.clone(),
                 repo_path.clone(),
+                autostash.clone(),
             );
             let c2 = choice.clone();
             dialog
@@ -458,7 +466,9 @@ impl Osier {
                              pushed: push afterwards to send the result. Osier preselects your \
                              last choice for this repository next time.",
                             cx,
-                        )),
+                        ))
+                        .pb_1()
+                        .children(flags.iter().enumerate().map(|(ix, f)| f.checkbox(ix, cx))),
                 )
                 .button_props(
                     DialogButtonProps::default()
@@ -478,6 +488,7 @@ impl Osier {
                     };
                     let mut options = options.clone();
                     options.strategy = strategy;
+                    options.autostash = autostash.get();
                     let repo_path = repo_path.clone();
                     let _ = weak.update(cx, |this, cx| {
                         this.state.pull_strategies.insert(
