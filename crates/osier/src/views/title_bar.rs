@@ -324,7 +324,7 @@ impl Osier {
                         .small()
                         .icon(Lucide::FolderSync)
                         .when(!self.compact, |b| b.label("Update project"))
-                        .tooltip("Update project: fetch, then merge or rebase")
+                        .tooltip("Update project: fetch, then merge or rebase (ctrl-t)")
                         .disabled(busy)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.update_project(window, cx)),

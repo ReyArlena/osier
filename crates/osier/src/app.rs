@@ -51,6 +51,7 @@ gpui_kit::actions!(
         FocusFileSearch,
         FocusSettingsSearch,
         CommitStaged,
+        UpdateProject,
         Fetch,
         Pull,
         Push,
@@ -2627,6 +2628,9 @@ impl Render for Osier {
                 this.focus_file_search(window, cx)
             }))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &UpdateProject, window, cx| this.update_project(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
                 this.start_remote(crate::remote_ops::RemoteOp::fetch_all(), window, cx)
             }))
@@ -6563,8 +6567,23 @@ mod tests {
             assert_eq!(choice.strategy, "rebase");
             assert!(!choice.remember, "unticked by default");
         });
-        h.click(cx, "update-project");
+        // ctrl-t, listed on the Keymap page like the other shortcuts.
+        let spec = crate::keymap::actions()
+            .into_iter()
+            .find(|s| s.id == "update_project")
+            .expect("in the keymap");
+        assert_eq!(spec.defaults, ["ctrl-t"]);
+
+        h.keys(cx, "ctrl-t");
         assert!(h.bounds(cx, "update-dialog").is_some(), "still asks");
+        // Shortcuts keep working after a dialog closes, by Escape or by its button.
+        h.keys(cx, "escape");
+        assert!(h.bounds(cx, "update-dialog").is_none());
+        h.keys(cx, "ctrl-t");
+        assert!(h.bounds(cx, "update-dialog").is_some(), "after Escape");
+        h.click(cx, "dialog-cancel");
+        h.keys(cx, "ctrl-t");
+        assert!(h.bounds(cx, "update-dialog").is_some(), "after Cancel");
     }
 
     #[gpui::test]
