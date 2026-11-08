@@ -19,6 +19,9 @@ All notable changes to Osier are documented here. The format follows
   changes, instead of refusing.
 - When uncommitted changes stop a pull, Osier offers to stash them, pull and put them back.
   When they stop a branch switch, it offers to save them to the Stashes tab and switch.
+- When a pull deletes files that someone stopped tracking and added to .gitignore, Osier
+  offers to put your copies back, untracked and ignored. Settings > Git > Pull turns the
+  offer off.
 
 ### Changed
 

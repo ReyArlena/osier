@@ -317,6 +317,17 @@ impl Osier {
                 if stash_clashed {
                     window.push_notification(crate::ops::autostash_clash_notice(), cx);
                 }
+                if let (RemoteOp::Pull(_), Ok(_), Some(before), Some(after)) =
+                    (&op, &result, &entry.head_before, &entry.head_after)
+                {
+                    this.offer_keep_ignored(
+                        path.clone(),
+                        before.clone(),
+                        after.clone(),
+                        window,
+                        cx,
+                    );
+                }
                 if let Err(error) = result {
                     this.handle_remote_error(op, error, window, cx);
                 }

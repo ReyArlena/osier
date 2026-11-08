@@ -250,6 +250,9 @@ pub struct Git {
     pub log_badges: LogBadges,
     /// How the Log graph marks commits that are not on any remote yet.
     pub log_unpushed: UnpushedStyle,
+    /// After a pull deletes files that an ignore rule now matches (someone stopped tracking
+    /// them), offer to write the local copies back from before the pull, untracked.
+    pub offer_keep_ignored: bool,
 }
 
 /// `dim` fades unpushed commits in the graph, `colour` draws them in another colour.
@@ -278,6 +281,7 @@ impl Default for Git {
             show_command_log: false,
             log_badges: LogBadges::Left,
             log_unpushed: UnpushedStyle::Dim,
+            offer_keep_ignored: true,
         }
     }
 }

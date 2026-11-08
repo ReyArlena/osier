@@ -6336,6 +6336,58 @@ mod tests {
         });
     }
 
+    /// A repository with a pushed `config.env`, and a second clone that stops tracking it,
+    /// ignores it and pushes that.
+    fn pushed_then_untracked_elsewhere() -> (TempRepo, TempRepo) {
+        let repo = TempRepo::new();
+        repo.commit_file("config.env", "secret=1\n", "add config");
+        let bare = repo.add_bare_origin();
+        repo.git(["push", "-q", "-u", "origin", "HEAD"]);
+        let other = TempRepo::new();
+        other.git(["remote", "add", "origin", bare.to_string_lossy().as_ref()]);
+        other.git(["fetch", "-q", "origin"]);
+        other.git(["checkout", "-q", "-b", "main", "origin/main"]);
+        other.write(".gitignore", "/config.env\n");
+        other.git(["rm", "-q", "--cached", "config.env"]);
+        other.git(["add", ".gitignore"]);
+        other.commit("untrack config");
+        other.git(["push", "-q", "origin", "main"]);
+        (repo, other)
+    }
+
+    #[gpui::test]
+    fn pull_offers_to_keep_newly_ignored_files(cx: &mut TestAppContext) {
+        use crate::remote_ops::RemoteOp;
+
+        let (repo, _other) = pushed_then_untracked_elsewhere();
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, window, cx| {
+            osier.start_remote(RemoteOp::pull_default(), window, cx)
+        });
+        assert!(!repo.path().join("config.env").exists(), "git removed it");
+        assert!(h.bounds(cx, "keep-ignored-dialog").is_some(), "offer shown");
+        h.click(cx, "dialog-ok");
+        assert_eq!(repo.read("config.env"), "secret=1\n");
+        assert!(
+            repo.git(["status", "--porcelain"]).is_empty(),
+            "restored copy is untracked and ignored"
+        );
+    }
+
+    #[gpui::test]
+    fn pull_skips_the_keep_offer_when_turned_off(cx: &mut TestAppContext) {
+        use crate::remote_ops::RemoteOp;
+
+        let (repo, _other) = pushed_then_untracked_elsewhere();
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, window, cx| {
+            osier.settings.git.offer_keep_ignored = false;
+            osier.start_remote(RemoteOp::pull_default(), window, cx)
+        });
+        assert!(!repo.path().join("config.env").exists());
+        assert!(h.bounds(cx, "keep-ignored-dialog").is_none());
+    }
+
     #[gpui::test]
     fn merge_conflict_resolve_and_continue(cx: &mut TestAppContext) {
         use osier_git::ops::integrate::{ConflictSide, MergeMode};

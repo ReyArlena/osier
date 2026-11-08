@@ -358,6 +358,147 @@ impl Osier {
         });
     }
 
+    /// After a pull moved `path`'s HEAD from `before` to `after`: if it deleted files an
+    /// ignore rule now matches (someone stopped tracking them), offer to write the local
+    /// copies back. Settings > Git > Pull turns the offer off.
+    pub(crate) fn offer_keep_ignored(
+        &mut self,
+        path: std::path::PathBuf,
+        before: String,
+        after: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings.git.offer_keep_ignored || before == after {
+            return;
+        }
+        let Some(repo) = self
+            .projects
+            .iter()
+            .find(|p| p.path == path)
+            .map(|p| p.repo.clone())
+        else {
+            return;
+        };
+        let check = cx.background_spawn({
+            let before = before.clone();
+            async move { ignore::removed_ignored(&repo, &before, &after) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let files = match check.await {
+                Ok(files) if !files.is_empty() => files,
+                Ok(_) => return,
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not list files the pull removed");
+                    return;
+                }
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                // The restore runs on the active project, so only offer while it is still
+                // the one that was pulled.
+                if this.active_project().is_some_and(|p| p.path == path) {
+                    this.keep_ignored_dialog(before, files, window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn keep_ignored_dialog(
+        &mut self,
+        before: String,
+        files: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        const SHOWN: usize = 8;
+        let count = files.len();
+        let (title, body) = if count == 1 {
+            (
+                format!("Keep your copy of {}?", files[0]),
+                "The pull stopped tracking this file, which is now ignored, so git deleted your \
+                 copy. Osier can put it back as it was before the pull."
+                    .to_string(),
+            )
+        } else {
+            (
+                format!("Keep your copies of {count} ignored files?"),
+                format!(
+                    "The pull stopped tracking these {count} files, which are now ignored, so git \
+                     deleted your copies. Osier can put them back as they were before the pull."
+                ),
+            )
+        };
+        let hint = "Restored files stay untracked and ignored, so they do not show up as changes. \
+                    You can turn this offer off in Settings > Git > Pull.";
+        let ok_label: SharedString = if count == 1 {
+            "Keep my copy".into()
+        } else {
+            "Keep my copies".into()
+        };
+        let weak = cx.entity().downgrade();
+        let files = Rc::new(files);
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let weak = weak.clone();
+            let files = files.clone();
+            let before = before.clone();
+            let mut list = v_flex().gap_1();
+            for f in files.iter().take(SHOWN) {
+                list = list.child(h_flex().child(crate::inline_code::inline_code(f.clone(), cx)));
+            }
+            if count > SHOWN {
+                list = list.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("and {} more", count - SHOWN)),
+                );
+            }
+            dialog
+                .title(title.clone())
+                .child(
+                    v_flex()
+                        .test_id("keep-ignored-dialog")
+                        .gap_3()
+                        .pb_1()
+                        .child(body.clone())
+                        .child(list)
+                        .child(crate::dialog_hint::hint(hint, cx)),
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(ok_label.clone())
+                        .ok_variant(ButtonVariant::Primary)
+                        .show_cancel(true),
+                )
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new(ok_label.clone())
+                        .variant(ButtonVariant::Primary),
+                )
+                .on_ok(move |_, window, cx| {
+                    let files = (*files).clone();
+                    let before = before.clone();
+                    let _ = weak.update(cx, |this, cx| {
+                        let summary = if files.len() == 1 {
+                            format!("Kept your copy of {}", files[0])
+                        } else {
+                            format!("Kept your copies of {} ignored files", files.len())
+                        };
+                        this.run_op_reporting(
+                            summary.clone(),
+                            move |repo| {
+                                ignore::restore_worktree(repo, &before, &files)?;
+                                Ok(summary)
+                            },
+                            window,
+                            cx,
+                        );
+                    });
+                    true
+                })
+        });
+    }
+
     fn run_ignore_steps(
         &mut self,
         path: String,

@@ -240,6 +240,21 @@ impl GitRunner {
         self.execute(repo, args, None, allowed)
     }
 
+    /// [`run_allowing`](Self::run_allowing) with `stdin` fed to git.
+    pub fn run_allowing_with_stdin<I, S>(
+        &self,
+        repo: Option<&Path>,
+        args: I,
+        stdin: &[u8],
+        allowed: &[i32],
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.execute(repo, args, Some(stdin), allowed)
+    }
+
     fn execute<I, S>(
         &self,
         repo: Option<&Path>,

@@ -859,6 +859,26 @@ fn git_page(view: &Entity<Osier>) -> SettingPage {
                 "How the Log graph shows commits that are on a local branch but no remote yet.",
             ),
         ]))
+        .group(SettingGroup::new().title("Pull").items(vec![
+            SettingItem::new(
+                "Offer to keep local copies of newly .gitignored files",
+                SettingField::switch(
+                    get(view, |o| o.settings.git.offer_keep_ignored),
+                    set(view, |o, v: bool, _| o.settings.git.offer_keep_ignored = v),
+                )
+                .default_value(defaults.git.offer_keep_ignored),
+            )
+            .description(
+                "When someone stops tracking a file and adds it to .gitignore, git deletes your \
+                 copy of that file the next time you pull. With this on, Osier lists those files \
+                 after a pull and offers to put your copies back as they were before the pull. \
+                 They stay untracked and ignored, so they do not show up as changes or get \
+                 committed again. Only files that an ignore rule now matches are offered: files \
+                 that were simply deleted stay deleted, and files still on your disk are left \
+                 alone. Pulls run outside Osier are not covered. There, run git show \
+                 ORIG_HEAD:<path> > <path> right after the pull to bring a file back.",
+            ),
+        ]))
         .group(SettingGroup::new().title("Prompts and viewer").items(vec![
             SettingItem::new(
                 "Osier askpass window",

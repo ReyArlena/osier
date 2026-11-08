@@ -188,6 +188,7 @@ log_page_size = 500
 show_command_log = false
 log_badges = "left"           # Log branch/tag badges: left (before the subject) | right
 log_unpushed = "dim"          # graph marking for commits not on a remote: dim | colour
+offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 
 [auth]
 askpass = true                # route ssh/git prompts to Osier's own window

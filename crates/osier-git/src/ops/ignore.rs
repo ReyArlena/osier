@@ -298,6 +298,70 @@ pub fn untrack(repo: &Repository, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Files that moving from commit `before` to `after` deleted, that an ignore rule now
+/// matches, and that are missing from the working tree. These are the files someone else
+/// stopped tracking (`untrack` plus an ignore rule): the pull removed the local copy, and
+/// [`restore_worktree`] can write it back from `before` without tracking it again.
+pub fn removed_ignored(repo: &Repository, before: &str, after: &str) -> Result<Vec<String>> {
+    let out = repo.git([
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--diff-filter=D",
+        before,
+        after,
+        "--",
+    ])?;
+    let missing: Vec<String> = out
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .filter(|p| repo.workdir().join(p).symlink_metadata().is_err())
+        .collect();
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stdin = Vec::new();
+    for p in &missing {
+        stdin.extend_from_slice(p.as_bytes());
+        stdin.push(0);
+    }
+    let out = repo.runner().run_allowing_with_stdin(
+        Some(repo.workdir()),
+        ["check-ignore", "-z", "--stdin"],
+        &stdin,
+        &[0, 1],
+    )?;
+    match out.record.status {
+        // 1: none of them is ignored.
+        Some(1) => Ok(Vec::new()),
+        Some(0) => Ok(out
+            .stdout
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| String::from_utf8_lossy(p).into_owned())
+            .collect()),
+        status => Err(crate::error::GitError::Failed {
+            status: status.unwrap_or(-1),
+            record: Box::new(out.record),
+        }),
+    }
+}
+
+/// Write `paths` into the working tree as they were in commit `source`, leaving the index
+/// alone, so untracked (ignored) files come back without being tracked again.
+pub fn restore_worktree(repo: &Repository, source: &str, paths: &[String]) -> Result<()> {
+    let source = format!("--source={source}");
+    for chunk in paths.chunks(500) {
+        let mut args = vec!["restore", source.as_str(), "--worktree", "--"];
+        args.extend(chunk.iter().map(String::as_str));
+        repo.git(args)?;
+    }
+    Ok(())
+}
+
 fn write_atomic(path: &Path, text: &str) -> Result<()> {
     let tmp = path.with_extension("osier-tmp");
     std::fs::write(&tmp, text)?;
@@ -528,5 +592,49 @@ mod tests {
         let t = TempRepo::new();
         t.commit_file("a.txt", "a\n", "first");
         assert!(untrack(&t.repo(), "missing.txt").is_err());
+    }
+
+    #[test]
+    fn pulled_untracking_lists_and_restores_ignored_files() {
+        let t = TempRepo::new();
+        t.commit_file("config.env", "secret=1\n", "add config");
+        t.commit_file("gone.txt", "x\n", "add gone");
+        t.write("keep.txt", "k\n");
+        t.git(["add", "keep.txt"]);
+        let before = t.commit("add keep");
+        let repo = t.repo();
+        // Someone untracks and ignores config.env, and deletes gone.txt outright.
+        add_pattern(&repo, IgnoreFile::Gitignore, "/config.env", "config.env").unwrap();
+        untrack(&repo, "config.env").unwrap();
+        t.git(["rm", "-q", "gone.txt"]);
+        t.git(["add", ".gitignore"]);
+        let after = t.commit("untrack config");
+        // What a pull of that commit does to a clone that had both files.
+        t.remove("config.env");
+
+        let listed = removed_ignored(&repo, &before, &after).unwrap();
+        assert_eq!(
+            listed,
+            vec!["config.env".to_string()],
+            "gone.txt is not ignored"
+        );
+
+        restore_worktree(&repo, &before, &listed).unwrap();
+        assert_eq!(t.read("config.env"), "secret=1\n");
+        assert!(!is_tracked(&repo, "config.env").unwrap(), "index untouched");
+        let status = t.git(["status", "--porcelain"]);
+        assert!(status.is_empty(), "restored file is ignored: {status:?}");
+
+        // Already on disk (the copy survived): nothing to offer.
+        assert!(removed_ignored(&repo, &before, &after).unwrap().is_empty());
+    }
+
+    #[test]
+    fn removed_ignored_fails_on_unknown_commits() {
+        let t = TempRepo::new();
+        let head = t.commit_file("a.txt", "a\n", "first");
+        assert!(
+            removed_ignored(&t.repo(), "0000000000000000000000000000000000000001", &head).is_err()
+        );
     }
 }
