@@ -372,15 +372,23 @@ impl Osier {
                     "Choose a GitHub account from the Push menu, or add your ssh key to the agent (`ssh-add`)."
                 };
                 window.push_notification(
-                    Notification::error(format!("{text}. {hint}"))
-                        .title(format!("{label} failed: authentication")),
+                    crate::ops::with_command_log(
+                        Notification::error(format!("{text}. {hint}"))
+                            .title(format!("{label} failed: authentication")),
+                        &error,
+                        cx,
+                    ),
                     cx,
                 );
             }
             (_, GitError::Network(_)) => {
                 window.push_notification(
-                    Notification::error(describe(&error))
-                        .title(format!("{label} failed: remote unreachable")),
+                    crate::ops::with_command_log(
+                        Notification::error(describe(&error))
+                            .title(format!("{label} failed: remote unreachable")),
+                        &error,
+                        cx,
+                    ),
                     cx,
                 );
             }
@@ -392,7 +400,11 @@ impl Osier {
             }
             _ => {
                 window.push_notification(
-                    Notification::error(describe(&error)).title(format!("{label} failed")),
+                    crate::ops::with_command_log(
+                        Notification::error(describe(&error)).title(format!("{label} failed")),
+                        &error,
+                        cx,
+                    ),
                     cx,
                 );
             }

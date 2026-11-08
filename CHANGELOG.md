@@ -8,6 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- The command log has a "Failures only" view, and error notifications open it on the
+  command that failed.
 - Merge, rebase, interactive rebase and pulling a diverged branch offer to stash your
   uncommitted changes while they run (git's autostash), and say so when the changes come
   back with conflicts.
@@ -16,6 +18,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Common git refusals (unmerged branch, worktree with changes, missing remote branch,
+  local changes in the way) are explained in plain words, and error titles say what could
+  not be done, such as "Could not delete branch x".
 - Dialog options have short labels with a plain explanation underneath, instead of
   bracketed text. "Push rejected" now says "Fetch now" and explains that pulling and
   pushing again are separate steps you take afterwards.
@@ -30,6 +35,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Error notifications show git's error line instead of progress output such as
+  "From <url>".
 - The "Also add ... to .gitignore" option in the untrack dialog wraps like normal text.
 - Notifications show their title again. A title such as "Push failed" was replaced by the
   message underneath it.

@@ -17,7 +17,15 @@ impl Osier {
     pub(crate) fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
-        let records = self.sink.records();
+        let all = self.sink.records();
+        let failed = all.iter().filter(|r| !r.expected).count();
+        let failures_only = self.command_log_failures_only;
+        // Failures are easy to miss: a refresh right after one runs a dozen routine commands.
+        let records: Vec<CommandRecord> = if failures_only {
+            all.iter().filter(|r| !r.expected).cloned().collect()
+        } else {
+            all.clone()
+        };
         let shown = records.len().min(200);
         let expanded = self.expanded_command;
 
@@ -134,12 +142,11 @@ impl Osier {
             );
         }
         if records.is_empty() {
-            list = list.child(
-                div()
-                    .p_3()
-                    .text_color(muted)
-                    .child("No git commands run yet."),
-            );
+            list = list.child(div().p_3().text_color(muted).child(if failures_only {
+                "No failed commands."
+            } else {
+                "No git commands run yet."
+            }));
         }
 
         v_flex()
@@ -161,9 +168,30 @@ impl Osier {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child(format!("{} recorded", records.len())),
+                            .child(format!("{} recorded", all.len())),
                     )
                     .child(div().flex_1())
+                    .child(
+                        Button::new("log-failures-only")
+                            .test_id("log-failures-only")
+                            .xsmall()
+                            .map(|b| {
+                                if failures_only {
+                                    b.primary()
+                                } else {
+                                    b.ghost()
+                                }
+                            })
+                            .label(match failed {
+                                0 => "Failures only".to_string(),
+                                1 => "Failures only (1)".to_string(),
+                                n => format!("Failures only ({n})"),
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.command_log_failures_only = !this.command_log_failures_only;
+                                cx.notify();
+                            })),
+                    )
                     .child(
                         Button::new("clear-log")
                             .test_id("clear-log")

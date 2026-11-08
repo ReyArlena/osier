@@ -138,6 +138,8 @@ pub struct Osier {
     pub(crate) sidebar_visible: bool,
     pub(crate) command_log_visible: bool,
     pub(crate) expanded_command: Option<u64>,
+    /// The command log lists only failed commands.
+    pub(crate) command_log_failures_only: bool,
     pub(crate) diff: Entity<DiffState>,
     /// Branches containing a commit, for the commit details panel, by hash. Cleared when
     /// the refs move.
@@ -406,6 +408,7 @@ impl Osier {
             tab_check_pending: false,
             fresh_open: None,
             expanded_command: None,
+            command_log_failures_only: false,
             diff,
             diff_subscription: None,
             diff_key: None,
@@ -2382,6 +2385,18 @@ impl Osier {
     pub(crate) fn toggle_command_log(&mut self, cx: &mut Context<Self>) {
         self.command_log_visible = !self.command_log_visible;
         self.save_state();
+        cx.notify();
+    }
+
+    /// From an error notification: open the command log on failures only, with the command
+    /// that failed (when known) expanded. Failures are few, so it is at or near the top.
+    pub(crate) fn show_failed_command(&mut self, id: Option<u64>, cx: &mut Context<Self>) {
+        if !self.command_log_visible {
+            self.command_log_visible = true;
+            self.save_state();
+        }
+        self.command_log_failures_only = true;
+        self.expanded_command = id;
         cx.notify();
     }
 }
