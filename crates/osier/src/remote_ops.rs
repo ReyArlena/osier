@@ -355,28 +355,27 @@ impl Osier {
                     "Choose a GitHub account from the Push menu, or add your ssh key to the agent (`ssh-add`)."
                 };
                 window.push_notification(
-                    Notification::error(format!("{label} failed: authentication"))
-                        .message(format!("{text}. {hint}")),
+                    Notification::error(format!("{text}. {hint}"))
+                        .title(format!("{label} failed: authentication")),
                     cx,
                 );
             }
             (_, GitError::Network(_)) => {
                 window.push_notification(
-                    Notification::error(format!("{label} failed: remote unreachable"))
-                        .message(describe(&error)),
+                    Notification::error(describe(&error))
+                        .title(format!("{label} failed: remote unreachable")),
                     cx,
                 );
             }
             (_, GitError::Conflict(_)) => {
                 window.push_notification(
-                    Notification::warning(format!("{label}: conflicts"))
-                        .message("Resolve the conflicted files in Changes, then continue or abort from the status bar."),
+                    Notification::warning("Resolve the conflicted files in Changes, then continue or abort from the status bar.").title(format!("{label}: conflicts")),
                     cx,
                 );
             }
             _ => {
                 window.push_notification(
-                    Notification::error(format!("{label} failed")).message(describe(&error)),
+                    Notification::error(describe(&error)).title(format!("{label} failed")),
                     cx,
                 );
             }
@@ -540,8 +539,8 @@ impl Osier {
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
             window.push_notification(
-                Notification::warning("No upstream and no remote")
-                    .message("Add a remote first (Branches tab)."),
+                Notification::warning("Add a remote first (Branches tab).")
+                    .title("No upstream and no remote"),
                 cx,
             );
             return;
@@ -571,8 +570,8 @@ impl Osier {
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
             window.push_notification(
-                Notification::warning("No upstream and no remote")
-                    .message("Add a remote first (Branches tab)."),
+                Notification::warning("Add a remote first (Branches tab).")
+                    .title("No upstream and no remote"),
                 cx,
             );
             return;

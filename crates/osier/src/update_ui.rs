@@ -229,8 +229,10 @@ impl Osier {
         match self.updates.source.restart(&binary) {
             Ok(()) => cx.quit(),
             Err(e) => window.push_notification(
-                gpui_kit::component::notification::Notification::warning("Could not restart")
-                    .message(format!("{e}. Close Osier and start it again.")),
+                gpui_kit::component::notification::Notification::warning(format!(
+                    "{e}. Close Osier and start it again."
+                ))
+                .title("Could not restart"),
                 cx,
             ),
         }

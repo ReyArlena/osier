@@ -88,8 +88,8 @@ impl Osier {
         match spawn(&argv, &root) {
             Ok(()) => {}
             Err(e) => window.push_notification(
-                Notification::error("Could not open editor")
-                    .message(format!("{}: {e}", argv.join(" "))),
+                Notification::error(format!("{}: {e}", argv.join(" ")))
+                    .title("Could not open editor"),
                 cx,
             ),
         }
@@ -122,15 +122,15 @@ impl Osier {
         };
         if argv.is_empty() {
             window.push_notification(
-                Notification::warning("No terminal found")
-                    .message("Set editor.terminal in config.toml or export TERMINAL."),
+                Notification::warning("Set editor.terminal in config.toml or export TERMINAL.")
+                    .title("No terminal found"),
                 cx,
             );
             return;
         }
         if let Err(e) = spawn(&argv, &root) {
             window.push_notification(
-                Notification::error("Could not open terminal").message(e.to_string()),
+                Notification::error(e.to_string()).title("Could not open terminal"),
                 cx,
             );
         }
@@ -163,7 +163,7 @@ impl Osier {
         ];
         if let Err(e) = spawn(&argv, &root) {
             window.push_notification(
-                Notification::error("Could not open file manager").message(e.to_string()),
+                Notification::error(e.to_string()).title("Could not open file manager"),
                 cx,
             );
         }
@@ -180,7 +180,7 @@ impl Osier {
         let cwd = path.parent().unwrap_or(path);
         if let Err(e) = spawn(&argv, cwd) {
             window.push_notification(
-                Notification::error("Could not open").message(e.to_string()),
+                Notification::error(e.to_string()).title("Could not open"),
                 cx,
             );
         }

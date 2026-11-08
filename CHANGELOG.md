@@ -6,6 +6,11 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Notifications show their title again. A title such as "Push failed" was replaced by the
+  message underneath it.
+
 ## [0.1.0] - 2026-11-08
 
 First release.

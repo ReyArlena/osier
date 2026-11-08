@@ -47,7 +47,7 @@ impl Osier {
             Ok(items) => items,
             Err(e) => {
                 window.push_notification(
-                    Notification::error("Cannot list commits").message(e.to_string()),
+                    Notification::error(e.to_string()).title("Cannot list commits"),
                     cx,
                 );
                 return;

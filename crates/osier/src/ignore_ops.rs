@@ -133,7 +133,7 @@ impl Osier {
             let result = check.await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Err(e) => window.push_notification(
-                    Notification::error("Could not check the path").message(e.to_string()),
+                    Notification::error(e.to_string()).title("Could not check the path"),
                     cx,
                 ),
                 // Already ignored, and git is not tracking it: nothing to do.

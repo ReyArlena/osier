@@ -1198,8 +1198,8 @@ impl Osier {
                 self.activate(ix, window, cx)
             }
             Err(error) => window.push_notification(
-                Notification::warning("Could not open repository")
-                    .message(format!("{error}. It was removed from the recent list.")),
+                Notification::warning(format!("{error}. It was removed from the recent list."))
+                    .title("Could not open repository"),
                 cx,
             ),
         }
@@ -2152,7 +2152,7 @@ impl Osier {
             window.push_notification("Key bindings reloaded from keymap.toml", cx);
         } else {
             window.push_notification(
-                Notification::warning("keymap.toml has problems").message(problems.join("\n")),
+                Notification::warning(problems.join("\n")).title("keymap.toml has problems"),
                 cx,
             );
         }
@@ -2174,8 +2174,8 @@ impl Osier {
             Ok(f) => f,
             Err(error) => {
                 window.push_notification(
-                    Notification::error("keymap.toml has an error; fix it first")
-                        .message(error.to_string()),
+                    Notification::error(error.to_string())
+                        .title("keymap.toml has an error; fix it first"),
                     cx,
                 );
                 return;
@@ -2193,7 +2193,7 @@ impl Osier {
         }
         if let Err(error) = file.save(&self.paths) {
             window.push_notification(
-                Notification::error("Could not save keymap.toml").message(error.to_string()),
+                Notification::error(error.to_string()).title("Could not save keymap.toml"),
                 cx,
             );
             return;
@@ -2224,8 +2224,8 @@ impl Osier {
         let file = osier_config::keymap::KeymapFile::default();
         if let Err(error) = file.save(&self.paths) {
             window.push_notification(
-                gpui_kit::component::notification::Notification::error("Could not reset keymap")
-                    .message(error.to_string()),
+                gpui_kit::component::notification::Notification::error(error.to_string())
+                    .title("Could not reset keymap"),
                 cx,
             );
             return;
@@ -2282,14 +2282,14 @@ impl Osier {
         use gpui_kit::component::WindowExt as _;
         use gpui_kit::component::notification::Notification;
         window.push_notification(
-            Notification::warning(format!(
+            Notification::warning(
+                "Context-menu keys and the prefix key cannot share a key with another binding.",
+            )
+            .title(format!(
                 "{} is already used by {}",
                 crate::keymap::pretty(keys),
                 others.join(", ")
-            ))
-            .message(
-                "Context-menu keys and the prefix key cannot share a key with another binding.",
-            ),
+            )),
             cx,
         );
     }

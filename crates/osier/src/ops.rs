@@ -126,8 +126,8 @@ impl Osier {
                         entry.error = Some(text.clone());
                         let owner = cx.weak_entity();
                         window.push_notification(
-                            Notification::error(format!("{summary} failed"))
-                                .message(text)
+                            Notification::error(text)
+                                .title(format!("{summary} failed"))
                                 .action(move |_, _, _| {
                                     let owner = owner.clone();
                                     Button::new("show-command-log")

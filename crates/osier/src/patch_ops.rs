@@ -95,7 +95,7 @@ impl Osier {
                 Ok(text) => then(this, text, window, cx),
                 Err(error) => {
                     window.push_notification(
-                        Notification::error("Could not create patch").message(describe(&error)),
+                        Notification::error(describe(&error)).title("Could not create patch"),
                         cx,
                     );
                 }
@@ -190,7 +190,7 @@ impl Osier {
             }
             Err(error) => {
                 window.push_notification(
-                    Notification::error("Could not save patch").message(error.to_string()),
+                    Notification::error(error.to_string()).title("Could not save patch"),
                     cx,
                 );
                 None
@@ -237,7 +237,7 @@ impl Osier {
                     cx,
                 ),
                 Err(e) => window.push_notification(
-                    Notification::error("Could not write patch").message(e.to_string()),
+                    Notification::error(e.to_string()).title("Could not write patch"),
                     cx,
                 ),
             });
@@ -378,7 +378,7 @@ impl Osier {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match probe {
                 Err(error) => window.push_notification(
-                    Notification::error("Not a patch git can read").message(describe(&error)),
+                    Notification::error(describe(&error)).title("Not a patch git can read"),
                     cx,
                 ),
                 Ok((files, _)) if files.is_empty() => {
@@ -414,11 +414,10 @@ impl Osier {
                     // fall back to a three-way merge. Say so instead of offering it.
                     let rejected = file_list(report.rejected.iter().map(String::as_str));
                     window.push_notification(
-                        Notification::error(format!("{label} does not apply cleanly"))
-                            .message(format!(
+                        Notification::error(format!(
                                 "Rejected:\n{rejected}\n\n{}\n\nThis patch has no blob ids (PhpStorm or plain diff), so a three-way merge is not possible. Bring the files closer to the patch's base and try again.",
                                 report.message
-                            )),
+                            )).title(format!("{label} does not apply cleanly")),
                         cx,
                     );
                 }
@@ -487,11 +486,13 @@ impl Osier {
                         let n = report.conflicts.len();
                         entry.error = Some(format!("conflicts in {n} {}", plural(n, "file")));
                         window.push_notification(
-                            Notification::warning(format!(
+                            Notification::warning(file_list(
+                                report.conflicts.iter().map(String::as_str),
+                            ))
+                            .title(format!(
                                 "{summary} with conflicts in {n} {}",
                                 plural(n, "file")
-                            ))
-                            .message(file_list(report.conflicts.iter().map(String::as_str))),
+                            )),
                             cx,
                         );
                         true
@@ -500,8 +501,8 @@ impl Osier {
                         entry.ok = false;
                         entry.error = Some(report.message.clone());
                         window.push_notification(
-                            Notification::error(format!("{label} was not applied"))
-                                .message(report.message.clone()),
+                            Notification::error(report.message.clone())
+                                .title(format!("{label} was not applied")),
                             cx,
                         );
                         false
@@ -510,8 +511,8 @@ impl Osier {
                         entry.ok = false;
                         entry.error = Some(describe(error));
                         window.push_notification(
-                            Notification::error(format!("{label} was not applied"))
-                                .message(describe(error)),
+                            Notification::error(describe(error))
+                                .title(format!("{label} was not applied")),
                             cx,
                         );
                         false
@@ -575,7 +576,7 @@ impl Osier {
                     this.apply_patch_text(text, label, None, window, cx);
                 }
                 Err(e) => window.push_notification(
-                    Notification::error("Could not read patch").message(e.to_string()),
+                    Notification::error(e.to_string()).title("Could not read patch"),
                     cx,
                 ),
             });
@@ -605,7 +606,7 @@ impl Osier {
             Ok(t) => t,
             Err(e) => {
                 window.push_notification(
-                    Notification::error("Could not read patch").message(e.to_string()),
+                    Notification::error(e.to_string()).title("Could not read patch"),
                     cx,
                 );
                 return;
@@ -667,7 +668,7 @@ impl Osier {
     ) {
         if let Err(error) = patches::delete(&self.paths, &id) {
             window.push_notification(
-                Notification::error("Could not delete patch").message(error.to_string()),
+                Notification::error(error.to_string()).title("Could not delete patch"),
                 cx,
             );
             return;
@@ -703,7 +704,7 @@ impl Osier {
                 }
                 if let Err(error) = patches::rename(&this.paths, &id, &name) {
                     window.push_notification(
-                        Notification::error("Could not rename patch").message(error.to_string()),
+                        Notification::error(error.to_string()).title("Could not rename patch"),
                         cx,
                     );
                 }
@@ -728,7 +729,7 @@ impl Osier {
                 );
             }
             Err(e) => window.push_notification(
-                Notification::error("Could not read patch").message(e.to_string()),
+                Notification::error(e.to_string()).title("Could not read patch"),
                 cx,
             ),
         }
@@ -747,7 +748,7 @@ impl Osier {
         match patch.text() {
             Ok(text) => self.write_patch_file(text, suggested, window, cx),
             Err(e) => window.push_notification(
-                Notification::error("Could not read patch").message(e.to_string()),
+                Notification::error(e.to_string()).title("Could not read patch"),
                 cx,
             ),
         }

@@ -239,7 +239,7 @@ impl Osier {
             Ok(_) => false,
             Err(error) => {
                 window.push_notification(
-                    Notification::error("config.toml has an error").message(error.to_string()),
+                    Notification::error(error.to_string()).title("config.toml has an error"),
                     cx,
                 );
                 false

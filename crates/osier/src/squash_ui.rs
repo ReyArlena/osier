@@ -27,10 +27,11 @@ impl Osier {
         let picked = project.picked.clone();
         if picked.len() < 2 {
             window.push_notification(
-                Notification::warning("Nothing to squash").message(
+                Notification::warning(
                     "Pick at least two commits: shift-click selects a range, ctrl-click adds \
                      single commits.",
-                ),
+                )
+                .title("Nothing to squash"),
                 cx,
             );
             return;
@@ -43,8 +44,8 @@ impl Osier {
             let _ = this.update_in(cx, |this, window, cx| match plan {
                 Ok(plan) => this.open_squash_dialog(plan, window, cx),
                 Err(error) => window.push_notification(
-                    Notification::warning("Cannot squash these commits")
-                        .message(crate::ops::describe(&error)),
+                    Notification::warning(crate::ops::describe(&error))
+                        .title("Cannot squash these commits"),
                     cx,
                 ),
             });

@@ -740,8 +740,8 @@ impl Osier {
         match result {
             Ok(_) => {
                 window.push_notification(
-                    Notification::success(label.to_string())
-                        .message(format!("In {}", crate::format::tilde(target))),
+                    Notification::success(format!("In {}", crate::format::tilde(target)))
+                        .title(label.to_string()),
                     cx,
                 );
                 self.open_project_notify(target, window, cx);
@@ -756,7 +756,7 @@ impl Osier {
                 window.push_notification(format!("{label}: cancelled"), cx);
             }
             Err(e) => window.push_notification(
-                Notification::warning(format!("{label} failed")).message(crate::ops::describe(&e)),
+                Notification::warning(crate::ops::describe(&e)).title(format!("{label} failed")),
                 cx,
             ),
         }
@@ -1318,7 +1318,7 @@ impl Osier {
                             }
                             Err(e) => {
                                 window.push_notification(
-                                    Notification::warning(format!("{label} failed")).message(e),
+                                    Notification::warning(e).title(format!("{label} failed")),
                                     cx,
                                 );
                                 cx.notify();
