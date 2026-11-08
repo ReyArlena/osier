@@ -73,11 +73,16 @@ A Flatpak manifest draft is in `packaging/flatpak/`.
 ## Usage
 
 ```
-osier [path]      open a repository (or start with the last session); if Osier is
-                  already running, it opens the repository there and comes to the front
-osier --new-instance [path]   start a separate window instead
+osier [path]          open a repository (or start with the last session); if Osier is
+                      already running, it opens the repository there and comes to the front
+osier -n [path]       start a separate window instead (--new-instance)
+osier --update        install the latest release (installs from the install script;
+                      --check only reports, --force reinstalls)
 osier --version --verbose
 ```
+
+Installed with a package manager, Flatpak or cargo? Update it that way; `osier --update`
+says so. Settings > About shows how Osier was installed.
 
 Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directories for them
 (Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent

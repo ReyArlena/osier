@@ -22,6 +22,7 @@ mod graph;
 mod hunk_ops;
 mod ignore_ops;
 mod inline_code;
+mod install_route;
 mod instance;
 mod keymap;
 mod new_repo;
@@ -45,6 +46,7 @@ mod system_scheme;
 mod test_ids;
 mod theme_cards;
 mod themes;
+mod update;
 mod viewer;
 mod views;
 
@@ -118,9 +120,10 @@ fn main() {
                 let git = osier_git::GitVersion::detect(&runner)
                     .ok()
                     .map(|v| v.to_string());
+                let install = Some(install_route::InstallRoute::detect().label());
                 print!(
                     "{}",
-                    runtime_info::RuntimeInfo::collect(paths.as_ref(), git)
+                    runtime_info::RuntimeInfo::collect(paths.as_ref(), git, install)
                 );
             }
             return;
@@ -128,6 +131,13 @@ fn main() {
         cli::Mode::Help => {
             println!("{}", cli::HELP);
             return;
+        }
+        cli::Mode::Update { check, force } => {
+            std::process::exit(update::run(check, force));
+        }
+        cli::Mode::Invalid(why) => {
+            eprintln!("osier: {why}\nRun `osier --help` for the options.");
+            std::process::exit(2);
         }
     };
     init_logging();

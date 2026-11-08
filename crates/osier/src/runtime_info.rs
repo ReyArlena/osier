@@ -13,6 +13,8 @@ pub const VERSION: &str = env!("OSIER_BUILD_VERSION");
 pub struct RuntimeInfo {
     pub osier_version: String,
     pub git_version: Option<String>,
+    /// How this binary was installed (`install_route.rs`), when it was looked up.
+    pub install: Option<String>,
     /// `Wayland` or `X11`, from the environment the process was started with.
     pub display_backend: &'static str,
     pub session_type: Option<String>,
@@ -24,7 +26,11 @@ pub struct RuntimeInfo {
 }
 
 impl RuntimeInfo {
-    pub fn collect(paths: Option<&Paths>, git_version: Option<String>) -> Self {
+    pub fn collect(
+        paths: Option<&Paths>,
+        git_version: Option<String>,
+        install: Option<String>,
+    ) -> Self {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
         let display_backend = if env("WAYLAND_DISPLAY").is_some() {
             "Wayland"
@@ -36,6 +42,7 @@ impl RuntimeInfo {
         Self {
             osier_version: VERSION.to_string(),
             git_version,
+            install,
             display_backend,
             session_type: env("XDG_SESSION_TYPE"),
             desktop: env("XDG_CURRENT_DESKTOP"),
@@ -51,6 +58,7 @@ impl RuntimeInfo {
         let or_unknown = |v: &Option<String>| v.clone().unwrap_or_else(|| "unknown".into());
         vec![
             ("Osier", format!("v{}", self.osier_version)),
+            ("Installed", or_unknown(&self.install)),
             (
                 "Git",
                 self.git_version
@@ -83,7 +91,11 @@ mod tests {
 
     #[test]
     fn prints_every_row() {
-        let info = RuntimeInfo::collect(None, Some("2.50.0".into()));
+        let info = RuntimeInfo::collect(
+            None,
+            Some("2.50.0".into()),
+            Some("install script (~/.local/bin)".into()),
+        );
         let text = info.to_string();
         assert!(text.contains("Git      v2.50.0"), "{text}");
         assert!(
@@ -91,8 +103,12 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Flatpak"));
-        assert_eq!(text.lines().count(), 9);
-        let unknown = RuntimeInfo::collect(None, None).to_string();
+        assert_eq!(text.lines().count(), 10);
+        assert!(
+            text.contains("Installed install script (~/.local/bin)"),
+            "{text}"
+        );
+        let unknown = RuntimeInfo::collect(None, None, None).to_string();
         assert!(unknown.contains("Git      unknown"), "{unknown}");
     }
 

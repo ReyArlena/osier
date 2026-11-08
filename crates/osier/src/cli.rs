@@ -31,7 +31,14 @@ pub enum Mode {
     Version {
         verbose: bool,
     },
+    /// `osier --update [--check] [--force]` (see `update.rs`).
+    Update {
+        check: bool,
+        force: bool,
+    },
     Help,
+    /// Arguments that make no sense: the message says why.
+    Invalid(String),
 }
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
@@ -78,6 +85,17 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
             verbose: args.iter().skip(1).any(|a| a == "--verbose" || a == "-v"),
         },
         Some("--help" | "-h") => Mode::Help,
+        Some("--update") => {
+            let (mut check, mut force) = (false, false);
+            for a in &args[1..] {
+                match a.as_str() {
+                    "--check" => check = true,
+                    "--force" => force = true,
+                    other => return Mode::Invalid(format!("--update does not take {other}")),
+                }
+            }
+            Mode::Update { check, force }
+        }
         // ssh runs `$SSH_ASKPASS "<prompt>"` with no flag; a prompt is not a path.
         Some(p)
             if p.ends_with(':')
@@ -88,11 +106,24 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
             Mode::Askpass(p.to_string())
         }
         _ => {
-            let new_instance = args.iter().any(|a| a == "--new-instance");
-            let path = args
-                .iter()
-                .find(|a| a.as_str() != "--new-instance")
-                .map(PathBuf::from);
+            let mut new_instance = false;
+            let mut path: Option<PathBuf> = None;
+            let mut only_paths = false;
+            for a in &args {
+                if !only_paths && a == "--" {
+                    only_paths = true;
+                } else if !only_paths && (a == "--new-instance" || a == "-n") {
+                    new_instance = true;
+                } else if !only_paths && a.starts_with('-') && a.len() > 1 {
+                    return Mode::Invalid(format!(
+                        "unknown option {a} (a path starting with - goes after --)"
+                    ));
+                } else if path.is_some() {
+                    return Mode::Invalid("open one path at a time".into());
+                } else {
+                    path = Some(PathBuf::from(a));
+                }
+            }
             Mode::Gui { path, new_instance }
         }
     }
@@ -144,13 +175,21 @@ pub fn run_gh_api(account: &str, host: &str, args: &[String]) -> i32 {
     }
 }
 
-pub const HELP: &str =
-    "osier [path]              open a repository; a running Osier opens it and comes to the front
-osier --new-instance [path]   start a separate window instead
-osier --version [--verbose]   (verbose adds git version, display backend and paths)
-osier --credential-helper --account <login> --host <host> <get|store|erase>
-osier --gh-api --account <login> --host <host> -- <gh api args>   (used by the app)
-osier --askpass <prompt>   (also used by ssh and git through SSH_ASKPASS / GIT_ASKPASS)";
+pub const HELP: &str = "\
+osier [options] [path]
+
+  path                  a repository (or a folder inside one); without one, Osier reopens
+                        the last session. A running Osier opens it and comes to the front.
+
+  -n, --new-instance    start a separate window instead
+      --update          install the latest release over this Osier (install-script installs)
+      --update --check  only report whether an update exists (exit code 10 when one does)
+      --update --force  reinstall, or replace a development or newer build
+  -V, --version         print the version (--verbose adds git, display, install and paths)
+  -h, --help            this help
+      --                end of options: a path starting with - goes after it
+
+Used by git and ssh, not typed by hand: --credential-helper, --askpass, --gh-api.";
 
 #[cfg(test)]
 mod tests {
@@ -195,6 +234,32 @@ mod tests {
             Mode::Askpass("Enter passphrase for key '/home/x/.ssh/id_ed25519': ".into())
         );
         assert_eq!(p(&["--version"]), Mode::Version { verbose: false });
+        assert_eq!(p(&["-n", "/tmp/x"]), gui(Some("/tmp/x"), true));
+        assert_eq!(p(&["--", "-odd"]), gui(Some("-odd"), false));
+        assert_eq!(
+            p(&["--update"]),
+            Mode::Update {
+                check: false,
+                force: false
+            }
+        );
+        assert_eq!(
+            p(&["--update", "--check"]),
+            Mode::Update {
+                check: true,
+                force: false
+            }
+        );
+        assert_eq!(
+            p(&["--update", "--force"]),
+            Mode::Update {
+                check: false,
+                force: true
+            }
+        );
+        assert!(matches!(p(&["--update", "now"]), Mode::Invalid(_)));
+        assert!(matches!(p(&["--udpate"]), Mode::Invalid(_)));
+        assert!(matches!(p(&["/a", "/b"]), Mode::Invalid(_)));
         assert_eq!(
             p(&["--version", "--verbose"]),
             Mode::Version { verbose: true }

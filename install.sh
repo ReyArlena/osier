@@ -57,15 +57,24 @@ download() {
   fi
 }
 
+# Newest published release (not a draft or pre-release): github.com/<repo>/releases/latest
+# redirects to .../releases/tag/vX.Y.Z. A plain web redirect, so the API rate limit does not
+# apply. Prints nothing when there is no release yet or GitHub is unreachable.
+latest_release_tag() {
+  url="https://github.com/$REPO/releases/latest"
+  if have curl; then
+    curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null
+  elif have wget; then
+    wget -q -S --spider --max-redirect=0 "$url" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p'
+  fi | sed -n 's|.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)[[:space:]]*$|\1|p' | head -n 1
+}
+
 resolve_version() {
   if [ -n "${OSIER_VERSION:-}" ]; then
     printf '%s' "$OSIER_VERSION"
     return
   fi
-  tmp="$(mktemp)"
-  download "https://api.github.com/repos/$REPO/releases/latest" "$tmp" || { rm -f "$tmp"; return 1; }
-  v="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp" | head -n1)"
-  rm -f "$tmp"
+  v="$(latest_release_tag)"
   [ -n "$v" ] || return 1
   printf '%s' "$v"
 }
@@ -105,7 +114,7 @@ install_desktop() {
 # works when the GitHub API is rate limited. Prints nothing when there is no release yet.
 latest_tag() {
   have git || return 0
-  git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+  GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
     | sed -n 's|.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' \
     | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
 }
@@ -141,7 +150,8 @@ install_from_source() {
   fi
   work="$(mktemp -d)"
   trap 'rm -rf "$work"' EXIT
-  ref="${OSIER_VERSION:-$(latest_tag)}"
+  ref="${OSIER_VERSION:-$(latest_release_tag)}"
+  [ -n "$ref" ] || ref="$(latest_tag)"
   if [ -z "$ref" ]; then
     ref="main"
     say "No release yet: building the latest code from main"

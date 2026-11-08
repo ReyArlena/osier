@@ -138,6 +138,10 @@ impl Osier {
                 .ok()
                 .map(|v| v.to_string());
         }
+        if self.install_route.is_none() {
+            // Asks the package managers who owns the binary; once per run is enough.
+            self.install_route = Some(crate::install_route::InstallRoute::detect().label());
+        }
         let view = cx.entity();
         let focus = self.settings_focus.clone();
         let root_focus = self.focus_handle.clone();
@@ -316,7 +320,11 @@ impl Osier {
     }
 
     pub(crate) fn runtime_info(&self) -> RuntimeInfo {
-        RuntimeInfo::collect(Some(&self.paths), self.git_version.clone())
+        RuntimeInfo::collect(
+            Some(&self.paths),
+            self.git_version.clone(),
+            self.install_route.clone(),
+        )
     }
 }
 

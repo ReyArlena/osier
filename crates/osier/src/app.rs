@@ -213,6 +213,8 @@ pub struct Osier {
     /// Filled when the settings sheet opens.
     pub(crate) ssh_status: Option<osier_auth::SshStatus>,
     pub(crate) git_version: Option<String>,
+    /// How Osier was installed (`install_route.rs`), looked up when settings first open.
+    pub(crate) install_route: Option<String>,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
     /// Waiting for the key after the prefix key (see `prefix.rs`).
@@ -438,6 +440,7 @@ impl Osier {
             blame: None,
             ssh_status: None,
             git_version: None,
+            install_route: None,
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
             prefix_pending: None,
