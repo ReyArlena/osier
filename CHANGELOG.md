@@ -68,6 +68,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Keyboard shortcuts work again straight after a dialog closes, instead of doing nothing
+  until you click somewhere in the window.
 - The sidebar filter's link to the project status setting selects "Status of projects that
   are not open" in Settings, instead of "Switching projects".
 - Pulling in a repository whose git config makes pulls rebase (`pull.rebase`) with

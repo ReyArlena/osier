@@ -2564,6 +2564,21 @@ fn load_patch(
 
 impl Render for Osier {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use gpui_kit::component::WindowExt as _;
+        // A dialog that closes can leave nothing focused (it gives focus back to a handle that
+        // is gone), and app shortcuts need a focused element to dispatch from. Put focus back
+        // on the app once no dialog or sheet is open.
+        if window.focused(cx).is_none()
+            && !window.has_active_dialog(cx)
+            && !window.has_active_sheet(cx)
+        {
+            let root = self.focus_handle.clone();
+            window.defer(cx, move |window, cx| {
+                if window.focused(cx).is_none() {
+                    root.focus(window, cx);
+                }
+            });
+        }
         let has_project = self.active.is_some();
         v_flex()
             .track_focus(&self.focus_handle)
