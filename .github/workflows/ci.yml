@@ -15,9 +15,9 @@ env:
 jobs:
   check:
     name: fmt, clippy, test, build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Native dependencies
         run: |
           sudo apt-get update
@@ -46,9 +46,9 @@ jobs:
 
   deny:
     name: cargo deny
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
