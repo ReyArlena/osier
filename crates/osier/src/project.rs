@@ -303,6 +303,72 @@ impl Project {
         }
     }
 
+    /// Where `selection` lands once `new` replaces the current snapshot, so the right pane
+    /// never names something the lists no longer show. Unchanged while what it points at is
+    /// still there. A Changes file that left its area (staged, unstaged, discarded,
+    /// committed) moves on to the next file in that area, or the one above when it was the
+    /// last, and follows the file into its new area when the area is now empty;
+    /// `keep_file` (an editor is open on it) always follows the file. A dropped stash moves
+    /// on to its neighbour the same way. A working-tree file that was deleted, or a Changes
+    /// file with nowhere to go, gives `Selection::None`, which the tab's default fills.
+    pub fn reconcile_selection(
+        &self,
+        selection: &Selection,
+        new: &Snapshot,
+        keep_file: bool,
+    ) -> Selection {
+        let old = self.snapshot.as_ref();
+        match selection {
+            Selection::File { path, area } => {
+                let items = ordered_changes(&new.status);
+                if items.iter().any(|(p, a)| p == path && a == area) {
+                    return selection.clone();
+                }
+                let follow = || items.iter().find(|(p, _)| p == path).cloned();
+                let next = if keep_file {
+                    follow()
+                } else {
+                    old.and_then(|old| {
+                        let was: Vec<String> = ordered_changes(&old.status)
+                            .into_iter()
+                            .filter(|(_, a)| a == area)
+                            .map(|(p, _)| p)
+                            .collect();
+                        neighbour(&was, path, |p| {
+                            items.iter().any(|(q, a)| q == p && a == area)
+                        })
+                        .map(|p| (p.clone(), *area))
+                    })
+                    .or_else(follow)
+                };
+                next.map_or(Selection::None, |(path, area)| Selection::File {
+                    path,
+                    area,
+                })
+            }
+            Selection::Compare { to, .. }
+                if old.is_some_and(|o| o.stashes.iter().any(|s| &s.oid == to))
+                    && !new.stashes.iter().any(|s| &s.oid == to) =>
+            {
+                let was: Vec<String> = old
+                    .map(|o| o.stashes.iter().map(|s| s.oid.clone()).collect())
+                    .unwrap_or_default();
+                neighbour(&was, to, |oid| new.stashes.iter().any(|s| &s.oid == oid)).map_or(
+                    Selection::None,
+                    |oid| Selection::Compare {
+                        from: format!("{oid}^1"),
+                        to: oid.clone(),
+                        since_merge_base: false,
+                    },
+                )
+            }
+            Selection::WorkFile { path, rev: None } if !self.repo.workdir().join(path).exists() => {
+                Selection::None
+            }
+            _ => selection.clone(),
+        }
+    }
+
     /// Row of a commit in the loaded log page.
     pub fn row_of(&self, hash: &str) -> Option<usize> {
         self.snapshot
@@ -333,6 +399,20 @@ impl Project {
             .map(|(ix, _)| ix)
             .collect()
     }
+}
+
+/// What takes `gone`'s place in the list `was` once it has left: the nearest item after it
+/// that `still` keeps, else the nearest one before it.
+pub fn neighbour<'a, T: PartialEq>(
+    was: &'a [T],
+    gone: &T,
+    still: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
+    let ix = was.iter().position(|t| t == gone)?;
+    was[ix + 1..]
+        .iter()
+        .find(|t| still(t))
+        .or_else(|| was[..ix].iter().rev().find(|t| still(t)))
 }
 
 /// Files in the order the Changes tab shows them: conflicted, staged, unstaged, untracked.

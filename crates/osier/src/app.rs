@@ -1416,11 +1416,50 @@ impl Osier {
                     project.selected_commit = anchor;
                     project.compare_commit = other;
                 }
-                // Drop a file selection that no longer exists.
-                if let Selection::File { path, .. } = &project.selection
-                    && !snapshot.status.entries.iter().any(|e| &e.path == path)
-                {
-                    project.selection = Selection::None;
+                // Move every selection off what the refresh took away (a file that changed
+                // area, a dropped stash), here and on the tabs that are away, so the pane
+                // never names something the lists no longer show. An open editor keeps its
+                // file selected.
+                let editing = |editor: Option<&crate::edit_pane::FileEditor>, s: &Selection| matches!((editor, s), (Some(e), Selection::File { path, .. }) if &e.path == path);
+                let editor = if is_active {
+                    self.editor.as_ref()
+                } else {
+                    project.parked_editor.as_ref()
+                };
+                let keep = editing(editor, &project.selection);
+                let moved = project.reconcile_selection(&project.selection, &snapshot, keep);
+                if moved != project.selection {
+                    project.selection = moved;
+                    if is_active {
+                        self.diff_force_large = false;
+                    }
+                }
+                let panes: Vec<(Tab, Selection)> = project
+                    .panes
+                    .iter()
+                    .map(|(tab, pane)| {
+                        let keep = editing(pane.editor.as_ref(), &pane.selection);
+                        (
+                            *tab,
+                            project.reconcile_selection(&pane.selection, &snapshot, keep),
+                        )
+                    })
+                    .collect();
+                for (tab, selection) in panes {
+                    if let Some(pane) = project.panes.get_mut(&tab) {
+                        pane.selection = selection;
+                    }
+                }
+                if is_active && let Some(oid) = &self.stash_selected {
+                    let was: Vec<String> = project
+                        .snapshot
+                        .as_ref()
+                        .map(|s| s.stashes.iter().map(|s| s.oid.clone()).collect())
+                        .unwrap_or_default();
+                    let still = |o: &String| snapshot.stashes.iter().any(|s| &s.oid == o);
+                    if !still(oid) {
+                        self.stash_selected = crate::project::neighbour(&was, oid, still).cloned();
+                    }
                 }
                 // Nothing picked on this tab yet: its default (the first change on Changes,
                 // the latest commit on Log), so the pane is not empty.
@@ -3099,6 +3138,113 @@ mod tests {
         );
         h.keys(cx, "escape");
         assert_eq!(repo.read("a.txt"), "A\n");
+    }
+
+    fn selected(h: &Harness, cx: &mut TestAppContext) -> Selection {
+        h.read(cx, |o, _| o.active_project().unwrap().selection.clone())
+    }
+
+    fn file(path: &str, area: Area) -> Selection {
+        Selection::File {
+            path: path.into(),
+            area,
+        }
+    }
+
+    /// Three changed files `a`, `b`, `c` in the Unstaged list.
+    fn three_unstaged() -> TempRepo {
+        let repo = TempRepo::new();
+        for f in ["a.txt", "b.txt", "c.txt"] {
+            repo.commit_file(f, "x\n", f);
+        }
+        for f in ["a.txt", "b.txt", "c.txt"] {
+            repo.write(f, "changed\n");
+        }
+        repo
+    }
+
+    #[gpui::test]
+    fn ui_staging_the_selected_file_moves_to_the_next(cx: &mut TestAppContext) {
+        let repo = three_unstaged();
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:b.txt");
+        h.click(cx, "change-stage:unstaged:b.txt");
+        assert_eq!(selected(&h, cx), file("c.txt", Area::Unstaged));
+        // The pane shows the new selection's diff, not an empty one.
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+        // Last in the list: the one above.
+        h.click(cx, "change-stage:unstaged:c.txt");
+        assert_eq!(selected(&h, cx), file("a.txt", Area::Unstaged));
+        // Only one left: follow it into Staged.
+        h.click(cx, "change-stage:unstaged:a.txt");
+        assert_eq!(selected(&h, cx), file("a.txt", Area::Staged));
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+    }
+
+    #[gpui::test]
+    fn ui_staging_another_file_keeps_the_selection(cx: &mut TestAppContext) {
+        let repo = three_unstaged();
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:a.txt");
+        h.click(cx, "change-stage:unstaged:c.txt");
+        assert_eq!(selected(&h, cx), file("a.txt", Area::Unstaged));
+        // Stage all follows the selected file; unstaging moves on in the Staged list.
+        h.act(cx, |o, w, cx| o.stage_all(w, cx));
+        assert_eq!(selected(&h, cx), file("a.txt", Area::Staged));
+        h.click(cx, "change-stage:staged:a.txt");
+        assert_eq!(selected(&h, cx), file("b.txt", Area::Staged));
+    }
+
+    #[gpui::test]
+    fn ui_staging_a_file_open_in_the_editor_keeps_it(cx: &mut TestAppContext) {
+        let repo = three_unstaged();
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:b.txt");
+        h.act(cx, |o, w, cx| o.open_editor(w, cx));
+        h.click(cx, "change-stage:unstaged:b.txt");
+        assert_eq!(selected(&h, cx), file("b.txt", Area::Staged));
+        assert!(h.read(cx, |o, _| o.editor.is_some()));
+    }
+
+    #[gpui::test]
+    fn ui_selection_on_an_away_tab_follows_too(cx: &mut TestAppContext) {
+        let repo = three_unstaged();
+        let h = Harness::open(cx, &repo);
+        h.click(cx, "change-row:unstaged:b.txt");
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        repo.git(["add", "b.txt"]);
+        h.act(cx, |o, _, cx| o.refresh_active(cx));
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Changes, cx));
+        assert_eq!(selected(&h, cx), file("c.txt", Area::Unstaged));
+    }
+
+    #[gpui::test]
+    fn ui_dropping_the_selected_stash_moves_to_the_next(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        for n in 0..3 {
+            repo.write("a.txt", &format!("{n}\n"));
+            repo.git(["stash", "-q"]);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Stashes, cx));
+        let oids: Vec<String> = h.read(cx, |o, _| {
+            let s = o.active_project().unwrap().snapshot.as_ref().unwrap();
+            s.stashes.iter().map(|s| s.oid.clone()).collect()
+        });
+        h.act(cx, |o, _, cx| o.select_stash(oids[1].clone(), cx));
+        repo.git(["stash", "drop", "-q", "stash@{1}"]);
+        h.act(cx, |o, _, cx| o.refresh_active(cx));
+        let to = |oid: &str| Selection::Compare {
+            from: format!("{oid}^1"),
+            to: oid.into(),
+            since_merge_base: false,
+        };
+        assert_eq!(selected(&h, cx), to(&oids[2]));
+        assert_eq!(
+            h.read(cx, |o, _| o.stash_selected.clone()),
+            Some(oids[2].clone())
+        );
     }
 
     fn input_text(

@@ -51,6 +51,11 @@ All notable changes to Osier are documented here. The format follows
 - The hard reset dialog no longer says the reflog can bring back uncommitted work.
 - The conflict notification points at the Continue and Abort buttons above the tabs, not
   the status bar.
+- Staging or unstaging the selected file moves the selection to the next file in its list
+  (or the one above, when it was the last), instead of leaving the file's name over an
+  empty "No changes" pane. When the list empties, the selection follows the file. An open
+  editor keeps its file selected, and a dropped stash moves on to the next stash the same
+  way.
 - Ticking a file's checkbox in Changes no longer selects that file.
 
 ## [0.1.0] - 2026-11-08
