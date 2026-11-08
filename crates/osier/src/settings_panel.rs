@@ -347,7 +347,7 @@ impl SettingsTarget {
     /// Projects > Status of projects that are not open.
     pub(crate) const RECENT_STATUS: Self = Self {
         page: Self::PROJECTS,
-        group: 1,
+        group: 2,
     };
     /// The Accounts page, for tests of its link.
     #[cfg(test)]

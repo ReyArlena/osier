@@ -68,6 +68,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The sidebar filter's link to the project status setting selects "Status of projects that
+  are not open" in Settings, instead of "Switching projects".
 - Pulling in a repository whose git config makes pulls rebase (`pull.rebase`) with
   uncommitted changes offers "Stash and pull", instead of showing git's "cannot pull with
   rebase" error.
