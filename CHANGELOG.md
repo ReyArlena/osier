@@ -22,6 +22,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The "Also add ... to .gitignore" option in the untrack dialog wraps like normal text.
 - Notifications show their title again. A title such as "Push failed" was replaced by the
   message underneath it.
 - Choosing force push in the "Push rejected" dialog opens its confirmation instead of

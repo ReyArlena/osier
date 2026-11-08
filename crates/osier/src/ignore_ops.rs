@@ -286,8 +286,8 @@ impl Osier {
                                     .id("tracked-dialog-option")
                                     .test_id("tracked-dialog-option")
                                     .gap_2()
-                                    .items_center()
-                                    .flex_wrap()
+                                    .items_start()
+                                    .pb_1()
                                     .cursor_pointer()
                                     .on_click(move |_, window, _| {
                                         c3.set(!c3.get());
@@ -304,9 +304,28 @@ impl Osier {
                                                 window.refresh();
                                             }),
                                     )
-                                    .child(before)
-                                    .child(crate::inline_code::inline_code(code, cx))
-                                    .when(!after.is_empty(), |this| this.child(after)),
+                                    // One element per word, so the sentence wraps like text
+                                    // and wrapped lines start under its first word, not under
+                                    // the checkbox.
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex_wrap()
+                                            .items_center()
+                                            .gap_x_1()
+                                            .children(
+                                                before
+                                                    .split_whitespace()
+                                                    .map(|w| div().child(w.to_string())),
+                                            )
+                                            .child(crate::inline_code::inline_code(code, cx))
+                                            .children(
+                                                after
+                                                    .split_whitespace()
+                                                    .map(|w| div().child(w.to_string())),
+                                            ),
+                                    ),
                             )
                         }),
                 )
