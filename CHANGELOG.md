@@ -52,6 +52,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- In the Log graph, a line from an unpushed commit to its parent stays dimmed all the way
+  down, instead of lighting up where it runs past commits that are already pushed.
 - Error notifications show git's error line instead of progress output such as
   "From <url>".
 - The "Also add ... to .gitignore" option in the untrack dialog wraps like normal text.

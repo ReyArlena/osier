@@ -24,6 +24,8 @@ pub struct Snapshot {
     pub tags: Vec<osier_git::refs::Tag>,
     pub commits: Vec<Commit>,
     pub graph: Vec<GraphRow>,
+    /// Per graph row, which of its edges are links from unpushed commits (drawn marked).
+    pub unpushed_edges: Vec<Vec<bool>>,
     pub stashes: Vec<StashEntry>,
     pub remotes: Vec<Remote>,
     pub reflog: Vec<ReflogEntry>,
@@ -498,6 +500,8 @@ pub fn load_snapshot(
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     let recent_messages = osier_git::log::recent_messages(repo, 5).unwrap_or_default();
     let unpushed = osier_git::log::unpushed(repo, 5000).unwrap_or_default();
+    let unpushed_edges =
+        osier_git::graph::marked_edges(&graph, |ix| unpushed.contains(&commits[ix].hash));
     // A broken .gitmodules must not take the whole snapshot down.
     let submodules = osier_git::submodule::list(repo).unwrap_or_else(|e| {
         tracing::debug!(error = %e, "submodule listing unavailable");
@@ -509,6 +513,7 @@ pub fn load_snapshot(
         tags,
         commits,
         graph,
+        unpushed_edges,
         stashes,
         remotes,
         reflog,

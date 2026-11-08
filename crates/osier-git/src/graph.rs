@@ -140,6 +140,39 @@ pub fn layout(commits: &[Commit]) -> Vec<GraphRow> {
     rows
 }
 
+/// Which edges belong to marked commits (the Log marks unpushed ones): `out[row][k]` is true
+/// when `rows[row].edges[k]` is part of a line that starts at a marked commit and has not
+/// reached its parent yet. The mark follows the line through the rows it passes, so a long
+/// link from a marked commit to its parent stays marked all the way. Where a marked and an
+/// unmarked line meet in one lane, the lane is unmarked from there on.
+pub fn marked_edges(rows: &[GraphRow], marked: impl Fn(usize) -> bool) -> Vec<Vec<bool>> {
+    let mut out = Vec::with_capacity(rows.len());
+    // Lanes of the current row whose arriving lines are all marked.
+    let mut lanes: Vec<bool> = Vec::new();
+    for (ix, row) in rows.iter().enumerate() {
+        let this = marked(ix);
+        let flags: Vec<bool> = row
+            .edges
+            .iter()
+            .map(|e| match e.parent {
+                // Starts at this row's node: a link to one of its parents.
+                Some(_) => this,
+                None => lanes.get(e.from).copied().unwrap_or(false),
+            })
+            .collect();
+        let width = row.edges.iter().map(|e| e.to + 1).max().unwrap_or(0);
+        let mut any = vec![false; width];
+        let mut all = vec![true; width];
+        for (e, &f) in row.edges.iter().zip(&flags) {
+            any[e.to] = true;
+            all[e.to] &= f;
+        }
+        lanes = any.iter().zip(&all).map(|(a, b)| *a && *b).collect();
+        out.push(flags);
+    }
+    out
+}
+
 fn first_free<T>(lanes: &[Option<T>]) -> usize {
     lanes
         .iter()
@@ -203,6 +236,45 @@ mod tests {
         assert_eq!(rows[2].lane, 0);
         assert_eq!(rows[3].lane, 0);
         assert_eq!(rows[3].width, 1, "lanes collapse at the common ancestor");
+    }
+
+    /// Local main (`m` merges origin's `r3`, plus unpushed `u2`, `u1`) over a shared `h`, as
+    /// in the bug report: `u1`'s link to `h` passes origin's rows and stays marked all the
+    /// way, while origin's own line is never marked.
+    #[test]
+    fn marked_links_stay_marked_while_passing_other_rows() {
+        let commits = [
+            c("m", &["u2", "r3"]),
+            c("u2", &["u1"]),
+            c("u1", &["h"]),
+            c("r3", &["r2"]),
+            c("r2", &["r1"]),
+            c("r1", &["h"]),
+            c("h", &["a"]),
+            c("a", &[]),
+        ];
+        let rows = layout(&commits);
+        let unpushed = ["m", "u2", "u1"];
+        let marks = marked_edges(&rows, |ix| unpushed.contains(&commits[ix].hash.as_str()));
+        let lane_of = |name: &str| rows[commits.iter().position(|c| c.hash == name).unwrap()].lane;
+        let (main, origin) = (lane_of("u1"), lane_of("r3"));
+        assert_ne!(main, origin);
+        // The merge line from `m` to `r3` passes `u2` and `u1` marked.
+        for name in ["u2", "u1"] {
+            let ix = commits.iter().position(|c| c.hash == name).unwrap();
+            for (e, &m) in rows[ix].edges.iter().zip(&marks[ix]) {
+                assert!(m, "{name}: {e:?} belongs to unpushed links");
+            }
+        }
+        // Origin's rows: the passing main line is marked, origin's own line is not.
+        for name in ["r3", "r2", "r1"] {
+            let ix = commits.iter().position(|c| c.hash == name).unwrap();
+            for (e, &m) in rows[ix].edges.iter().zip(&marks[ix]) {
+                assert_eq!(m, e.from == main && e.parent.is_none(), "{name}: {e:?}");
+            }
+        }
+        // Pushed history below is never marked.
+        assert!(marks[6..].iter().flatten().all(|m| !m));
     }
 
     #[test]

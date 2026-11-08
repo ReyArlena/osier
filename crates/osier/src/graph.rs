@@ -33,14 +33,17 @@ impl UnpushedPaint {
     }
 }
 
-/// Which parts of a row belong to unpushed commits: this row's node and its links to its
-/// parents (`this`), and the links arriving from the previous row's commit (`prev`: that
-/// row's lane, when it is unpushed). Lanes that only pass through are left alone.
-#[derive(Debug, Clone, Copy)]
+/// Which parts of a row belong to unpushed commits: this row's node (`this`), and per edge
+/// whether it is a link from an unpushed commit to its parent, for the edges leaving this row
+/// (`outgoing`, one per `row.edges`) and those arriving from the previous row (`incoming`).
+/// A link keeps its mark while it passes other rows; other branches' lines are left alone
+/// (see `osier_git::graph::marked_edges`).
+#[derive(Debug, Clone)]
 pub struct UnpushedMarks {
     pub paint: UnpushedPaint,
     pub this: bool,
-    pub prev: Option<usize>,
+    pub outgoing: Vec<bool>,
+    pub incoming: Vec<bool>,
 }
 
 /// Canvas element for a row: incoming edges from the previous row, outgoing edges, node.
@@ -74,7 +77,7 @@ pub fn graph_cell(
             let edge_color = |e: &Edge| color(e.color);
 
             // Top half: second halves of edges arriving from the previous row.
-            for e in &incoming {
+            for (k, e) in incoming.iter().enumerate() {
                 let mut b = PathBuilder::stroke(px(2.));
                 if e.from == e.to {
                     b.move_to(point(x_of(e.to), top));
@@ -91,12 +94,12 @@ pub fn graph_cell(
                 }
                 if let Ok(path) = b.build() {
                     let c = edge_color(e);
-                    let marked = marks.prev == Some(e.from);
+                    let marked = marks.incoming.get(k).copied().unwrap_or(false);
                     window.paint_path(path, if marked { marks.paint.apply(c) } else { c });
                 }
             }
             // Bottom half: first halves of edges leaving this row.
-            for e in &row.edges {
+            for (k, e) in row.edges.iter().enumerate() {
                 let mut b = PathBuilder::stroke(px(2.));
                 b.move_to(point(x_of(e.from), mid));
                 if e.from == e.to {
@@ -112,7 +115,7 @@ pub fn graph_cell(
                 }
                 if let Ok(path) = b.build() {
                     let c = edge_color(e);
-                    let marked = marks.this && e.from == row.lane;
+                    let marked = marks.outgoing.get(k).copied().unwrap_or(false);
                     window.paint_path(path, if marked { marks.paint.apply(c) } else { c });
                 }
             }

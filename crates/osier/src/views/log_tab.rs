@@ -58,6 +58,7 @@ impl Osier {
         let commits = Arc::new(snapshot.commits.clone());
         let graph = Arc::new(snapshot.graph.clone());
         let unpushed = Arc::new(snapshot.unpushed.clone());
+        let unpushed_edges = Arc::new(snapshot.unpushed_edges.clone());
         let unpushed_paint = match self.settings.git.log_unpushed {
             osier_config::settings::UnpushedStyle::Dim => {
                 crate::graph::UnpushedPaint::Dim(cx.theme().background)
@@ -177,10 +178,14 @@ impl Osier {
                                     let marks = crate::graph::UnpushedMarks {
                                         paint: unpushed_paint,
                                         this: unpushed.contains(&commit.hash),
-                                        prev: ix
+                                        outgoing: unpushed_edges
+                                            .get(ix)
+                                            .cloned()
+                                            .unwrap_or_default(),
+                                        incoming: ix
                                             .checked_sub(1)
-                                            .filter(|p| unpushed.contains(&commits[*p].hash))
-                                            .map(|p| graph[p].lane),
+                                            .and_then(|p| unpushed_edges.get(p).cloned())
+                                            .unwrap_or_default(),
                                     };
                                     let owner = owner.clone();
                                     let subject = if commit.subject.is_empty() {
