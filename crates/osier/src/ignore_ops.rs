@@ -204,9 +204,11 @@ impl Osier {
     ) {
         let what = if row.is_dir { "folder" } else { "file" };
         let warning = format!(
-            "Stopping tracking stages the {what}'s removal from the repository. The {what} stays \
-             on your disk, but when the commit is pulled into another clone, git deletes it \
-             there."
+            "Stopping tracking leaves the {what} on your disk and stages its removal from the \
+             repository for your next commit. Once that commit is pushed, anyone who pulls it \
+             will most likely have the {what} deleted from their disk. Git only keeps their copy \
+             when they have uncommitted edits to it, and then stops their pull until they deal \
+             with those. If they pull with Osier, it offers to put their copy back."
         );
         // What the checkbox runs, shown as a command. Folders untrack every file inside.
         let rm_command = if row.is_dir {

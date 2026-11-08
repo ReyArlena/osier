@@ -37,6 +37,8 @@ All notable changes to Osier are documented here. The format follows
   an editable text field.
 - Clearer wording in the pull, force push, upstream, abort, branch delete, reset, detached
   checkout, stash, tag, worktree, clone and untrack dialogs, written for people new to git.
+- The untrack and ignore dialogs say the file stays on your disk, and that other people
+  will most likely have it deleted when they pull the commit.
 - A force push that git stops because someone pushed since your last fetch says so,
   instead of reporting a rejected non fast-forward update.
 - The Log lists commits from all branches by date (git's date order, as PhpStorm does),
