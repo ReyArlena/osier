@@ -15,11 +15,13 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            arch: x86_64
             runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
+            arch: aarch64
             runner: ubuntu-22.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history and tags, so build.rs can tell this is exactly the release tag.
           fetch-depth: 0
@@ -55,21 +57,28 @@ jobs:
           cp -r packaging/com.reyarlena.osier.desktop packaging/com.reyarlena.osier.askpass.desktop packaging/com.reyarlena.osier.metainfo.xml packaging/icons "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
-      - uses: actions/upload-artifact@v4
+          # The bare binary under a version-free name, so
+          # releases/latest/download/osier-linux-<arch> always points at the newest release.
+          bin="osier-linux-${{ matrix.arch }}"
+          install -m 755 "target/${{ matrix.target }}/release/osier" "dist/${bin}"
+          (cd dist && sha256sum "${bin}" > "${bin}.sha256")
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
-          path: dist/*.tar.gz*
+          path: |
+            dist/*.tar.gz*
+            dist/osier-linux-*
 
   release:
     name: GitHub release
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
