@@ -307,6 +307,9 @@ impl Osier {
                                 .checked(area == Area::Staged)
                                 .disabled(area == Area::Conflicted)
                                 .on_click(cx.listener(move |this, checked: &bool, window, cx| {
+                                    // Staging leaves the selection alone: the row's own click
+                                    // would select it first.
+                                    cx.stop_propagation();
                                     let paths = vec![toggle_path.clone()];
                                     if *checked {
                                         this.stage_paths(paths, window, cx);

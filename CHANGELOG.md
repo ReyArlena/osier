@@ -51,6 +51,7 @@ All notable changes to Osier are documented here. The format follows
 - The hard reset dialog no longer says the reflog can bring back uncommitted work.
 - The conflict notification points at the Continue and Abort buttons above the tabs, not
   the status bar.
+- Ticking a file's checkbox in Changes no longer selects that file.
 
 ## [0.1.0] - 2026-11-08
 
