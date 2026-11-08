@@ -752,7 +752,8 @@ impl Osier {
             .position(|c| self.gh_accounts.iter().any(|a| a.active && &a.login == c))
             .unwrap_or(0);
         let choice = std::rc::Rc::new(std::cell::Cell::new(active_ix));
-        let always = std::rc::Rc::new(std::cell::Cell::new(true));
+        // Never ticked by default: remembering an account is an explicit choice.
+        let always = std::rc::Rc::new(std::cell::Cell::new(false));
         let weak = cx.entity().downgrade();
         let host = needed.host.clone();
         let candidates = needed.candidates.clone();

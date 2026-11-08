@@ -31,6 +31,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- "Always use this account for this project" in the account picker starts unticked, so
+  remembering an account is always your choice.
 - Common git refusals (unmerged branch, worktree with changes, missing remote branch,
   local changes in the way) are explained in plain words, and error titles say what could
   not be done, such as "Could not delete branch x".
