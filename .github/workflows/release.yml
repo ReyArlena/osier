@@ -31,8 +31,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libxcb-xkb-dev \
             libwayland-dev libvulkan-dev libfontconfig1-dev libfreetype-dev libssl-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read the pinned Rust version
+        id: rust
+        run: echo "version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build

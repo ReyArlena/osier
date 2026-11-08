@@ -1,3 +1,5 @@
 [toolchain]
-channel = "stable"
+# Exact version, bumped on purpose (rustup update stable, fix new lints, then change this).
+# CI and release workflows read this line, so local and CI use the same compiler and lints.
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
