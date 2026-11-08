@@ -489,8 +489,8 @@
         <div class="install-card reveal">
           <header><svg class="icon"><use href="#i-zap"/></svg><h3>Install script</h3><span class="badge">Recommended</span></header>
           <p>Fetches the latest release for x86_64 or ARM64 into <code>~/.local/bin</code>,
-            with the desktop entry and icons. It builds from source with cargo if no release
-            matches your machine.</p>
+            with the desktop entry and icons (glibc 2.35 or newer). Later updates come from
+            <code>osier --update</code> or Settings.</p>
           <div class="cmd">
             <code><span class="prompt">$</span><span data-copy-source>curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh</span></code>
             <button class="copy" type="button" aria-label="Copy install script command"><svg class="icon"><use href="#i-copy"/></svg><span>Copy</span></button>

@@ -45,7 +45,9 @@ none of the IDE.
 
 Osier needs Linux (Wayland, X11 fallback), `git` 2.30 or newer and a GPU driver with Vulkan.
 
-**Script** (prebuilt binary, falls back to a cargo build):
+**Script** (prebuilt binary for x86_64 and ARM64 Linux with glibc 2.35 or newer; other
+systems get pointed to the source build below). `osier --update`, or Settings > About >
+Updates, installs new releases the same way:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh
@@ -64,6 +66,17 @@ packages are on the AUR.
 #   libvulkan-dev libfontconfig1-dev libssl-dev
 # Arch: pkgconf libxkbcommon libxkbcommon-x11 wayland vulkan-headers fontconfig openssl
 cargo install --locked --git https://github.com/ReyArlena/osier osier
+```
+
+For a launcher entry and icon after a source build, copy them from a clone of the
+repository (the entry runs `osier`, so `~/.cargo/bin` must be on your `PATH`):
+
+```sh
+install -Dm644 packaging/com.reyarlena.osier.desktop -t ~/.local/share/applications
+for s in 16 32 48 64 128 256 512; do
+  install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/com.reyarlena.osier.png \
+    -t ~/.local/share/icons/hicolor/${s}x${s}/apps
+done
 ```
 
 <!-- Reinstate when the Flatpak is published:

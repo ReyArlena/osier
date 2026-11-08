@@ -2,14 +2,14 @@
 # Osier installer: curl -fsSL https://raw.githubusercontent.com/ReyArlena/osier/main/install.sh | sh
 #
 # Installs the latest release binary to ~/.local/bin (or $OSIER_PREFIX/bin), with the desktop
-# entry and icons under ~/.local/share. Falls back to building that same release from source
-# with cargo when no prebuilt binary matches this machine (or the download fails), and to main
-# only while no release exists. Set OSIER_VERSION=v1.2.3 to pin a release, OSIER_VERSION=main
-# for the latest code, and OSIER_FROM_SOURCE=1 to force a source build.
+# entry and icons under ~/.local/share. Prebuilt binaries only: x86_64 and ARM64 Linux with
+# glibc 2.35 or newer. Anything else stops with how to build from source instead. Set
+# OSIER_VERSION=v1.2.3 to install a specific release.
 set -eu
 
 REPO="ReyArlena/osier"
-REPO_URL="https://github.com/$REPO.git"
+# The release binaries are built on Ubuntu 22.04 (see .github/workflows/release.yml).
+MIN_GLIBC="2.35"
 PREFIX="${OSIER_PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -26,6 +26,37 @@ case "$arch" in
   *) target="" ;;
 esac
 [ "$(uname -s)" = "Linux" ] || die "Osier runs on Linux only"
+
+# No prebuilt binary fits this machine: say so, and how to get Osier anyway.
+no_build() {
+  say "error: $1"
+  say ""
+  say "There is no prebuilt Osier for this system. You can build it from source:"
+  say "  https://github.com/$REPO#install"
+  say "or ask for a build for your system:"
+  say "  https://github.com/$REPO/issues/new"
+  exit 1
+}
+
+# The binaries link glibc; musl systems and older glibc cannot run them.
+check_platform() {
+  [ -n "$target" ] || no_build "unsupported CPU architecture: $arch"
+  libc="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"   # "glibc 2.39"
+  if [ -z "$libc" ]; then
+    if ldd --version 2>&1 | grep -qi musl; then
+      no_build "this system uses musl libc; the prebuilt binaries need glibc $MIN_GLIBC or newer"
+    fi
+    say "warning: could not tell the C library version; the binary needs glibc $MIN_GLIBC or newer"
+    return 0
+  fi
+  have_v="${libc##* }"
+  have_major="${have_v%%.*}"; have_minor="${have_v#*.}"; have_minor="${have_minor%%.*}"
+  need_major="${MIN_GLIBC%%.*}"; need_minor="${MIN_GLIBC#*.}"
+  if [ "$have_major" -lt "$need_major" ] ||
+     { [ "$have_major" -eq "$need_major" ] && [ "$have_minor" -lt "$need_minor" ]; }; then
+    no_build "this system has glibc $have_v; the prebuilt binaries need glibc $MIN_GLIBC or newer"
+  fi
+}
 
 check_runtime_deps() {
   # Shared libraries loaded at runtime. Missing ones only produce a warning: the user may
@@ -110,64 +141,28 @@ install_desktop() {
   fi
 }
 
-# Newest stable release tag (vX.Y.Z, no pre-releases), read from the repository itself so it
-# works when the GitHub API is rate limited. Prints nothing when there is no release yet.
-latest_tag() {
-  have git || return 0
-  GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
-    | sed -n 's|.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' \
-    | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
-}
-
 install_release() {
-  [ -n "$target" ] || return 1
-  [ "${OSIER_VERSION:-}" = "main" ] && return 1
-  version="$(resolve_version)" || return 1
+  version="$(resolve_version)" ||
+    die "no Osier release found (none published yet, or GitHub is unreachable)"
   plain="${version#v}"
   name="osier-${plain}-${target}"
   base="https://github.com/$REPO/releases/download/$version"
   work="$(mktemp -d)"
   trap 'rm -rf "$work"' EXIT
   say "Downloading $name.tar.gz"
-  download "$base/$name.tar.gz" "$work/$name.tar.gz" || return 1
-  download "$base/$name.tar.gz.sha256" "$work/$name.tar.gz.sha256" || return 1
+  download "$base/$name.tar.gz" "$work/$name.tar.gz" ||
+    die "could not download $name.tar.gz (is $version a published release?)"
+  download "$base/$name.tar.gz.sha256" "$work/$name.tar.gz.sha256" ||
+    die "could not download the checksum for $name.tar.gz"
   (cd "$work" && sha256sum -c "$name.tar.gz.sha256" >/dev/null) || die "checksum mismatch for $name.tar.gz"
   tar -C "$work" -xzf "$work/$name.tar.gz"
   install_files "$work/$name"
   say "Installed osier $plain to $BIN_DIR/osier"
 }
 
-install_from_source() {
-  have cargo || die "no prebuilt binary for this machine and cargo is not installed (https://rustup.rs)"
-  have git || die "git is required to build from source"
-  say "Building from source (this takes a few minutes)"
-  if have pacman; then
-    say "Build dependencies on Arch: pkgconf libxkbcommon libxkbcommon-x11 wayland vulkan-headers fontconfig openssl"
-  elif have apt-get; then
-    say "Build dependencies on Debian/Ubuntu: pkg-config libxkbcommon-dev libxkbcommon-x11-dev libxcb-xkb-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev"
-  elif have dnf; then
-    say "Build dependencies on Fedora: pkgconf-pkg-config libxkbcommon-devel libxkbcommon-x11-devel wayland-devel vulkan-loader-devel fontconfig-devel openssl-devel"
-  fi
-  work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
-  ref="${OSIER_VERSION:-$(latest_release_tag)}"
-  [ -n "$ref" ] || ref="$(latest_tag)"
-  if [ -z "$ref" ]; then
-    ref="main"
-    say "No release yet: building the latest code from main"
-  elif [ "$ref" != "main" ]; then
-    say "Building release $ref"
-  fi
-  git clone --quiet --depth 1 --branch "$ref" "$REPO_URL" "$work/src"
-  cargo install --locked --path "$work/src/crates/osier" --root "$PREFIX"
-  install_desktop "$work/src/packaging"
-  say "Installed osier to $BIN_DIR/osier"
-}
-
+check_platform
 check_runtime_deps
-if [ "${OSIER_FROM_SOURCE:-0}" = "1" ] || ! install_release; then
-  install_from_source
-fi
+install_release
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
