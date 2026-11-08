@@ -6,6 +6,20 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Dialog options have short labels with a plain explanation underneath, instead of
+  bracketed text. "Push rejected" now says "Fetch now" and explains that pulling and
+  pushing again are separate steps you take afterwards.
+- "Branch has diverged" always asks how to pull, with your last choice for the repository
+  preselected, instead of offering to remember it and never asking again.
+- "Remove worktree?" says what is deleted and what is kept, and no longer shows the path in
+  an editable text field.
+- Clearer wording in the pull, force push, upstream, abort, branch delete, reset, detached
+  checkout, stash, tag, worktree, clone and untrack dialogs, written for people new to git.
+- A force push that git stops because someone pushed since your last fetch says so,
+  instead of reporting a rejected non fast-forward update.
+
 ### Fixed
 
 - Notifications show their title again. A title such as "Push failed" was replaced by the
@@ -14,6 +28,9 @@ All notable changes to Osier are documented here. The format follows
   doing nothing, and the second step of "New worktree" opens too.
 - Text prompts such as "New branch" and "Stash changes" focus their text field when they
   open.
+- The hard reset dialog no longer says the reflog can bring back uncommitted work.
+- The conflict notification points at the Continue and Abort buttons above the tabs, not
+  the status bar.
 
 ## [0.1.0] - 2026-11-08
 

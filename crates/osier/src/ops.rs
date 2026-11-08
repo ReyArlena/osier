@@ -1,11 +1,11 @@
 //! Running mutating git operations from the UI: background execution, notifications,
 //! history and refresh.
 
-use gpui_kit::component::Sizable as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
 use osier_config::history::{self, HistoryEntry};
 use osier_git::{GitError, Repository};
@@ -173,17 +173,40 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.confirm_with_flags(title, body, ok_label, danger, Vec::new(), on_ok, window, cx);
+    }
+
+    /// `confirm` with checkboxes under the body. `on_ok` reads them through their values.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn confirm_with_flags(
+        &mut self,
+        title: impl Into<SharedString>,
+        body: impl Into<SharedString>,
+        ok_label: impl Into<SharedString>,
+        danger: bool,
+        flags: Vec<crate::actions::PromptFlag>,
+        on_ok: impl Fn(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let flags = std::rc::Rc::new(flags);
         let title = title.into();
         let body = body.into();
         let ok_label = ok_label.into();
         let weak = cx.entity().downgrade();
         let on_ok = std::rc::Rc::new(on_ok);
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let on_ok = on_ok.clone();
+            // pb_1: the dialog clips at the body's bottom edge, where a last checkbox's focus
+            // ring sits.
+            let mut content = v_flex().gap_3().pb_1().w_full().child(body.clone());
+            for (ix, flag) in flags.iter().enumerate() {
+                content = content.child(flag.checkbox(ix, cx));
+            }
             dialog
                 .title(title.clone())
-                .child(body.clone())
+                .child(content)
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(ok_label.clone())

@@ -19,6 +19,7 @@ use osier_git::ops::remote::{
 use osier_git::{CancelToken, GitError, Progress};
 
 use crate::app::Osier;
+use crate::dialog_hint::{hint, hinted_radio};
 use crate::ops::describe;
 
 #[derive(Debug, Clone)]
@@ -341,6 +342,17 @@ impl Osier {
             (RemoteOp::Push(o), GitError::NonFastForward(_)) if !o.force_with_lease => {
                 self.prompt_push_rejected(o.clone(), window, cx);
             }
+            (RemoteOp::Push(_), GitError::NonFastForward(_)) => {
+                // Force with lease refused: the remote moved since the last fetch.
+                window.push_notification(
+                    Notification::warning(
+                        "Someone pushed to the remote branch since your last fetch, so nothing \
+                         was replaced. Fetch to see their commits, then decide again.",
+                    )
+                    .title("Force push stopped"),
+                    cx,
+                );
+            }
             (RemoteOp::Push(o), GitError::NoUpstream(_)) => {
                 self.prompt_set_upstream_and_push(o.clone(), window, cx);
             }
@@ -369,7 +381,7 @@ impl Osier {
             }
             (_, GitError::Conflict(_)) => {
                 window.push_notification(
-                    Notification::warning("Resolve the conflicted files in Changes, then continue or abort from the status bar.").title(format!("{label}: conflicts")),
+                    Notification::warning("Resolve the conflicted files in Changes, then press Continue or Abort in the bar above the tabs.").title(format!("{label}: conflicts")),
                     cx,
                 );
             }
@@ -382,10 +394,11 @@ impl Osier {
         }
     }
 
-    /// "Branch diverged": merge, rebase or cancel, optionally remembered per repo.
+    /// "Branch diverged": merge, rebase or cancel. Always asks, with the choice last used for
+    /// this repository preselected.
     fn prompt_pull_strategy(
         &mut self,
-        mut options: PullOptions,
+        options: PullOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -393,30 +406,30 @@ impl Osier {
             .active_project()
             .map(|p| p.path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // A remembered strategy skips the dialog.
-        if let Some(s) = self.state.pull_strategies.get(&repo_path) {
-            options.strategy = if s == "rebase" {
-                PullStrategy::Rebase
-            } else {
-                PullStrategy::Merge
-            };
-            self.start_remote(RemoteOp::Pull(options), window, cx);
-            return;
-        }
-        let choice = std::rc::Rc::new(std::cell::Cell::new(0usize));
-        let remember = std::rc::Rc::new(std::cell::Cell::new(false));
+        let last = self.state.pull_strategies.get(&repo_path);
+        let choice = std::rc::Rc::new(std::cell::Cell::new(match last.map(String::as_str) {
+            Some("rebase") => 1usize,
+            _ => 0,
+        }));
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (choice, remember, weak, options, repo_path) =
-                (choice.clone(), remember.clone(), weak.clone(), options.clone(), repo_path.clone());
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let (choice, weak, options, repo_path) = (
+                choice.clone(),
+                weak.clone(),
+                options.clone(),
+                repo_path.clone(),
+            );
             let c2 = choice.clone();
-            let r2 = remember.clone();
             dialog
                 .title("Branch has diverged")
                 .child(
                     v_flex()
                         .gap_3()
-                        .child("The remote has commits you do not have, and you have commits it does not. A fast-forward is not possible. Nothing was changed.")
+                        .child(
+                            "The remote branch has commits you do not have, and you have commits \
+                             it does not. Nothing has been changed yet. Choose how to combine \
+                             them.",
+                        )
                         .child(
                             RadioGroup::vertical("pull-strategy")
                                 .selected_index(Some(choice.get()))
@@ -424,19 +437,28 @@ impl Osier {
                                     c2.set(*ix);
                                     window.refresh();
                                 })
-                                .child(Radio::new("merge").label("Merge the remote branch into mine (creates a merge commit)"))
-                                .child(Radio::new("rebase").label("Rebase my commits on top of the remote branch")),
+                                .child(hinted_radio(
+                                    "merge",
+                                    "Merge the remote branch into mine",
+                                    "Keeps both sets of commits as they are and joins them with \
+                                     a new merge commit.",
+                                    cx,
+                                ))
+                                .child(hinted_radio(
+                                    "rebase",
+                                    "Rebase my commits on top of the remote branch",
+                                    "Replays your commits after the remote ones, for a straight \
+                                     history. Your commits get new IDs.",
+                                    cx,
+                                )),
                         )
-                        .child(
-                            Checkbox::new("remember-pull")
-                                .small()
-                                .label("Remember for this repository")
-                                .checked(remember.get())
-                                .on_click(move |v, window, _| {
-                                    r2.set(*v);
-                                    window.refresh();
-                                }),
-                        ),
+                        .child(hint(
+                            "Only your local branch changes. If both sides changed the same \
+                             lines, the pull stops so you can resolve the conflicts. Nothing is \
+                             pushed: push afterwards to send the result. Osier preselects your \
+                             last choice for this repository next time.",
+                            cx,
+                        )),
                 )
                 .button_props(
                     DialogButtonProps::default()
@@ -444,21 +466,30 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
-.footer(crate::dialog_buttons::DialogButtons::new("Pull").variant(ButtonVariant::Primary))
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new("Pull")
+                        .variant(ButtonVariant::Primary),
+                )
                 .on_ok(move |_, window, cx| {
-                    let strategy = if choice.get() == 1 { PullStrategy::Rebase } else { PullStrategy::Merge };
+                    let strategy = if choice.get() == 1 {
+                        PullStrategy::Rebase
+                    } else {
+                        PullStrategy::Merge
+                    };
                     let mut options = options.clone();
                     options.strategy = strategy;
-                    let remember = remember.get();
                     let repo_path = repo_path.clone();
                     let _ = weak.update(cx, |this, cx| {
-                        if remember {
-                            this.state.pull_strategies.insert(
-                                repo_path,
-                                if strategy == PullStrategy::Rebase { "rebase" } else { "merge" }.into(),
-                            );
-                            this.save_state();
-                        }
+                        this.state.pull_strategies.insert(
+                            repo_path,
+                            if strategy == PullStrategy::Rebase {
+                                "rebase"
+                            } else {
+                                "merge"
+                            }
+                            .into(),
+                        );
+                        this.save_state();
                         this.start_remote(RemoteOp::Pull(options), window, cx);
                     });
                     true
@@ -475,7 +506,7 @@ impl Osier {
     ) {
         let choice = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let (choice, weak, options) = (choice.clone(), weak.clone(), options.clone());
             let c2 = choice.clone();
             dialog
@@ -483,6 +514,7 @@ impl Osier {
                 .child(
                     v_flex()
                         .gap_3()
+                        .pb_1()
                         .child("The remote branch has commits you do not have. Nothing was pushed.")
                         .child(
                             RadioGroup::vertical("push-rejected")
@@ -491,8 +523,23 @@ impl Osier {
                                     c2.set(*ix);
                                     window.refresh();
                                 })
-                                .child(Radio::new("fetch").label("Fetch now, then merge or rebase and push again"))
-                                .child(Radio::new("force").label("Force push with lease (replaces the remote branch, only if nobody pushed since your last fetch)")),
+                                .child(hinted_radio(
+                                    "fetch",
+                                    "Fetch now",
+                                    "Downloads the remote's new commits. Your branch and files \
+                                     are not changed. After this you can pull to merge or rebase \
+                                     them into your branch, then try pushing again.",
+                                    cx,
+                                ))
+                                .child(hinted_radio(
+                                    "force",
+                                    "Force push with lease",
+                                    "Replaces the remote branch with yours. The remote commits \
+                                     you do not have are removed from it. Git stops if anyone \
+                                     pushed since your last fetch. You confirm this in the next \
+                                     step.",
+                                    cx,
+                                )),
                         ),
                 )
                 .button_props(
@@ -501,7 +548,10 @@ impl Osier {
                         .ok_variant(ButtonVariant::Primary)
                         .show_cancel(true),
                 )
-.footer(crate::dialog_buttons::DialogButtons::new("Continue").variant(ButtonVariant::Primary))
+                .footer(
+                    crate::dialog_buttons::DialogButtons::new("Continue")
+                        .variant(ButtonVariant::Primary),
+                )
                 .on_ok(move |_, window, cx| {
                     let force = choice.get() == 1;
                     let options = options.clone();
@@ -544,7 +594,7 @@ impl Osier {
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
             window.push_notification(
-                Notification::warning("Add a remote first (Branches tab).")
+                Notification::warning("Add a remote first in the Branches tab.")
                     .title("No upstream and no remote"),
                 cx,
             );
@@ -552,7 +602,7 @@ impl Osier {
         };
         self.confirm(
             "No upstream yet",
-            format!("{branch} is not linked to a remote branch. Push it to {remote}/{branch} and remember that as its upstream?"),
+            format!("{branch} is not linked to a branch on {remote} yet. Push it to {remote}/{branch} and link the two, so later pushes and pulls use that branch? This creates {remote}/{branch} if it does not exist."),
             "Push and set upstream",
             false,
             move |this, window, cx| {
@@ -575,7 +625,7 @@ impl Osier {
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
             window.push_notification(
-                Notification::warning("Add a remote first (Branches tab).")
+                Notification::warning("Add a remote first in the Branches tab.")
                     .title("No upstream and no remote"),
                 cx,
             );
@@ -584,7 +634,7 @@ impl Osier {
         let upstream = format!("{remote}/{branch}");
         self.confirm(
             "No upstream yet",
-            format!("{branch} is not linked to a remote branch. Use {upstream} as its upstream and pull from it? (The remote branch must exist.)"),
+            format!("{branch} is not linked to a branch on {remote} yet. Link it to {upstream} and pull from there? This only works if {upstream} already exists on the remote."),
             "Set upstream and pull",
             false,
             move |this, window, cx| {
@@ -612,7 +662,7 @@ impl Osier {
         options.force_with_lease = true;
         self.confirm(
             "Force push with lease?",
-            "The remote branch is replaced with yours. git refuses if the remote moved since your last fetch, so nobody else's work is overwritten silently.",
+            "The remote branch is replaced with yours, and the remote commits your branch does not have are removed from it. Git stops if anyone pushed since your last fetch, so commits you have not seen yet are never removed.",
             "Force push",
             true,
             move |this, window, cx| this.start_remote(RemoteOp::Push(options.clone()), window, cx),
@@ -643,7 +693,7 @@ impl Osier {
         let weak = cx.entity().downgrade();
         let host = needed.host.clone();
         let candidates = needed.candidates.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let (choice, always, weak, op, repo_path, candidates, host) = (
                 choice.clone(),
                 always.clone(),
@@ -669,6 +719,7 @@ impl Osier {
                 .child(
                     v_flex()
                         .gap_3()
+                        .pb_1()
                         .child(format!("Several gh accounts are logged in to {host}. Pick the one to use for this repository."))
                         .child(group)
                         .child(
@@ -679,7 +730,12 @@ impl Osier {
                                 .on_click(move |v, window, _| {
                                     a2.set(*v);
                                     window.refresh();
-                                }),
+                                })
+                                .child(hint(
+                                    "Unticked, Osier asks again after it restarts. You can \
+                                     change it later from the Push button's menu.",
+                                    cx,
+                                )),
                         ),
                 )
                 .button_props(

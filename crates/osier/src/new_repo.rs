@@ -572,12 +572,17 @@ impl Render for CloneForm {
                 Checkbox::new("clone-recurse")
                     .test_id("clone-recurse")
                     .small()
-                    .label("Run with --recurse-submodules (also clone the submodules)")
+                    .label("Also clone submodules")
                     .checked(self.recurse)
                     .on_click(cx.listener(|this, v: &bool, _, cx| {
                         this.recurse = *v;
                         cx.notify();
-                    })),
+                    }))
+                    .child(crate::dialog_hint::hint(
+                        "Submodules are other repositories this one includes. Without this, their \
+                         folders stay empty until you fetch them.",
+                        cx,
+                    )),
             )
             .child(outcome_line(outcome, cx))
     }

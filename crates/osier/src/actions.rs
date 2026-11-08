@@ -9,6 +9,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{Sizable as _, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::ops::integrate::{self, ConflictSide, MergeMode};
 use osier_git::ops::reset::ResetMode;
@@ -17,10 +18,13 @@ use osier_git::ops::{branch, remote, reset, stash, tag};
 use osier_git::repo::InProgress;
 
 use crate::app::{Osier, Tab};
+use crate::dialog_hint::hint;
 
 /// A labelled checkbox inside a prompt dialog.
 pub(crate) struct PromptFlag {
     pub label: &'static str,
+    /// What the option does, shown under the label.
+    pub hint: Option<&'static str>,
     pub value: Rc<Cell<bool>>,
 }
 
@@ -28,8 +32,28 @@ impl PromptFlag {
     pub fn new(label: &'static str, default: bool) -> Self {
         Self {
             label,
+            hint: None,
             value: Rc::new(Cell::new(default)),
         }
+    }
+
+    pub fn hint(mut self, hint: &'static str) -> Self {
+        self.hint = Some(hint);
+        self
+    }
+
+    /// The checkbox for this flag inside a dialog, with its hint underneath.
+    pub fn checkbox(&self, ix: usize, cx: &App) -> Checkbox {
+        let value = self.value.clone();
+        Checkbox::new(("prompt-flag", ix))
+            .small()
+            .label(self.label)
+            .checked(value.get())
+            .on_click(move |v, window, _| {
+                value.set(*v);
+                window.refresh();
+            })
+            .when_some(self.hint, |this, text| this.child(hint(text, cx)))
     }
 }
 
@@ -60,24 +84,16 @@ impl Osier {
         let weak = cx.entity().downgrade();
         let on_ok = Rc::new(on_ok);
         let focus = input.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let input = input.clone();
             let flags = flags.clone();
             let weak = weak.clone();
             let on_ok = on_ok.clone();
-            let mut body = v_flex().gap_3().w_full().child(Input::new(&input));
+            // pb_1: the dialog clips at the body's bottom edge, where a last checkbox's focus
+            // ring sits.
+            let mut body = v_flex().gap_3().pb_1().w_full().child(Input::new(&input));
             for (ix, flag) in flags.iter().enumerate() {
-                let value = flag.value.clone();
-                body = body.child(
-                    Checkbox::new(("prompt-flag", ix))
-                        .small()
-                        .label(flag.label)
-                        .checked(value.get())
-                        .on_click(move |v, window, _| {
-                            value.set(*v);
-                            window.refresh();
-                        }),
-                );
+                body = body.child(flag.checkbox(ix, cx));
             }
             dialog
                 .title(title.clone())
@@ -115,7 +131,8 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let checkout = PromptFlag::new("Check out the new branch", true);
+        let checkout = PromptFlag::new("Check out the new branch", true)
+            .hint("Switches to the new branch right after creating it.");
         let checkout_value = checkout.value.clone();
         let title = match &start_point {
             Some(s) => format!("New branch at {}", &s[..s.len().min(7)]),
@@ -219,10 +236,14 @@ impl Osier {
     ) {
         let body = if force {
             format!(
-                "{name} is deleted even if it has unmerged commits. They stay in the reflog for a while."
+                "{name} is deleted even if it has commits that are on no other branch. Those \
+                 commits are not erased straight away, but they are hard to find again."
             )
         } else {
-            format!("{name} is deleted. Git refuses if it has commits not merged elsewhere.")
+            format!(
+                "{name} is deleted. Git refuses if some of its commits are not on its upstream \
+                 branch yet, or on the current branch when it has no upstream."
+            )
         };
         self.confirm(
             if force {
@@ -250,8 +271,10 @@ impl Osier {
     // ----- stash -----
 
     pub(crate) fn prompt_stash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let untracked = PromptFlag::new("Include untracked files", false);
-        let keep_index = PromptFlag::new("Keep staged changes in the index", false);
+        let untracked = PromptFlag::new("Include untracked files", false)
+            .hint("New files git is not tracking yet are stashed too. Otherwise they stay where they are.");
+        let keep_index = PromptFlag::new("Keep staged changes", false)
+            .hint("Staged changes are saved in the stash and also stay staged in your files.");
         let (u, k) = (untracked.value.clone(), keep_index.value.clone());
         self.prompt_text(
             "Stash changes",
@@ -343,7 +366,7 @@ impl Osier {
         let short = hash[..hash.len().min(7)].to_string();
         self.confirm(
             "Check out commit?",
-            format!("HEAD becomes detached at {short}. Create a branch to keep work made there."),
+            format!("You will be on commit {short} instead of on a branch. Git calls this a detached HEAD. Commits made here belong to no branch and are easy to lose, so create a branch first if you plan to make changes."),
             "Check out",
             false,
             move |this, window, cx| {
@@ -366,7 +389,8 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let annotated = PromptFlag::new("Annotated tag (uses the name as message)", true);
+        let annotated = PromptFlag::new("Annotated tag", true)
+            .hint("Also records who made the tag and when. The tag name is used as its message.");
         let a = annotated.value.clone();
         let short = target[..target.len().min(7)].to_string();
         self.prompt_text(
@@ -474,15 +498,17 @@ impl Osier {
             ResetMode::Hard => (
                 "Hard reset?",
                 format!(
-                    "Move the branch to {short} and discard every later commit's changes AND all uncommitted work. Only the reflog can bring it back."
+                    "Move the branch to {short}. Later commits leave the branch and all \
+                     uncommitted changes are lost. The later commits can be recovered from the \
+                     reflog for a while. The uncommitted changes cannot be recovered."
                 ),
                 true,
             ),
         };
         let label = match mode {
-            ResetMode::Soft => "Reset (soft)",
-            ResetMode::Mixed => "Reset (mixed)",
-            ResetMode::Hard => "Reset (hard)",
+            ResetMode::Soft => "Soft reset",
+            ResetMode::Mixed => "Mixed reset",
+            ResetMode::Hard => "Hard reset",
         };
         self.confirm(
             title,
@@ -648,9 +674,22 @@ impl Osier {
             Some(InProgress::Bisect) => "bisect",
             None => return,
         };
+        let body = match what {
+            "merge" => "Your branch returns to where it was before the merge started, and \
+                        conflicts you resolved so far are lost. If you had uncommitted changes \
+                        when the merge started, git may not be able to bring them back exactly."
+                .to_string(),
+            "bisect" => "Git goes back to the commit you were on before the bisect started, and \
+                         the good and bad marks made so far are lost."
+                .to_string(),
+            _ => format!(
+                "Your branch returns to where it was before the {what} started, and conflicts \
+                 you resolved so far are lost."
+            ),
+        };
         self.confirm(
             format!("Abort the {what}?"),
-            format!("The repository returns to the state before the {what} started. Resolutions made so far are lost."),
+            body,
             "Abort",
             true,
             |this, window, cx| this.run_op("Aborted", integrate::abort, window, cx),
@@ -776,15 +815,20 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let name = crate::format::tilde(&path);
-        let force = PromptFlag::new("Force (discard uncommitted changes in it)", false);
+        let force = PromptFlag::new("Remove even with uncommitted changes", false).hint(
+            "Changed and untracked files in that worktree are lost. Otherwise git stops if there are any.",
+        );
         let force_value = force.value.clone();
-        self.prompt_text(
+        self.confirm_with_flags(
             "Remove worktree?",
-            "",
-            name.clone(),
+            format!(
+                "The folder {name} and everything in it is deleted from your disk. Its branch \
+                 and the commits on it are kept."
+            ),
             "Remove",
+            true,
             vec![force],
-            move |this, _, window, cx| {
+            move |this, window, cx| {
                 let p = path.clone();
                 let force = force_value.get();
                 this.run_op(

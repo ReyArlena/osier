@@ -220,7 +220,7 @@ impl Osier {
                 format!(
                     "You've chosen to add {path} to {} but it is a tracked {what}. Ignore rules \
                      do not apply to tracked files. Do you also want to stop tracking the {what} \
-                     in this repository? (The {what} will not be deleted.)",
+                     in this repository?",
                     file.label()
                 ),
                 Some(("Run", rm_command.clone(), "")),
@@ -231,7 +231,7 @@ impl Osier {
                 format!("{path} is already ignored"),
                 format!(
                     "{path} matches an ignore rule but git is still tracking it, so its changes \
-                     keep showing. Stop tracking it? (The {what} will not be deleted.)"
+                     keep showing. Stop tracking it?"
                 ),
                 None,
                 "Stop tracking".to_string(),
@@ -239,7 +239,7 @@ impl Osier {
             ),
             Mode::Untrack(step) => (
                 format!("Untrack {path}"),
-                format!("Git stops tracking {path}. The {what} will not be deleted."),
+                format!("Git stops tracking {path}."),
                 step.as_ref().map(|(_, p)| {
                     (
                         "Also add",

@@ -22,7 +22,8 @@ pub struct State {
     pub window: Option<WindowGeometry>,
     /// GitHub (gh) account chosen per repository path ("always use for this project").
     pub accounts: std::collections::BTreeMap<String, String>,
-    /// Pull strategy remembered per repository path: `merge` or `rebase`.
+    /// Pull strategy last chosen per repository path (`merge` or `rebase`), preselected the
+    /// next time the diverged-branch dialog opens.
     pub pull_strategies: std::collections::BTreeMap<String, String>,
     /// The last look for a newer release.
     pub update_check: UpdateCheck,
