@@ -47,8 +47,8 @@ impl PromptFlag {
         Self::new("Stash my uncommitted changes while this runs", true).hint(
             "Your uncommitted changes are set aside first and put back when git finishes. If it \
              stops for conflicts, they come back once you continue or abort. If they clash with \
-             the incoming changes, those files show conflicts and a full copy stays in the \
-             Stashes tab.",
+             the new commits, those files show conflicts and a full copy stays in the Stashes \
+             tab.",
         )
     }
 
@@ -197,21 +197,78 @@ impl Osier {
                 .map(|(_, b)| b.to_string())
                 .unwrap_or(name.clone());
             let remote = name.clone();
-            self.run_op(
+            let retry = name.clone();
+            self.run_op_or_else(
                 format!("Checked out {local} tracking {remote}"),
                 move |repo| branch::checkout_remote(repo, &remote, &local),
+                move |this, error, window, cx| {
+                    this.offer_stash_and_switch(error, retry, true, window, cx)
+                },
                 window,
                 cx,
             );
         } else {
             let n = name.clone();
-            self.run_op(
+            self.run_op_or_else(
                 format!("Switched to {name}"),
                 move |repo| branch::checkout(repo, &n),
+                move |this, error, window, cx| {
+                    this.offer_stash_and_switch(error, name, false, window, cx)
+                },
                 window,
                 cx,
             );
         }
+    }
+
+    /// git would not switch because uncommitted changes are in the way: offer to save them
+    /// to the Stashes tab and switch. They stay there; switching does not bring them along.
+    fn offer_stash_and_switch(
+        &mut self,
+        error: &osier_git::GitError,
+        name: String,
+        is_remote: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !matches!(error, osier_git::GitError::Dirty(_)) {
+            return false;
+        }
+        self.confirm(
+            format!("Switch to {name}?"),
+            format!(
+                "Switching to {name} would overwrite your uncommitted changes to some files, so \
+                 git stopped and nothing was changed. Save and switch puts your uncommitted \
+                 changes in the Stashes tab first, then switches. They do not come with you: \
+                 apply them from the Stashes tab when you want them, on any branch."
+            ),
+            "Save and switch",
+            false,
+            move |this, window, cx| {
+                let name = name.clone();
+                let note = format!("Saved before switching to {name}");
+                this.run_op(
+                    format!("Switched to {name}"),
+                    move |repo| {
+                        stash_before(repo, note)?;
+                        if is_remote {
+                            let local = name
+                                .split_once('/')
+                                .map(|(_, b)| b.to_string())
+                                .unwrap_or(name.clone());
+                            branch::checkout_remote(repo, &name, &local)
+                        } else {
+                            branch::checkout(repo, &name)
+                        }
+                    },
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
+        true
     }
 
     pub(crate) fn prompt_rename_branch(

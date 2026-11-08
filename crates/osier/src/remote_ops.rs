@@ -358,6 +358,24 @@ impl Osier {
                     cx,
                 );
             }
+            (RemoteOp::Pull(o), GitError::Dirty(_)) if !o.autostash => {
+                let mut options = o.clone();
+                options.autostash = true;
+                self.confirm(
+                    "Local changes in the way",
+                    "The incoming commits change files you have uncommitted changes in, so git \
+                     did not pull and nothing was changed. Stash and pull sets your uncommitted \
+                     changes aside, pulls, then puts them back. If they clash with the incoming \
+                     changes, those files show conflicts and a full copy stays in the Stashes tab.",
+                    "Stash and pull",
+                    false,
+                    move |this, window, cx| {
+                        this.start_remote(RemoteOp::Pull(options.clone()), window, cx)
+                    },
+                    window,
+                    cx,
+                );
+            }
             (RemoteOp::Push(o), GitError::NoUpstream(_)) => {
                 self.prompt_set_upstream_and_push(o.clone(), window, cx);
             }

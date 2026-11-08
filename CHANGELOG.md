@@ -15,6 +15,10 @@ All notable changes to Osier are documented here. The format follows
   back with conflicts.
 - Cherry-pick, revert and hard reset offer to save uncommitted changes to the Stashes tab
   first. Those are not put back automatically.
+- Squash offers the same stash option when commits have to be replayed over uncommitted
+  changes, instead of refusing.
+- When uncommitted changes stop a pull, Osier offers to stash them, pull and put them back.
+  When they stop a branch switch, it offers to save them to the Stashes tab and switch.
 
 ### Changed
 

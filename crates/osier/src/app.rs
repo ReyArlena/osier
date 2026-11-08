@@ -4896,6 +4896,52 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn squash_over_uncommitted_changes_stashes_them_while_it_runs(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        for f in ["a", "b", "c", "d"] {
+            repo.commit_file(&format!("{f}.txt"), &format!("{f}\n"), f);
+        }
+        repo.write("a.txt", "edited\n");
+        let h = Harness::open(cx, &repo);
+        // Squashing HEAD~2 and HEAD~1 replays HEAD over the uncommitted edit.
+        let picked: Vec<String> = ["HEAD~1", "HEAD~2"]
+            .iter()
+            .map(|r| repo.git(["rev-parse", r]).trim().to_string())
+            .collect();
+        h.act(cx, move |o, w, cx| {
+            o.active_project_mut().expect("project").picked = picked;
+            o.confirm_squash(w, cx);
+        });
+        h.click(cx, "dialog-ok");
+        assert_eq!(repo.git(["rev-list", "--count", "HEAD"]).trim(), "3");
+        assert_eq!(repo.read("a.txt"), "edited\n", "the edit is put back");
+        assert!(repo.git(["stash", "list"]).trim().is_empty());
+    }
+
+    #[gpui::test]
+    fn switching_over_conflicting_changes_offers_to_save_them(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "base");
+        repo.checkout_new("other");
+        repo.commit_file("a.txt", "other\n", "other");
+        repo.checkout("main");
+        repo.write("a.txt", "mine\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, w, cx| {
+            o.checkout_branch("other".into(), false, w, cx)
+        });
+        assert_eq!(repo.git(["branch", "--show-current"]).trim(), "main");
+        h.click(cx, "dialog-ok");
+        assert_eq!(repo.git(["branch", "--show-current"]).trim(), "other");
+        assert!(
+            repo.git(["stash", "list"])
+                .contains("Saved before switching to other"),
+            "the edit is saved, not brought along"
+        );
+        assert_eq!(repo.read("a.txt"), "other\n");
+    }
+
     fn bind(cx: &mut TestAppContext, pairs: &[(&str, &[&str])]) {
         let mut file = osier_config::keymap::KeymapFile::default();
         for (id, keys) in pairs {

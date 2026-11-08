@@ -103,6 +103,29 @@ impl Osier {
             summary,
             move |repo| op(repo).map(|()| None),
             then,
+            None,
+            window,
+            cx,
+        );
+    }
+
+    /// Like [`run_op`](Self::run_op); `on_error` sees a failure first and returns true when it
+    /// has dealt with it (for example by opening a dialog), which skips the error notification.
+    pub(crate) fn run_op_or_else<F>(
+        &mut self,
+        summary: impl Into<String>,
+        op: F,
+        on_error: impl FnOnce(&mut Osier, &GitError, &mut Window, &mut Context<Osier>) -> bool + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        F: FnOnce(&Repository) -> osier_git::Result<()> + Send + 'static,
+    {
+        self.run_op_inner(
+            summary,
+            move |repo| op(repo).map(|()| None),
+            |_, _, _| {},
+            Some(Box::new(on_error)),
             window,
             cx,
         );
@@ -123,6 +146,7 @@ impl Osier {
             summary,
             move |repo| op(repo).map(Some),
             |_, _, _| {},
+            None,
             window,
             cx,
         );
@@ -133,6 +157,7 @@ impl Osier {
         summary: impl Into<String>,
         op: F,
         then: impl FnOnce(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
+        on_error: Option<ErrorHandler>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) where
@@ -172,14 +197,17 @@ impl Osier {
                         tracing::warn!(%summary, %text, "operation failed");
                         entry.ok = false;
                         entry.error = Some(text.clone());
-                        window.push_notification(
-                            with_command_log(
-                                Notification::error(text).title(failure_title(&summary)),
-                                error,
+                        let handled = on_error.is_some_and(|h| h(this, error, window, cx));
+                        if !handled {
+                            window.push_notification(
+                                with_command_log(
+                                    Notification::error(text).title(failure_title(&summary)),
+                                    error,
+                                    cx,
+                                ),
                                 cx,
-                            ),
-                            cx,
-                        );
+                            );
+                        }
                     }
                 }
                 if stash_clashed {
@@ -287,6 +315,10 @@ pub(crate) fn autostash_clash_notice() -> Notification {
     )
     .title("Your changes were put back with conflicts")
 }
+
+/// See [`Osier::run_op_or_else`].
+type ErrorHandler =
+    Box<dyn FnOnce(&mut Osier, &GitError, &mut Window, &mut Context<Osier>) -> bool>;
 
 /// Title for a failed operation. Summaries are written for success ("Deleted branch x"), so
 /// turn the leading verb round: "Could not delete branch x". Unknown verbs keep the summary.

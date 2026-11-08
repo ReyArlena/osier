@@ -3,8 +3,9 @@
 //! Safety, in order:
 //! - [`plan`] refuses anything that is not on the checked-out branch's own line of history:
 //!   detached HEAD, an operation in progress, commits off the branch (or only on a branch
-//!   merged into it), merge commits anywhere from the oldest selected commit up to HEAD, or
-//!   (when commits must be replayed) uncommitted changes to tracked files.
+//!   merged into it), or merge commits anywhere from the oldest selected commit up to HEAD.
+//!   When commits must be replayed over uncommitted changes to tracked files, [`squash`]
+//!   refuses unless the caller sets [`SquashPlan::autostash`].
 //! - Neighbouring commits: the squashed commit is built with `commit-tree` from the newest
 //!   commit's tree, so its content is exactly what the branch had. When the newest is HEAD
 //!   the branch moves with a compare-and-swap `update-ref`; the working tree and the index
@@ -46,6 +47,12 @@ pub struct SquashPlan {
     pub other_refs: Vec<String>,
     /// The commits' messages, oldest first, joined by blank lines: the default message.
     pub message: String,
+    /// Commits must be replayed and there are uncommitted changes to tracked files: the
+    /// squash only runs with [`autostash`](Self::autostash) set.
+    pub needs_stash: bool,
+    /// Set by the caller: let git set uncommitted changes aside while commits are replayed
+    /// and put them back afterwards (also when the squash is aborted).
+    pub autostash: bool,
 }
 
 impl SquashPlan {
@@ -144,15 +151,10 @@ pub fn plan(repo: &Repository, selected: &[String]) -> Result<SquashPlan> {
     let base = line[oldest_ix].1.first().cloned();
     let replay = newest_ix;
     let rewritten = replay + between.len();
-    if rewritten > 0 {
+    let needs_stash = rewritten > 0 && {
         let dirty = repo.git(["status", "--porcelain", "--untracked-files=no"])?;
-        if !dirty.stdout_str()?.trim().is_empty() {
-            return Err(refused(format!(
-                "Commit or stash your changes first: {} have to be replayed.",
-                count(rewritten, "other commit")
-            )));
-        }
-    }
+        !dirty.stdout_str()?.trim().is_empty()
+    };
 
     // Refs that already contain the oldest selected commit keep the old history after the
     // squash: remote branches (published, needs a force push) and other local branches and
@@ -190,6 +192,8 @@ pub fn plan(repo: &Repository, selected: &[String]) -> Result<SquashPlan> {
         published,
         other_refs,
         message,
+        needs_stash,
+        autostash: false,
     })
 }
 
@@ -235,6 +239,13 @@ pub fn squash(repo: &Repository, plan: &SquashPlan, message: &str) -> Result<Str
     let (Some(newest), Some(oldest)) = (plan.commits.first(), plan.commits.last()) else {
         return Err(refused("Nothing to squash."));
     };
+    if plan.needs_stash && !plan.autostash {
+        let rewritten = plan.replay + plan.between.len();
+        return Err(refused(format!(
+            "Commit or stash your changes first: {} have to be replayed.",
+            count(rewritten, "other commit")
+        )));
+    }
     if !plan.contiguous() {
         return squash_separated(repo, plan, message);
     }
@@ -287,7 +298,11 @@ pub fn squash(repo: &Repository, plan: &SquashPlan, message: &str) -> Result<Str
         // Compare-and-swap: fails if HEAD moved in the meantime.
         repo.git(["update-ref", "-m", &reason, "HEAD", &new, &plan.head])?;
     } else {
-        let replayed = repo.git(["rebase", "--onto", &new, newest]);
+        let replayed = if plan.autostash {
+            repo.git(["rebase", "--autostash", "--onto", &new, newest])
+        } else {
+            repo.git(["rebase", "--onto", &new, newest])
+        };
         if let Err(error) = replayed {
             let _ = repo.git(["rebase", "--abort"]);
             return Err(error);
@@ -332,7 +347,9 @@ fn squash_separated(repo: &Repository, plan: &SquashPlan, message: &str) -> Resu
         todo.push_str(&format!("pick {h}\n"));
     }
     let base = plan.base.clone().unwrap_or_else(|| "--root".to_string());
-    if let Err(error) = crate::ops::rebase_interactive::run_todo(repo, &base, &todo, &dir, false) {
+    if let Err(error) =
+        crate::ops::rebase_interactive::run_todo(repo, &base, &todo, &dir, plan.autostash)
+    {
         let _ = repo.git(["rebase", "--abort"]);
         return Err(match error {
             GitError::Conflict(_) => refused(
@@ -529,9 +546,12 @@ mod tests {
     fn refuses_to_replay_over_local_changes_and_after_head_moves() {
         let t = five();
         t.write("a.txt", "local edit\n");
-        let e = plan_of(&t, &["HEAD~3", "HEAD~2"]).unwrap_err().to_string();
+        let p = plan_of(&t, &["HEAD~3", "HEAD~2"]).unwrap();
+        assert!(p.needs_stash);
+        let e = squash(&t.repo(), &p, "x").unwrap_err().to_string();
         assert!(e.contains("Commit or stash"), "{e}");
-        let e = plan_of(&t, &["HEAD", "HEAD~2"]).unwrap_err().to_string();
+        let p = plan_of(&t, &["HEAD", "HEAD~2"]).unwrap();
+        let e = squash(&t.repo(), &p, "x").unwrap_err().to_string();
         assert!(
             e.contains("Commit or stash"),
             "separated needs a rebase: {e}"
@@ -543,6 +563,19 @@ mod tests {
         let e = squash(&t.repo(), &p, "x").unwrap_err().to_string();
         assert!(e.contains("moved"), "{e}");
         assert_eq!(subjects(&t)[0], "g", "nothing changed");
+    }
+
+    #[test]
+    fn autostash_squashes_over_local_changes_and_keeps_them() {
+        for revs in [["HEAD~3", "HEAD~2"], ["HEAD", "HEAD~2"]] {
+            let t = five();
+            t.write("a.txt", "local edit\n");
+            let mut p = plan_of(&t, &revs).unwrap();
+            p.autostash = true;
+            squash(&t.repo(), &p, "squashed").unwrap();
+            assert_eq!(t.read("a.txt"), "local edit\n", "{revs:?}");
+            assert_eq!(crate::stash::autostash_count(&t.repo()), 0, "{revs:?}");
+        }
     }
 
     #[test]

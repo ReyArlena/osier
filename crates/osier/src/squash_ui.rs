@@ -103,10 +103,13 @@ impl Osier {
             )
         });
         let weak = cx.entity().downgrade();
+        // Commits get replayed over uncommitted changes: git needs them set aside.
+        let stash = std::rc::Rc::new(plan.needs_stash.then(crate::actions::PromptFlag::autostash));
         let plan = Arc::new(plan);
         let focus = message.clone();
         window.open_dialog(cx, move |dialog, window, cx| {
-            let (message, weak, plan) = (message.clone(), weak.clone(), plan.clone());
+            let (message, weak, plan, stash) =
+                (message.clone(), weak.clone(), plan.clone(), stash.clone());
             let muted = cx.theme().muted_foreground;
             let danger = cx.theme().danger;
             let mut body = v_flex().gap_3().w_full();
@@ -121,6 +124,9 @@ impl Osier {
                     .test_id("squash-message")
                     .child(Textarea::new(&message)),
             );
+            if let Some(flag) = stash.as_ref() {
+                body = body.pb_1().child(flag.checkbox(0, cx));
+            }
             let label: SharedString = format!("Squash {count} commits").into();
             let variant = if warning.is_some() {
                 ButtonVariant::Danger
@@ -144,7 +150,8 @@ impl Osier {
                     if text.trim().is_empty() {
                         return false;
                     }
-                    let plan = (*plan).clone();
+                    let mut plan = (*plan).clone();
+                    plan.autostash = stash.as_ref().as_ref().is_some_and(|f| f.value.get());
                     let _ = weak.update(cx, |this, cx| this.run_squash(plan, text, window, cx));
                     true
                 })
