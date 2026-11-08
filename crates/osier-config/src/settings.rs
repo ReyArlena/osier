@@ -253,6 +253,8 @@ pub struct Git {
     /// After a pull deletes files that an ignore rule now matches (someone stopped tracking
     /// them), offer to write the local copies back from before the pull, untracked.
     pub offer_keep_ignored: bool,
+    /// Show the Git config panel as a tab too (it is always in the project's sidebar menu).
+    pub config_tab: bool,
 }
 
 /// `dim` fades unpushed commits in the graph, `colour` draws them in another colour.
@@ -282,6 +284,7 @@ impl Default for Git {
             log_badges: LogBadges::Left,
             log_unpushed: UnpushedStyle::Dim,
             offer_keep_ignored: true,
+            config_tab: false,
         }
     }
 }

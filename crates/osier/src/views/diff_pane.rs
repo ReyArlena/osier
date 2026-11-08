@@ -183,6 +183,10 @@ impl Osier {
                 crate::app::Tab::Stashes => ("No stash picked", "Pick a stash to see its changes."),
                 crate::app::Tab::Files => ("No file open", "Pick a file to view it here."),
                 crate::app::Tab::Patches => ("No patch picked", "Pick a patch to see it here."),
+                crate::app::Tab::Config => (
+                    "Read only",
+                    "Change a setting in the file it comes from: Open, under Other sources.",
+                ),
             };
             self.empty_state(title, hint, cx).into_any_element()
         } else if self.diff_files == 0 {

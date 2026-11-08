@@ -22,6 +22,12 @@ All notable changes to Osier are documented here. The format follows
 - When a pull deletes files that someone stopped tracking and added to .gitignore, Osier
   offers to put your copies back, untracked and ignored. Settings > Git > Pull turns the
   offer off.
+- A Git config panel, from a project's right-click menu in the sidebar, lists the git
+  settings that change how the repository behaves (pull, merge, rebase, push, identity,
+  signing, line endings, remotes, credentials and more), with the value git uses, where it
+  comes from (this repository, global, system, an included file or the environment) and
+  what it overrides, plus hooks, ignore files and `GIT_` variables. Read only for now.
+  Settings > Git > Git config tab also shows it as a tab.
 
 ### Changed
 

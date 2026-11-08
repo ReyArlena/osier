@@ -35,6 +35,7 @@ mod project;
 mod rebase_dialog;
 mod recent_status;
 mod remote_ops;
+mod repo_config;
 mod repo_watch;
 mod row_actions;
 mod row_menu;

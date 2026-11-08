@@ -198,6 +198,9 @@ impl Osier {
     /// Save and re-apply after any settings change (panel, config reload).
     pub(crate) fn settings_changed(&mut self, cx: &mut Context<Self>) {
         self.save_settings();
+        if self.tab == crate::app::Tab::Config && !self.config_tab_enabled() {
+            self.set_tab(crate::app::Tab::Log, cx);
+        }
         self.apply_appearance(cx);
         self.apply_recent_status_mode(cx);
         self.rescan_projects(cx);
@@ -877,6 +880,22 @@ fn git_page(view: &Entity<Osier>) -> SettingPage {
                  that were simply deleted stay deleted, and files still on your disk are left \
                  alone. Pulls run outside Osier are not covered. There, run git show \
                  ORIG_HEAD:<path> > <path> right after the pull to bring a file back.",
+            ),
+        ]))
+        .group(SettingGroup::new().title("Git config").items(vec![
+            SettingItem::new(
+                "Git config tab",
+                SettingField::switch(
+                    get(view, |o| o.settings.git.config_tab),
+                    set(view, |o, v: bool, _| o.settings.git.config_tab = v),
+                )
+                .default_value(defaults.git.config_tab),
+            )
+            .description(
+                "Show the Git config panel as a tab next to Patches. It lists the git settings \
+                 that change how a repository behaves, with the value git uses and where it \
+                 comes from. It is always available from a project's right-click menu in the \
+                 sidebar.",
             ),
         ]))
         .group(SettingGroup::new().title("Prompts and viewer").items(vec![

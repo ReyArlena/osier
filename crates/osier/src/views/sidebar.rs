@@ -490,6 +490,14 @@ impl Osier {
                             },
                         ))
                     })
+                    .item(PopupMenuItem::new("Git config").on_click({
+                        let (w, p) = (w.clone(), p.clone());
+                        move |_, window, cx| {
+                            let _ = w.update(cx, |this, cx| {
+                                this.open_repo_config(p.clone(), window, cx)
+                            });
+                        }
+                    }))
                     .separator()
                     .item(
                         PopupMenuItem::new("Move up")
@@ -568,6 +576,7 @@ impl Osier {
                     let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
                     let (p1, p2) = (menu_path.clone(), menu_path.clone());
                     let (w3, p3) = (menu_weak.clone(), menu_path.clone());
+                    let (w4, p4) = (menu_weak.clone(), menu_path.clone());
                     menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
                         let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
                     }))
@@ -575,6 +584,13 @@ impl Osier {
                         PopupMenuItem::new("Open on GitHub").on_click(move |_, window, cx| {
                             let _ = w3.update(cx, |this, cx| {
                                 this.open_project_on_github(&p3, window, cx)
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Git config").on_click(move |_, window, cx| {
+                            let _ = w4.update(cx, |this, cx| {
+                                this.open_repo_config(p4.clone(), window, cx)
                             });
                         }),
                     )
@@ -619,6 +635,7 @@ impl Osier {
                     let (w1, w2, w3) = (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
                     let (p1, p2, p3) = (menu_path.clone(), menu_path.clone(), menu_path.clone());
                     let (w4, p4) = (menu_weak.clone(), menu_path.clone());
+                    let (w5, p5) = (menu_weak.clone(), menu_path.clone());
                     menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
                         let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
                     }))
@@ -629,6 +646,15 @@ impl Osier {
                             });
                         }),
                     )
+                    .when(!missing, |menu| {
+                        menu.item(PopupMenuItem::new("Git config").on_click(
+                            move |_, window, cx| {
+                                let _ = w5.update(cx, |this, cx| {
+                                    this.open_repo_config(p5.clone(), window, cx)
+                                });
+                            },
+                        ))
+                    })
                     .item(PopupMenuItem::new("Remove from recents").on_click(
                         move |_, window, cx| {
                             let _ = w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));

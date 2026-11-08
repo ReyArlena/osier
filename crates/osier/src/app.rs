@@ -83,16 +83,19 @@ pub enum Tab {
     Stashes,
     Files,
     Patches,
+    /// Shown only when Settings > Git > Git config tab is on.
+    Config,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [
+    pub const ALL: [Tab; 7] = [
         Tab::Changes,
         Tab::Log,
         Tab::Branches,
         Tab::Stashes,
         Tab::Files,
         Tab::Patches,
+        Tab::Config,
     ];
 
     pub fn label(self) -> &'static str {
@@ -103,6 +106,7 @@ impl Tab {
             Tab::Stashes => "Stashes",
             Tab::Files => "Files",
             Tab::Patches => "Patches",
+            Tab::Config => "Git config",
         }
     }
 }
@@ -210,6 +214,8 @@ pub struct Osier {
     /// The patch clipboard (`<state>/patches`), newest first.
     pub(crate) patches: Vec<osier_config::patches::StoredPatch>,
     pub(crate) patch_selected: Option<String>,
+    /// The Git config panel's repository and its config (dialog or tab).
+    pub(crate) repo_config: Option<crate::repo_config::RepoConfigView>,
     /// Blame shown in the diff pane instead of the diff, until closed.
     pub(crate) blame: Option<crate::blame_view::BlameView>,
     /// Filled when the settings sheet opens.
@@ -395,13 +401,14 @@ impl Osier {
             projects: Vec::new(),
             active: None,
             show_reflog: false,
-            // Dev aid for screenshots: OSIER_START_TAB=log|branches|stashes|files|patches.
+            // Dev aid for screenshots: OSIER_START_TAB=log|branches|stashes|files|patches|config.
             tab: match std::env::var("OSIER_START_TAB").as_deref() {
                 Ok("log") => Tab::Log,
                 Ok("branches") => Tab::Branches,
                 Ok("stashes") => Tab::Stashes,
                 Ok("files") => Tab::Files,
                 Ok("patches") => Tab::Patches,
+                Ok("config") => Tab::Config,
                 _ => Tab::Changes,
             },
             auto_tab: None,
@@ -440,6 +447,7 @@ impl Osier {
             session_only_accounts: Default::default(),
             patches,
             patch_selected: None,
+            repo_config: None,
             blame: None,
             ssh_status: None,
             git_version: None,
@@ -1921,7 +1929,7 @@ impl Osier {
                 self.select_commit(next, cx);
             }
             Tab::Branches | Tab::Stashes => self.move_ref_or_stash_selection(delta, cx),
-            Tab::Files | Tab::Patches => {}
+            Tab::Files | Tab::Patches | Tab::Config => {}
         }
     }
 
@@ -1951,6 +1959,11 @@ impl Osier {
     // ----- layout -----
 
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        let tab = if tab == Tab::Config && !self.config_tab_enabled() {
+            Tab::Log
+        } else {
+            tab
+        };
         self.tab = tab;
         self.auto_tab = None;
         self.sync_pane(false, cx);
@@ -6400,6 +6413,67 @@ mod tests {
         assert!(repo.path().join("b.txt").exists(), "pulled");
         assert_eq!(repo.read("a.txt"), "edited\n", "change put back");
         assert!(repo.git(["stash", "list"]).is_empty());
+    }
+
+    #[gpui::test]
+    fn ui_sidebar_menu_opens_git_config(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.git(["config", "pull.rebase", "true"]);
+        let mut state = State::default();
+        state.layout.sidebar_visible = true;
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        let name = h.read(cx, |o, _| o.active_project().unwrap().name.clone());
+        h.right_click(cx, &format!("sidebar-open:{name}"));
+        // Open in editor, Open in terminal, Open in file manager, Git config.
+        h.keys(cx, "down down down down enter");
+        assert!(h.bounds(cx, "repo-config-dialog").is_some(), "dialog open");
+        h.read(cx, |o, _| {
+            let view = o.repo_config.as_ref().expect("loaded");
+            let config = view.data.as_ref().unwrap().as_ref().unwrap();
+            let rebase = config
+                .entries
+                .iter()
+                .find(|e| e.key == "pull.rebase")
+                .unwrap();
+            assert_eq!(rebase.scope, osier_git::config::Scope::Local);
+        });
+        h.keys(cx, "escape");
+        assert!(h.bounds(cx, "repo-config-dialog").is_none(), "closed");
+    }
+
+    #[gpui::test]
+    fn ui_git_config_tab_follows_its_setting(cx: &mut TestAppContext) {
+        use super::Tab;
+
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        // Wide enough for every tab, so the click lands on the tab itself.
+        let mut state = State::default();
+        state.layout.center_width = Some(1000.);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        assert!(h.bounds(cx, "tab-git config").is_none(), "off by default");
+        h.act(cx, |o, _, cx| {
+            o.set_tab(Tab::Config, cx);
+            assert_eq!(o.tab, Tab::Log, "hidden tab cannot be picked");
+            o.settings.git.config_tab = true;
+            o.settings_changed(cx);
+        });
+        h.click(cx, "tab-git config");
+        h.read(cx, |o, _| assert_eq!(o.tab, Tab::Config));
+        assert!(h.bounds(cx, "repo-config-tab").is_some());
+        assert!(
+            h.bounds(cx, "repo-config-reload").is_some(),
+            "config loaded"
+        );
+        h.act(cx, |o, _, cx| {
+            o.settings.git.config_tab = false;
+            o.settings_changed(cx);
+        });
+        h.read(cx, |o, _| {
+            assert_eq!(o.tab, Tab::Log, "turned off: back to Log")
+        });
+        assert!(h.bounds(cx, "tab-git config").is_none());
     }
 
     #[gpui::test]

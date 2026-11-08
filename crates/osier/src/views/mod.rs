@@ -72,7 +72,8 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let active_ix = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let tabs = self.visible_tabs();
+        let active_ix = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
         // Measured on the previous frame; the canvas below re-renders when it changes.
         let tab_edges = tab_strip_edges(&self.tab_scroll);
         let tabs_overflow = tab_edges.overflow;
@@ -110,11 +111,11 @@ impl Osier {
                     .track_scroll(&self.tab_scroll)
                     .selected_index(active_ix)
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                        if let Some(tab) = Tab::ALL.get(*ix) {
+                        if let Some(tab) = this.visible_tabs().get(*ix) {
                             this.set_tab(*tab, cx);
                         }
                     }))
-                    .children(Tab::ALL.iter().map(|t| {
+                    .children(tabs.iter().map(|t| {
                         KitTab::new()
                             .label(t.label())
                             .test_id(format!("tab-{}", t.label().to_lowercase()))
@@ -184,6 +185,7 @@ impl Osier {
                 Tab::Stashes => self.render_stashes(cx).into_any_element(),
                 Tab::Files => self.render_files(cx).into_any_element(),
                 Tab::Patches => self.render_patches(cx).into_any_element(),
+                Tab::Config => self.render_repo_config_tab(cx),
             }))
     }
 

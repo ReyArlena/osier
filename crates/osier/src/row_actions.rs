@@ -489,6 +489,8 @@ impl Osier {
                         message: s.message.clone(),
                     })
             }
+            // Settings rows have no actions.
+            Tab::Config => None,
         }
     }
 
