@@ -186,10 +186,8 @@ fn hunk_counts(rest: &str) -> Option<(u32, u32)> {
 fn strip_revision_suffix(line: &str) -> Option<String> {
     let (marker, rest) = if let Some(r) = line.strip_prefix("--- ") {
         ("--- ", r)
-    } else if let Some(r) = line.strip_prefix("+++ ") {
-        ("+++ ", r)
     } else {
-        return None;
+        ("+++ ", line.strip_prefix("+++ ")?)
     };
     let trimmed = rest.trim_end();
     let inner_end = trimmed.strip_suffix(')')?;
