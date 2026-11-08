@@ -6,6 +6,8 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-08
+
 First release.
 
 ### Highlights
@@ -29,3 +31,6 @@ First release.
 - Install script, desktop entry and release builds for x86_64 and ARM64 Linux; a daily
   update check with an "Update available" badge, and updates from Settings or
   `osier --update` for script installs.
+
+[Unreleased]: https://github.com/ReyArlena/osier/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ReyArlena/osier/releases/tag/v0.1.0

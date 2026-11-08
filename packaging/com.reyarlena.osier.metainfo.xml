@@ -28,6 +28,6 @@
     <binary>osier</binary>
   </provides>
   <releases>
-    <release version="0.1.0" date="2026-09-19" />
+    <release version="0.1.0" date="2026-11-08" />
   </releases>
 </component>
