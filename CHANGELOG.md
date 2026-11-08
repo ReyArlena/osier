@@ -38,6 +38,9 @@ All notable changes to Osier are documented here. The format follows
   instead of reporting a rejected non fast-forward update.
 - The Log lists commits from all branches by date (git's date order, as PhpStorm does),
   instead of listing each branch's commits together.
+- In the commit graph each branch keeps its own column and colour from its tip down to
+  the commit it started from, and its line joins that commit there. Before, a branch moved
+  into a neighbouring column straight away and took that column's colour.
 - Shift-click in the Log picks only the commits on the line between the two clicked
   commits, so commits of other branches listed between them are left out and the range
   can still be squashed.

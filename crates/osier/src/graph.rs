@@ -60,7 +60,9 @@ pub fn graph_cell(
             let top = bounds.origin.y;
             let mid = top + bounds.size.height / 2.;
             let bottom = top + bounds.size.height;
-            let color = |lane: usize| colors[lane % colors.len()];
+            // Colours belong to branch lines (set by the layout), not to columns, so a branch
+            // keeps its colour wherever it sits.
+            let color = |ix: usize| colors[ix % colors.len()];
 
             // An edge runs from `from` at this row's middle to `to` at the next row's middle.
             // A lane change is one cubic S-curve over that whole span, with control points on
@@ -69,15 +71,7 @@ pub fn graph_cell(
             // is continuous across the two canvases with no flat step.
             let h = bounds.size.height;
             let half_x = |e: &Edge| (x_of(e.from) + x_of(e.to)) / 2.;
-            // A sideways edge belongs to the side branch (the outer lane), whether it forks off
-            // here or merges in, so both halves take that lane's colour.
-            let edge_color = |e: &Edge| {
-                if e.from == e.to {
-                    color(e.to)
-                } else {
-                    color(e.from.max(e.to))
-                }
-            };
+            let edge_color = |e: &Edge| color(e.color);
 
             // Top half: second halves of edges arriving from the previous row.
             for e in &incoming {
@@ -131,9 +125,9 @@ pub fn graph_cell(
             let center = point(x_of(row.lane), mid);
             let node = Bounds::new(point(center.x - r, center.y - r), size(r * 2., r * 2.));
             let node_color = if marks.this {
-                marks.paint.apply(color(row.lane))
+                marks.paint.apply(color(row.color))
             } else {
-                color(row.lane)
+                color(row.color)
             };
             window.paint_quad(quad(
                 node,

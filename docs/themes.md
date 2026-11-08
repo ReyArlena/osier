@@ -83,7 +83,7 @@ Colours are `#rrggbb` or `#rrggbbaa`.
 | `scrollbar.background`, `scrollbar.thumb.background`, `scrollbar.thumb.hover.background` | Scrollbars |
 | `selection.background`, `caret` | Text selection and cursor |
 | `base.red`, `base.green`, `base.yellow`, `base.blue`, `base.cyan`, `base.magenta` (+ `.light`) | Status badges, graph lanes |
-| `chart.1` .. `chart.5` | Commit graph lane colours |
+| `chart.1` .. `chart.5` | Commit graph branch colours |
 | `window.border` | Window border |
 
 The full list, including `button.*`, `switch.*`, `table.*` and the rest of the component
