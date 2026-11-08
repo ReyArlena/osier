@@ -23,6 +23,9 @@ none of the IDE.
   create/rename/delete/checkout actions and confirmations where data could be lost.
 - **Fetch, pull, push** with progress and cancel, upstream prompts, pull strategy memory per
   repository, `--force-with-lease` only (never plain `--force`).
+- **Update project**, like PhpStorm's: fetch, then merge or rebase (asked, or remembered per
+  repository), with uncommitted changes set aside and put back, stopping only for real
+  conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
 - **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
 - **Patches**: copy files or commits as a patch, apply from clipboard or file with a dry run
@@ -200,7 +203,7 @@ askpass = true                # route ssh/git prompts to Osier's own window
 remote_images = true          # fetch http(s) images in markdown
 ```
 
-State (open projects, recents, window layout, per-project account choices) is in
+State (open projects, recents, window layout, per-project choices) is in
 `~/.local/state/osier/`, the patch clipboard in `~/.local/state/osier/patches/`.
 
 ## Themes

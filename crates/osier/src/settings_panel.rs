@@ -349,6 +349,14 @@ impl SettingsTarget {
         page: Self::PROJECTS,
         group: 1,
     };
+    /// The Accounts page, for tests of its link.
+    #[cfg(test)]
+    pub(crate) const ACCOUNTS: Self = Self { page: 4, group: 0 };
+    /// Projects > Per-project choices (linked from the Accounts page).
+    pub(crate) const PER_PROJECT_CHOICES: Self = Self {
+        page: Self::PROJECTS,
+        group: 4,
+    };
 }
 
 const HIGHLIGHT_HOLD: Duration = Duration::from_millis(900);
@@ -365,7 +373,7 @@ fn highlight_alpha(elapsed: Duration) -> f32 {
 
 /// A group that can be flashed by `open_settings_at`. Padding with a matching negative
 /// margin gives the tint room around the text without moving anything.
-fn highlightable(
+pub(crate) fn highlightable(
     group: SettingGroup,
     target: SettingsTarget,
     view: &Entity<Osier>,
@@ -1070,7 +1078,6 @@ fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         );
     }
     let v1 = view.clone();
-    let v2 = view.clone();
     let v3 = view.clone();
     let mut page = SettingPage::new("Accounts")
         .icon(Icon::new(Lucide::KeyRound))
@@ -1128,66 +1135,7 @@ fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 .items(host_items),
         );
     }
-    page.group(
-            SettingGroup::new()
-                .title("Per-project choices")
-                .description("Accounts chosen with \"always use for this project\". Session-only choices are forgotten on exit.")
-                .item(SettingItem::render(move |options, _, cx| {
-                    let o = v2.read(cx);
-                    let muted = cx.theme().muted_foreground;
-                    let mut col = v_flex().gap_1().w_full();
-                    if o.state.accounts.is_empty() {
-                        col = col.child(div().text_sm().text_color(muted).child("None yet."));
-                    }
-                    for (ix, (repo, login)) in o.state.accounts.iter().enumerate() {
-                        let session = o.session_only_accounts.contains(repo);
-                        let v = v2.clone();
-                        let key = repo.clone();
-                        col = col.child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_sm()
-                                        .child(crate::format::tilde(std::path::Path::new(repo))),
-                                )
-                                .child(div().text_sm().child(login.clone()))
-                                .when(session, |this| {
-                                    this.child(Tag::secondary().xsmall().child("this session"))
-                                })
-                                .child(
-                                    Button::new(("reset-account", ix))
-                                        .ghost()
-                                        .with_size(options.size())
-                                        .label("Reset")
-                                        .on_click(move |_, _, cx| {
-                                            v.update(cx, |o, cx| {
-                                                o.clear_account_override(key.clone(), cx)
-                                            });
-                                        }),
-                                ),
-                        );
-                    }
-                    let v = v2.clone();
-                    col.when(!o.state.accounts.is_empty(), |this| {
-                        this.child(
-                            h_flex().pt_1().child(
-                                Button::new("reset-all-accounts").test_id("reset-all-accounts")
-                                    .outline()
-                                    .with_size(options.size())
-                                    .label("Reset all")
-                                    .on_click(move |_, _, cx| {
-                                        v.update(cx, |o, cx| o.clear_all_account_overrides(cx));
-                                    }),
-                            ),
-                        )
-                    })
-                })),
-        )
+    page.group(crate::project_choices::accounts_pointer(view))
         .group(
             SettingGroup::new()
                 .title("SSH")
@@ -1487,6 +1435,7 @@ fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                         )
                 })),
         )
+        .group(crate::project_choices::group(view, cx))
 }
 
 /// About > Updates: where Osier stands against the latest release, and what can be done.

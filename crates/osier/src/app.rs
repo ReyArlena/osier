@@ -6476,6 +6476,129 @@ mod tests {
         assert!(h.bounds(cx, "tab-git config").is_none());
     }
 
+    /// A pushed repository whose remote got a commit from elsewhere while it made one of its
+    /// own (diverged), plus an uncommitted edit.
+    fn diverged_with_local_edit() -> (TempRepo, TempRepo) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let bare = repo.add_bare_origin();
+        repo.git(["push", "-q", "-u", "origin", "HEAD"]);
+        let other = TempRepo::new();
+        other.git(["remote", "add", "origin", bare.to_string_lossy().as_ref()]);
+        other.git(["fetch", "-q", "origin"]);
+        other.git(["checkout", "-q", "-b", "main", "origin/main"]);
+        other.commit_file("remote.txt", "r\n", "remote work");
+        other.git(["push", "-q", "origin", "main"]);
+        repo.commit_file("local.txt", "l\n", "local work");
+        repo.write("a.txt", "edited\n");
+        (repo, other)
+    }
+
+    #[gpui::test]
+    fn ui_update_project_asks_then_remembers(cx: &mut TestAppContext) {
+        let (repo, other) = diverged_with_local_edit();
+        let h = Harness::open(cx, &repo);
+        let key = repo.path().to_string_lossy().into_owned();
+
+        h.click(cx, "update-project");
+        assert!(
+            h.bounds(cx, "update-dialog").is_some(),
+            "asks the first time"
+        );
+        h.click(cx, "update-remember");
+        h.click(cx, "dialog-ok");
+        assert!(repo.path().join("remote.txt").exists(), "merged in");
+        assert_eq!(repo.read("a.txt"), "edited\n", "local edit put back");
+        assert!(repo.git(["stash", "list"]).is_empty());
+        h.read(cx, |o, _| {
+            let choice = o.state.update_strategies.get(&key).expect("saved");
+            assert_eq!(choice.strategy, "merge");
+            assert!(choice.remember);
+            assert!(o.state.pull_strategies.is_empty(), "kept apart from pulls");
+        });
+
+        // Remembered: the next update runs straight away.
+        other.commit_file("more.txt", "m\n", "more remote work");
+        other.git(["push", "-q", "origin", "main"]);
+        h.click(cx, "update-project");
+        assert!(h.bounds(cx, "update-dialog").is_none(), "no dialog");
+        assert!(repo.path().join("more.txt").exists());
+    }
+
+    #[gpui::test]
+    fn ui_update_project_preselects_and_does_not_remember_by_default(cx: &mut TestAppContext) {
+        let (repo, _other) = diverged_with_local_edit();
+        repo.git(["config", "pull.rebase", "true"]);
+        let h = Harness::open(cx, &repo);
+        let key = repo.path().to_string_lossy().into_owned();
+        h.click(cx, "update-project");
+        // Preselected from pull.rebase; OK without touching anything rebases.
+        h.click(cx, "dialog-ok");
+        assert_eq!(
+            repo.git(["rev-list", "--count", "--merges", "HEAD"]).trim(),
+            "0",
+            "rebased, no merge commit"
+        );
+        h.read(cx, |o, _| {
+            let choice = o
+                .state
+                .update_strategies
+                .get(&key)
+                .expect("last choice kept");
+            assert_eq!(choice.strategy, "rebase");
+            assert!(!choice.remember, "unticked by default");
+        });
+        h.click(cx, "update-project");
+        assert!(h.bounds(cx, "update-dialog").is_some(), "still asks");
+    }
+
+    #[gpui::test]
+    fn ui_per_project_choices_show_as_pills_and_forget(cx: &mut TestAppContext) {
+        use crate::settings_panel::SettingsTarget;
+
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let h = Harness::open(cx, &repo);
+        let key = repo.path().to_string_lossy().into_owned();
+        h.act(cx, |o, _, _| {
+            o.state.pull_strategies.insert(key.clone(), "rebase".into());
+            o.state.update_strategies.insert(
+                key.clone(),
+                osier_config::state::UpdateChoice {
+                    strategy: "merge".into(),
+                    remember: true,
+                },
+            );
+        });
+
+        // The Accounts page's card opens Projects > Per-project choices.
+        h.act(cx, |o, w, cx| {
+            o.open_settings_at(SettingsTarget::ACCOUNTS, w, cx)
+        });
+        h.click(cx, "accounts-choices-link");
+        // The scroll to the group happens a frame later, on a timer.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        assert!(h.has_settings(cx));
+        assert_eq!(
+            h.read(cx, |o, _| o.settings_target),
+            Some(SettingsTarget::PER_PROJECT_CHOICES)
+        );
+        assert!(h.bounds(cx, "choice:pull:0").is_some());
+        assert!(h.bounds(cx, "choice:update:0").is_some());
+
+        h.click(cx, "choice-forget:update:0");
+        h.read(cx, |o, _| {
+            assert!(o.state.update_strategies.is_empty(), "forgotten");
+            assert_eq!(o.state.pull_strategies.len(), 1, "the other stays");
+        });
+        assert!(h.bounds(cx, "choice:update:0").is_none());
+        h.click(cx, "reset-all-choices");
+        h.read(cx, |o, _| assert!(o.state.pull_strategies.is_empty()));
+        assert!(h.bounds(cx, "project-choice-row:0").is_none());
+    }
+
     #[gpui::test]
     fn pull_skips_the_keep_offer_when_turned_off(cx: &mut TestAppContext) {
         use crate::remote_ops::RemoteOp;

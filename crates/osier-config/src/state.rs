@@ -25,10 +25,24 @@ pub struct State {
     /// Pull strategy last chosen per repository path (`merge` or `rebase`), preselected the
     /// next time the diverged-branch dialog opens.
     pub pull_strategies: std::collections::BTreeMap<String, String>,
+    /// Update project's method per repository path: the last one chosen (preselected in its
+    /// dialog), and whether to skip the dialog and use it straight away. Kept apart from
+    /// `pull_strategies`.
+    pub update_strategies: std::collections::BTreeMap<String, UpdateChoice>,
     /// The last look for a newer release.
     pub update_check: UpdateCheck,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// One repository's Update project choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct UpdateChoice {
+    /// `merge` or `rebase`.
+    pub strategy: String,
+    /// "Remember my choice for this repository": update without asking.
+    pub remember: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -174,5 +188,24 @@ mod tests {
         let mut loaded = loaded;
         assert!(!loaded.toggle_pin(p));
         assert!(loaded.pinned.is_empty());
+    }
+
+    #[test]
+    fn update_choices_survive_a_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::Paths::under(dir.path());
+        let mut s = State::default();
+        s.update_strategies.insert(
+            "/r/one".into(),
+            UpdateChoice {
+                strategy: "rebase".into(),
+                remember: true,
+            },
+        );
+        s.pull_strategies.insert("/r/one".into(), "merge".into());
+        s.save(&paths).unwrap();
+        let loaded = State::load(&paths).unwrap();
+        assert_eq!(loaded.update_strategies, s.update_strategies);
+        assert_eq!(loaded.pull_strategies, s.pull_strategies, "kept apart");
     }
 }

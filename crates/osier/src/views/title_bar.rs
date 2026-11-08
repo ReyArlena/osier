@@ -317,6 +317,19 @@ impl Osier {
                         .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
                 )
                 .child(Separator::vertical().h_4().mx_1())
+                .child(
+                    Button::new("update-project")
+                        .test_id("update-project")
+                        .ghost()
+                        .small()
+                        .icon(Lucide::FolderSync)
+                        .when(!self.compact, |b| b.label("Update project"))
+                        .tooltip("Update project: fetch, then merge or rebase")
+                        .disabled(busy)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.update_project(window, cx)),
+                        ),
+                )
                 .child(self.remote_menu_button("fetch", Lucide::CloudDownload, "Fetch", busy, cx))
                 .child(self.remote_menu_button("pull", Lucide::ArrowDown, "Pull", busy, cx))
                 .child(self.remote_menu_button("push", Lucide::ArrowUp, "Push", busy, cx))

@@ -8,6 +8,14 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- "Update project" button, left of Fetch: fetches, then merges or rebases with your
+  uncommitted changes set aside and put back, like PhpStorm's Update Project. It asks which
+  method to use each time, preselecting your last choice (or the repository's `pull.rebase`
+  the first time), unless you tick "Remember my choice for this repository". This choice is
+  kept apart from the diverged-pull one.
+- Settings > Projects > Per-project choices lists what Osier remembers for each project
+  (GitHub account, diverged-pull method, Update project method) as pills; the X on a pill
+  forgets that choice so Osier asks again. The Accounts page points to it.
 - The command log has a "Failures only" view, and error notifications open it on the
   command that failed.
 - Merge, rebase, interactive rebase and pulling a diverged branch offer to stash your

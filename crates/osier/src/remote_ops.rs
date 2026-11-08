@@ -27,6 +27,9 @@ pub enum RemoteOp {
     Fetch(FetchOptions),
     Pull(PullOptions),
     Push(PushOptions),
+    /// "Update project": a pull with a merge or rebase picked up front and autostash, so it
+    /// only stops for real conflicts.
+    Update(PullOptions),
 }
 
 impl RemoteOp {
@@ -65,6 +68,10 @@ impl RemoteOp {
                     .unwrap_or_default(),
                 o.remote.as_deref().unwrap_or("origin")
             ),
+            RemoteOp::Update(o) => match o.strategy {
+                PullStrategy::Rebase => "Update project (rebase)".into(),
+                _ => "Update project (merge)".into(),
+            },
             RemoteOp::Push(o) => match (o.set_upstream, o.force_with_lease) {
                 (_, true) => "Force push with lease".into(),
                 (true, false) => "Push and set upstream".into(),
@@ -77,7 +84,7 @@ impl RemoteOp {
     fn remote_name(&self, upstream_remote: Option<&str>) -> String {
         let explicit = match self {
             RemoteOp::Fetch(o) => o.remote.clone(),
-            RemoteOp::Pull(o) => o.remote.clone(),
+            RemoteOp::Pull(o) | RemoteOp::Update(o) => o.remote.clone(),
             RemoteOp::Push(o) => o.remote.clone(),
         };
         explicit
@@ -289,7 +296,9 @@ impl Osier {
                     let before = osier_git::stash::autostash_count(&repo2);
                     let result = match &op2 {
                         RemoteOp::Fetch(o) => remote::fetch(&repo2, o, &ctx, progress),
-                        RemoteOp::Pull(o) => remote::pull(&repo2, o, &ctx, progress),
+                        RemoteOp::Pull(o) | RemoteOp::Update(o) => {
+                            remote::pull(&repo2, o, &ctx, progress)
+                        }
                         RemoteOp::Push(o) => remote::push(&repo2, o, &ctx, progress),
                     };
                     (result, osier_git::stash::autostash_count(&repo2) > before)
@@ -317,7 +326,7 @@ impl Osier {
                 if stash_clashed {
                     window.push_notification(crate::ops::autostash_clash_notice(), cx);
                 }
-                if let (RemoteOp::Pull(_), Ok(_), Some(before), Some(after)) =
+                if let (RemoteOp::Pull(_) | RemoteOp::Update(_), Ok(_), Some(before), Some(after)) =
                     (&op, &result, &entry.head_before, &entry.head_after)
                 {
                     this.offer_keep_ignored(
@@ -401,7 +410,7 @@ impl Osier {
             (RemoteOp::Push(o), GitError::NoUpstream(_)) => {
                 self.prompt_set_upstream_and_push(o.clone(), window, cx);
             }
-            (RemoteOp::Pull(o), GitError::NoUpstream(_)) => {
+            (RemoteOp::Pull(o) | RemoteOp::Update(o), GitError::NoUpstream(_)) => {
                 self.prompt_set_upstream_and_pull(o.clone(), window, cx);
             }
             (_, GitError::AuthRequired(_)) => {
@@ -516,7 +525,8 @@ impl Osier {
                             "Only your local branch changes. If both sides changed the same \
                              lines, the pull stops so you can resolve the conflicts. Nothing is \
                              pushed: push afterwards to send the result. Osier preselects your \
-                             last choice for this repository next time.",
+                             last choice for this repository next time; clear it in Settings > \
+                             Projects > Per-project choices.",
                             cx,
                         ))
                         .pb_1()
