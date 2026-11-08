@@ -369,15 +369,26 @@ impl Osier {
                     cx,
                 );
             }
-            (RemoteOp::Pull(o), GitError::Dirty(_)) if !o.autostash => {
+            (RemoteOp::Pull(o), GitError::Dirty(record)) if !o.autostash => {
                 let mut options = o.clone();
                 options.autostash = true;
+                // Rebase configured for this repository: git refuses any uncommitted change,
+                // whichever files the incoming commits touch.
+                let why = if record.stderr.contains("cannot pull with rebase") {
+                    "This repository's git config makes pulls rebase, and git does not rebase \
+                     while there are uncommitted changes, so it did not pull and nothing was \
+                     changed."
+                } else {
+                    "The incoming commits change files you have uncommitted changes in, so git \
+                     did not pull and nothing was changed."
+                };
                 self.confirm(
                     "Local changes in the way",
-                    "The incoming commits change files you have uncommitted changes in, so git \
-                     did not pull and nothing was changed. Stash and pull sets your uncommitted \
-                     changes aside, pulls, then puts them back. If they clash with the incoming \
-                     changes, those files show conflicts and a full copy stays in the Stashes tab.",
+                    format!(
+                        "{why} Stash and pull sets your uncommitted changes aside, pulls, then \
+                         puts them back. If they clash with the incoming changes, those files \
+                         show conflicts and a full copy stays in the Stashes tab."
+                    ),
                     "Stash and pull",
                     false,
                     move |this, window, cx| {

@@ -370,6 +370,39 @@ mod tests {
         assert!(!names.contains(&"origin/temp".to_string()), "pruned");
     }
 
+    /// A repository set to pull by rebasing refuses any uncommitted change, even for a
+    /// fast-forward. That is reported as `Dirty` (so the UI offers to stash), and the
+    /// autostash retry pulls and puts the change back.
+    #[test]
+    fn rebase_config_pull_with_local_changes_is_dirty_and_autostash_pulls() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "main"]);
+        let other = TempRepo::new();
+        other.git(["remote", "add", "origin", bare.to_string_lossy().as_ref()]);
+        other.git(["fetch", "-q", "origin"]);
+        other.git(["checkout", "-q", "-b", "main", "origin/main"]);
+        other.commit_file("remote.txt", "r\n", "remote work");
+        other.git(["push", "-q", "origin", "main"]);
+        t.git(["config", "pull.rebase", "true"]);
+        t.write("a.txt", "edited\n");
+
+        let repo = t.repo();
+        let ctx = RemoteContext::default();
+        let err = pull(&repo, &PullOptions::default(), &ctx, no_progress);
+        assert!(matches!(err, Err(GitError::Dirty(_))), "{err:?}");
+
+        let options = PullOptions {
+            autostash: true,
+            ..Default::default()
+        };
+        pull(&repo, &options, &ctx, no_progress).unwrap();
+        assert!(t.path().join("remote.txt").exists());
+        assert_eq!(t.read("a.txt"), "edited\n", "change put back");
+        assert!(t.git(["stash", "list"]).is_empty(), "no stash left over");
+    }
+
     #[test]
     fn pull_ff_only_refuses_divergence_then_merge_and_rebase_work() {
         let t = TempRepo::new();

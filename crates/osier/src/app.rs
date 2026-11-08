@@ -6375,6 +6375,34 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_pull_in_a_rebase_configured_repo_offers_stash_and_pull(cx: &mut TestAppContext) {
+        use crate::remote_ops::RemoteOp;
+
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let bare = repo.add_bare_origin();
+        repo.git(["push", "-q", "-u", "origin", "HEAD"]);
+        let other = TempRepo::new();
+        other.git(["remote", "add", "origin", bare.to_string_lossy().as_ref()]);
+        other.git(["fetch", "-q", "origin"]);
+        other.git(["checkout", "-q", "-b", "main", "origin/main"]);
+        other.commit_file("b.txt", "b\n", "remote work");
+        other.git(["push", "-q", "origin", "main"]);
+        repo.git(["config", "pull.rebase", "true"]);
+        repo.write("a.txt", "edited\n");
+
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |osier, window, cx| {
+            osier.start_remote(RemoteOp::pull_default(), window, cx)
+        });
+        assert!(!repo.path().join("b.txt").exists(), "git refused");
+        h.click(cx, "dialog-ok");
+        assert!(repo.path().join("b.txt").exists(), "pulled");
+        assert_eq!(repo.read("a.txt"), "edited\n", "change put back");
+        assert!(repo.git(["stash", "list"]).is_empty());
+    }
+
+    #[gpui::test]
     fn pull_skips_the_keep_offer_when_turned_off(cx: &mut TestAppContext) {
         use crate::remote_ops::RemoteOp;
 

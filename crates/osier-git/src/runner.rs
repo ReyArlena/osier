@@ -402,7 +402,12 @@ fn classify(status: i32, record: CommandRecord, stdout: &str) -> GitError {
         || has("could not revert")
     {
         GitError::Conflict(Box::new(record))
-    } else if has("would be overwritten by") || has("commit your changes or stash them") {
+    } else if has("would be overwritten by")
+        || has("commit your changes or stash them")
+        // A pull that rebases (pull.rebase or branch.<name>.rebase in the repository's
+        // config, even with --ff-only) refuses any uncommitted change.
+        || has("cannot pull with rebase")
+    {
         GitError::Dirty(Box::new(record))
     } else if has("is not fully merged") {
         GitError::BranchNotMerged(Box::new(record))
