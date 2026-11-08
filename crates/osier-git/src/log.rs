@@ -40,10 +40,23 @@ pub struct LogOptions {
     /// Restrict to a path; `follow` tracks renames (single path only).
     pub path: Option<String>,
     pub follow: bool,
-    /// `--topo-order`: parents after children, branches kept together. Needed for the graph.
-    pub topo_order: bool,
+    /// Row order. The graph needs children before parents, which `Topo` and `Date` give.
+    pub order: LogOrder,
     pub author: Option<String>,
     pub grep: Option<String>,
+}
+
+/// How `git log` orders commits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LogOrder {
+    /// git's default: reverse commit date, parents may come before children.
+    #[default]
+    Default,
+    /// `--topo-order`: children before parents, each branch's commits kept together.
+    Topo,
+    /// `--date-order`: children before parents, branches interleaved by commit date (how
+    /// PhpStorm orders its log).
+    Date,
 }
 
 const FORMAT: &str = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%D%x1f%s%x1f%b";
@@ -56,8 +69,10 @@ pub fn log(repo: &Repository, options: &LogOptions) -> Result<Vec<Commit>> {
         "--decorate=full".into(),
         "--decorate-refs-exclude=refs/prefetch".into(),
     ];
-    if options.topo_order {
-        args.push("--topo-order".into());
+    match options.order {
+        LogOrder::Default => {}
+        LogOrder::Topo => args.push("--topo-order".into()),
+        LogOrder::Date => args.push("--date-order".into()),
     }
     if options.all {
         args.push("--all".into());
@@ -293,6 +308,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(followed.len(), 3, "follow crosses the rename");
+    }
+
+    #[test]
+    fn date_order_interleaves_branches_and_topo_keeps_them_together() {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "base\n", "base");
+        t.git(["switch", "-q", "-c", "side"]);
+        t.commit_file("s.txt", "1\n", "s1");
+        t.commit_file("s.txt", "2\n", "s2");
+        t.git(["switch", "-q", "main"]);
+        t.commit_file("m.txt", "1\n", "m1");
+        t.git(["switch", "-q", "side"]);
+        t.commit_file("s.txt", "3\n", "s3");
+        let subjects = |order| {
+            let options = LogOptions {
+                all: true,
+                order,
+                ..Default::default()
+            };
+            log(&t.repo(), &options)
+                .unwrap()
+                .into_iter()
+                .map(|c| c.subject)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(subjects(LogOrder::Date), ["s3", "m1", "s2", "s1", "base"]);
+        let topo = subjects(LogOrder::Topo);
+        let s = |x: &str| topo.iter().position(|y| y == x).unwrap();
+        assert_eq!((s("s2"), s("s1")), (s("s3") + 1, s("s3") + 2), "{topo:?}");
+        assert_eq!(topo.last().map(String::as_str), Some("base"));
     }
 
     #[test]

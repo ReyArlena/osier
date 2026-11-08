@@ -36,6 +36,11 @@ All notable changes to Osier are documented here. The format follows
   checkout, stash, tag, worktree, clone and untrack dialogs, written for people new to git.
 - A force push that git stops because someone pushed since your last fetch says so,
   instead of reporting a rejected non fast-forward update.
+- The Log lists commits from all branches by date (git's date order, as PhpStorm does),
+  instead of listing each branch's commits together.
+- Shift-click in the Log picks only the commits on the line between the two clicked
+  commits, so commits of other branches listed between them are left out and the range
+  can still be squashed.
 
 ### Fixed
 

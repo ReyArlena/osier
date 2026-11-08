@@ -1706,8 +1706,7 @@ impl Osier {
         if let Some(p) = self.active_project_mut()
             && let Some(s) = &p.snapshot
         {
-            let rows = anchor.min(ix)..=anchor.max(ix);
-            p.picked = s.commits[rows].iter().map(|c| c.hash.clone()).collect();
+            p.picked = crate::project::range_between(&s.commits, anchor, ix);
         }
         cx.notify();
     }
@@ -4270,6 +4269,41 @@ mod tests {
             ["d", "c", "b"],
             "the same three commits, two rows lower"
         );
+    }
+
+    #[gpui::test]
+    fn ui_squash_a_range_with_another_branch_between(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "x\n", "base");
+        // Alternate commits on main and side, so date order interleaves them.
+        repo.git(["branch", "side"]);
+        for (branch, s) in [
+            ("side", "s1"),
+            ("main", "m1"),
+            ("side", "s2"),
+            ("main", "m2"),
+        ] {
+            repo.git(["switch", "-q", branch]);
+            repo.commit_file(&format!("{s}.txt"), "x\n", s);
+        }
+        repo.git(["switch", "-q", "main"]);
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        assert_eq!(log_subjects(&h, cx), ["m2", "s2", "m1", "s1", "base"]);
+        h.click(cx, "log-row:0");
+        h.click_with(cx, "log-row:2", gpui::Modifiers::shift());
+        let picked = h.read(cx, |o, _| {
+            let p = o.active_project().unwrap();
+            let mut rows: Vec<usize> = p.picked_rows().into_iter().collect();
+            rows.sort_unstable();
+            rows
+        });
+        assert_eq!(picked, [0, 2], "s2 between them is not picked");
+        h.act(cx, |o, w, cx| o.confirm_squash(w, cx));
+        assert!(h.has_settings(cx), "squash dialog open");
+        h.click(cx, "dialog-ok");
+        assert_eq!(repo.git(["rev-list", "--count", "main"]).trim(), "2");
+        assert_eq!(repo.git(["rev-list", "--count", "side"]).trim(), "3");
     }
 
     #[gpui::test]

@@ -401,6 +401,40 @@ impl Project {
     }
 }
 
+/// Hashes of the commits a shift-click from row `a` to row `b` picks, in log order: those on
+/// the line between the two ends (descendants of the older end that the newer one reaches),
+/// so commits of other branches the date order puts in between are left out. When neither
+/// end leads to the other in the loaded page, every row between them.
+pub fn range_between(commits: &[Commit], a: usize, b: usize) -> Vec<String> {
+    use std::collections::HashSet;
+    let (newer, older) = (a.min(b), a.max(b));
+    let Some(rows) = commits.get(newer..=older) else {
+        return Vec::new();
+    };
+    // Children come before parents, so one pass down finds what the newer end reaches and
+    // one pass up finds what leads to the older end.
+    let mut reached: HashSet<&str> = HashSet::from([rows[0].hash.as_str()]);
+    for c in rows {
+        if reached.contains(c.hash.as_str()) {
+            reached.extend(c.parents.iter().map(String::as_str));
+        }
+    }
+    let oldest = &rows[rows.len() - 1].hash;
+    if !reached.contains(oldest.as_str()) {
+        return rows.iter().map(|c| c.hash.clone()).collect();
+    }
+    let mut leads: HashSet<&str> = HashSet::from([oldest.as_str()]);
+    for c in rows.iter().rev() {
+        if c.parents.iter().any(|p| leads.contains(p.as_str())) {
+            leads.insert(c.hash.as_str());
+        }
+    }
+    rows.iter()
+        .filter(|c| reached.contains(c.hash.as_str()) && leads.contains(c.hash.as_str()))
+        .map(|c| c.hash.clone())
+        .collect()
+}
+
 /// What takes `gone`'s place in the list `was` once it has left: the nearest item after it
 /// that `still` keeps, else the nearest one before it.
 pub fn neighbour<'a, T: PartialEq>(
@@ -444,7 +478,7 @@ pub fn load_snapshot(
         repo,
         &LogOptions {
             all: true,
-            topo_order: true,
+            order: osier_git::log::LogOrder::Date,
             limit: Some(log_page_size),
             path: log_path.map(str::to_string),
             follow: log_path.is_some(),
@@ -486,4 +520,65 @@ pub fn load_snapshot(
         identity,
         in_progress: repo.in_progress(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use osier_git::log::Commit;
+
+    use super::range_between;
+
+    fn c(hash: &str, parents: &[&str]) -> Commit {
+        Commit {
+            hash: hash.into(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            author_name: String::new(),
+            author_email: String::new(),
+            authored_at: 0,
+            committer_name: String::new(),
+            committer_email: String::new(),
+            committed_at: 0,
+            refs: vec![],
+            subject: String::new(),
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn range_follows_the_line_between_its_ends() {
+        // Date order: main m2, m1 and side s2, s1 interleaved above base.
+        let log = [
+            c("m2", &["m1"]),
+            c("s2", &["s1"]),
+            c("m1", &["base"]),
+            c("s1", &["base"]),
+            c("base", &[]),
+        ];
+        assert_eq!(range_between(&log, 0, 2), ["m2", "m1"]);
+        assert_eq!(range_between(&log, 4, 0), ["m2", "m1", "base"]);
+        assert_eq!(range_between(&log, 1, 4), ["s2", "s1", "base"]);
+    }
+
+    #[test]
+    fn range_keeps_both_sides_of_a_merge() {
+        let log = [
+            c("m", &["a", "f"]),
+            c("f", &["b"]),
+            c("a", &["b"]),
+            c("b", &[]),
+        ];
+        assert_eq!(range_between(&log, 0, 3), ["m", "f", "a", "b"]);
+    }
+
+    #[test]
+    fn unrelated_ends_pick_every_row_between() {
+        let log = [
+            c("m2", &["m1"]),
+            c("s2", &["s1"]),
+            c("m1", &[]),
+            c("s1", &[]),
+        ];
+        assert_eq!(range_between(&log, 1, 2), ["s2", "m1"]);
+        assert!(range_between(&log, 0, 9).is_empty());
+    }
 }
