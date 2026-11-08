@@ -204,7 +204,12 @@ impl Osier {
                     ),
                 )
                 .on_ok(move |_, window, cx| {
-                    let _ = weak.update(cx, |this, cx| on_ok(this, window, cx));
+                    // Run once this dialog has closed. Closing removes the topmost dialog, so a
+                    // dialog opened straight from here would be the one that closes.
+                    let (weak, on_ok) = (weak.clone(), on_ok.clone());
+                    window.defer(cx, move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| on_ok(this, window, cx));
+                    });
                     true
                 })
         });

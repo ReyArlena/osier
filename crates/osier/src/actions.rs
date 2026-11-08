@@ -59,6 +59,7 @@ impl Osier {
         let flags = Rc::new(flags);
         let weak = cx.entity().downgrade();
         let on_ok = Rc::new(on_ok);
+        let focus = input.clone();
         window.open_dialog(cx, move |dialog, _, _| {
             let input = input.clone();
             let flags = flags.clone();
@@ -93,10 +94,17 @@ impl Osier {
                 )
                 .on_ok(move |_, window, cx| {
                     let text = input.read(cx).value().to_string();
-                    let _ = weak.update(cx, |this, cx| on_ok(this, text, window, cx));
+                    // Run once this dialog has closed. Closing removes the topmost dialog, so a
+                    // dialog opened straight from here would be the one that closes.
+                    let (weak, on_ok) = (weak.clone(), on_ok.clone());
+                    window.defer(cx, move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| on_ok(this, text, window, cx));
+                    });
                     true
                 })
         });
+        // Type straight away, as in the clone and create dialogs.
+        focus.update(cx, |i, cx| i.focus(window, cx));
     }
 
     // ----- branches -----

@@ -10,6 +10,10 @@ All notable changes to Osier are documented here. The format follows
 
 - Notifications show their title again. A title such as "Push failed" was replaced by the
   message underneath it.
+- Choosing force push in the "Push rejected" dialog opens its confirmation instead of
+  doing nothing, and the second step of "New worktree" opens too.
+- Text prompts such as "New branch" and "Stash changes" focus their text field when they
+  open.
 
 ## [0.1.0] - 2026-11-08
 

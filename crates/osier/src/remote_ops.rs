@@ -505,12 +505,17 @@ impl Osier {
                 .on_ok(move |_, window, cx| {
                     let force = choice.get() == 1;
                     let options = options.clone();
-                    let _ = weak.update(cx, |this, cx| {
-                        if force {
-                            this.confirm_force_push(options, window, cx);
-                        } else {
-                            this.start_remote(RemoteOp::fetch_all(), window, cx);
-                        }
+                    let weak = weak.clone();
+                    // After this dialog has closed: closing removes the topmost dialog, which
+                    // would otherwise be the force push confirmation opened here.
+                    window.defer(cx, move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            if force {
+                                this.confirm_force_push(options, window, cx);
+                            } else {
+                                this.start_remote(RemoteOp::fetch_all(), window, cx);
+                            }
+                        });
                     });
                     true
                 })
