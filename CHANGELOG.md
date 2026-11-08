@@ -26,5 +26,6 @@ First release.
   with a higher contrast option.
 - Command palette, rebindable keys with an optional prefix key, and a log of every git
   command Osier runs.
-- Install script, desktop entry and release builds for x86_64 and ARM64 Linux;
-  `osier --update` updates script installs in place.
+- Install script, desktop entry and release builds for x86_64 and ARM64 Linux; a daily
+  update check with an "Update available" badge, and updates from Settings or
+  `osier --update` for script installs.

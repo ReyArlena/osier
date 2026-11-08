@@ -24,8 +24,19 @@ pub struct State {
     pub accounts: std::collections::BTreeMap<String, String>,
     /// Pull strategy remembered per repository path: `merge` or `rebase`.
     pub pull_strategies: std::collections::BTreeMap<String, String>,
+    /// The last look for a newer release.
+    pub update_check: UpdateCheck,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct UpdateCheck {
+    /// Unix seconds of the last successful check.
+    pub checked_at: Option<i64>,
+    /// The latest release tag it found (`v0.3.0`).
+    pub latest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]

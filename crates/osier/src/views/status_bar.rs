@@ -146,6 +146,29 @@ impl Osier {
                                 ),
                         )
                     })
+                    // A newer release: opens Settings > About > Updates.
+                    .when_some(self.update_badge().map(str::to_string), |this, tag| {
+                        this.child(
+                            div()
+                                .id("update-badge")
+                                .test_id("update-badge")
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded(cx.theme().radius)
+                                .bg(cx.theme().primary)
+                                .text_color(cx.theme().primary_foreground)
+                                .font_medium()
+                                .cursor_pointer()
+                                .child(format!("Update available: {tag}"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_settings_at(
+                                        crate::settings_panel::SettingsTarget::UPDATES,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                    })
                     .when(has_project, |this| {
                         this.child(crate::format::count(changes, "change"))
                     })

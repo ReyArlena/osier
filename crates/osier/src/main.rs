@@ -47,6 +47,7 @@ mod test_ids;
 mod theme_cards;
 mod themes;
 mod update;
+mod update_ui;
 mod viewer;
 mod views;
 

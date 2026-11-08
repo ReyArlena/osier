@@ -17,9 +17,27 @@ pub struct Settings {
     pub auth: Auth,
     pub viewer: Viewer,
     pub keys: Keys,
+    pub updates: Updates,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// Checking GitHub for a newer Osier release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Updates {
+    /// Look for a newer release at startup (at most once a day) and show a status bar badge
+    /// when there is one.
+    pub check_on_startup: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self {
+            check_on_startup: true,
+        }
+    }
 }
 
 /// Keyboard behaviour that is not a binding (bindings live in `keymap.toml`).

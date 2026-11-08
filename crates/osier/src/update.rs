@@ -1,16 +1,17 @@
-//! `osier --update`: install the latest release over this binary by running the install
-//! script, the same way the README's one-liner does.
+//! Updating Osier: `osier --update` and Settings > About > Updates share these steps.
 //!
-//! - Only for install-script installs ([`InstallRoute::Script`]); packages, Flatpak, cargo
-//!   and development builds are refused with what to do instead.
-//! - The latest release comes from `github.com/<repo>/releases/latest`, which redirects to
-//!   the newest published (non-draft, non-pre-release) release without using the rate
-//!   limited API; `git ls-remote` tags are the fallback, as in the installer.
-//! - The installer is fetched from that release's tag and told to install exactly that tag,
-//!   into the folder this binary lives in (`OSIER_PREFIX`).
-//! - `--check` only reports (exit 10 when an update is available). `--force` reinstalls the
-//!   same version or replaces a development or newer build. `OSIER_VERSION=v1.2.3` installs
-//!   that version; `OSIER_FROM_SOURCE=1` passes through to the installer.
+//! - [`latest_release`]: `github.com/<repo>/releases/latest` redirects to the newest
+//!   published (non-draft, non-pre-release) release; a plain web redirect, so the API rate
+//!   limit does not apply. The installer uses the same lookup.
+//! - [`decide`]: compare this build with it (development builds never count as outdated).
+//! - [`install`]: run the release's own `install.sh` for that tag, into the folder this
+//!   binary lives in (`OSIER_PREFIX`). Only for install-script installs
+//!   ([`InstallRoute::Script`]); the installer is prebuilt-binaries only.
+//! - [`restart`]: start the new binary once this process has exited.
+//!
+//! CLI: `--check` only reports (exit 10 when an update is available); `--force` reinstalls
+//! the same version or replaces a development or newer build; `OSIER_VERSION=v1.2.3`
+//! installs that release.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -63,17 +64,6 @@ pub fn tag_from_url(url: &str) -> Option<String> {
     (tag.starts_with('v') && !tag.contains('-') && triple(tag).is_some()).then(|| tag.to_string())
 }
 
-/// The newest stable tag among `git ls-remote --tags` lines.
-pub fn newest_tag(ls_remote: &str) -> Option<String> {
-    ls_remote
-        .lines()
-        .filter_map(|l| l.rsplit_once("refs/tags/").map(|(_, t)| t.trim()))
-        .filter(|t| t.starts_with('v') && !t.contains('-'))
-        .filter_map(|t| triple(t).map(|n| (n, t.to_string())))
-        .max_by_key(|(n, _)| *n)
-        .map(|(_, t)| t)
-}
-
 fn has_cmd(cmd: &str) -> bool {
     std::env::var_os("PATH")
         .is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(cmd).is_file()))
@@ -83,8 +73,6 @@ fn output(cmd: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(cmd)
         .args(args)
         .stdin(Stdio::null())
-        // Never wait for a username or password (git asks for one on private or missing repos).
-        .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .ok()?;
     // wget --spider prints headers on stderr and may exit non-zero on the redirect.
@@ -93,8 +81,8 @@ fn output(cmd: &str, args: &[&str]) -> Option<String> {
     Some(text)
 }
 
-/// The latest published release tag.
-fn latest_release() -> Result<String, String> {
+/// The latest published release tag (`v0.3.0`).
+pub fn latest_release() -> Result<String, String> {
     let url = format!("https://github.com/{REPO}/releases/latest");
     if has_cmd("curl")
         && let Some(final_url) = output(
@@ -111,12 +99,6 @@ fn latest_release() -> Result<String, String> {
             .lines()
             .filter(|l| l.trim_start().to_ascii_lowercase().starts_with("location:"))
             .find_map(tag_from_url)
-    {
-        return Ok(tag);
-    }
-    let repo_url = format!("https://github.com/{REPO}.git");
-    if let Some(tags) = output("git", &["ls-remote", "--tags", "--refs", &repo_url])
-        && let Some(tag) = newest_tag(&tags)
     {
         return Ok(tag);
     }
@@ -220,51 +202,98 @@ pub fn run(check: bool, force: bool) -> i32 {
     let InstallRoute::Script { bin_dir } = &route else {
         return 2;
     };
-    let Some(prefix) = bin_dir.parent() else {
-        eprintln!(
-            "osier --update: cannot tell the install prefix of {}",
-            bin_dir.display()
-        );
-        return 1;
-    };
-    let script = std::env::temp_dir().join(format!("osier-install-{}.sh", std::process::id()));
-    let script_url = format!("https://raw.githubusercontent.com/{REPO}/{target}/install.sh");
-    if !has_cmd("curl") && !has_cmd("wget") {
-        eprintln!("osier --update: curl or wget is needed to download the installer");
-        return 1;
-    }
-    if !download(&script_url, &script) {
-        eprintln!(
-            "osier --update: could not download {script_url} (is {target} a published release?)"
-        );
-        let _ = std::fs::remove_file(&script);
-        return 1;
-    }
-    let status = Command::new("sh")
-        .arg(&script)
-        .env("OSIER_PREFIX", prefix)
-        .env("OSIER_VERSION", &target)
-        .status();
-    let _ = std::fs::remove_file(&script);
-    match status {
-        Ok(s) if s.success() => {
+    match install(bin_dir, &target, false) {
+        Ok(_) => {
             println!(
                 "Updated to {target}. An Osier window that is already open keeps running the old \
                  version until you restart it (and `osier <path>` opens paths in that window)."
             );
             0
         }
-        Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("osier --update: could not run the installer: {e}");
+            eprintln!("osier --update: {e}");
             1
         }
     }
 }
 
+/// The release page of `tag`, for "what's new".
+pub fn release_url(tag: &str) -> String {
+    format!("https://github.com/{REPO}/releases/tag/{tag}")
+}
+
+/// Run the install script of release `tag` into the prefix that holds `bin_dir`. With
+/// `capture`, its output is returned (for the app) instead of going to the terminal.
+pub fn install(bin_dir: &Path, tag: &str, capture: bool) -> Result<String, String> {
+    let prefix = bin_dir
+        .parent()
+        .ok_or_else(|| format!("cannot tell the install prefix of {}", bin_dir.display()))?;
+    if !has_cmd("curl") && !has_cmd("wget") {
+        return Err("curl or wget is needed to download the installer".into());
+    }
+    let script = std::env::temp_dir().join(format!("osier-install-{}.sh", std::process::id()));
+    let script_url = format!("https://raw.githubusercontent.com/{REPO}/{tag}/install.sh");
+    if !download(&script_url, &script) {
+        let _ = std::fs::remove_file(&script);
+        return Err(format!(
+            "could not download {script_url} (is {tag} a published release?)"
+        ));
+    }
+    let mut cmd = Command::new("sh");
+    cmd.arg(&script)
+        .env("OSIER_PREFIX", prefix)
+        .env("OSIER_VERSION", tag)
+        .stdin(Stdio::null());
+    let result = if capture {
+        cmd.output().map(|o| {
+            let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&o.stderr));
+            (o.status, text)
+        })
+    } else {
+        cmd.status().map(|s| (s, String::new()))
+    };
+    let _ = std::fs::remove_file(&script);
+    match result {
+        Ok((status, text)) if status.success() => Ok(text),
+        Ok((status, text)) => Err(format!(
+            "the installer failed ({}){}",
+            status
+                .code()
+                .map_or_else(|| "killed".to_string(), |c| format!("exit {c}")),
+            if text.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", text.trim())
+            }
+        )),
+        Err(e) => Err(format!("could not run the installer: {e}")),
+    }
+}
+
+/// Start `binary` as soon as process `pid` (this one) has exited, so the new Osier takes
+/// over the single-instance socket and reopens the saved session. The caller quits next.
+/// `current_exe` cannot be used for this: after an update it names the deleted old file.
+#[cfg_attr(test, allow(dead_code))]
+pub fn restart(binary: &Path, pid: u32) -> std::io::Result<()> {
+    Command::new("sh")
+        .args([
+            "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec \"$2\"",
+            "osier-restart",
+            &pid.to_string(),
+        ])
+        .arg(binary)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Decision, decide, newest_tag, tag_from_url};
+    use super::{Decision, decide, tag_from_url};
 
     #[test]
     fn decides_against_the_latest_release() {
@@ -284,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_tags_from_redirects_and_ls_remote() {
+    fn reads_tags_from_redirects() {
         assert_eq!(
             tag_from_url("https://github.com/ReyArlena/osier/releases/tag/v1.2.3").as_deref(),
             Some("v1.2.3")
@@ -298,8 +327,5 @@ mod tests {
             tag_from_url("https://github.com/o/r/releases/tag/v1.0.0-rc.1"),
             None
         );
-        let ls = "a\trefs/tags/v0.9.2\nb\trefs/tags/v0.10.0\nc\trefs/tags/v1.0.0-rc.1\nd\trefs/tags/nightly\n";
-        assert_eq!(newest_tag(ls).as_deref(), Some("v0.10.0"));
-        assert_eq!(newest_tag(""), None);
     }
 }

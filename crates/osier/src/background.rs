@@ -17,6 +17,8 @@ pub(crate) const GH_ACCOUNTS: &str = "Loading GitHub accounts";
 pub(crate) const GH_REPOS: &str = "Loading GitHub repositories";
 pub(crate) const GH_LISTS: &str = "Loading GitHub lists";
 pub(crate) const BRANCHES: &str = "Looking up branches";
+pub(crate) const UPDATE_CHECK: &str = "Checking for updates";
+pub(crate) const UPDATE_INSTALL: &str = "Updating Osier";
 
 /// Counted background work, shared with the tasks doing it: each holds a [`BgGuard`] and
 /// counts itself out when it finishes or is dropped (a closed dialog cancels its task). The
