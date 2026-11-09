@@ -1,7 +1,7 @@
 //! Editing in the diff pane: the merge result of a conflicted file, or a working-tree file.
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::input::EditorState;
+use gpui_kit::component::input::{EditorState, InputEvent};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use osier_git::ops::integrate;
@@ -22,6 +22,8 @@ pub struct FileEditor {
     pub path: String,
     pub kind: EditKind,
     pub state: Entity<EditorState>,
+    /// Re-renders on every edit, so the Save button's label follows the text.
+    _changes: Subscription,
 }
 
 impl std::fmt::Debug for FileEditor {
@@ -87,8 +89,39 @@ impl Osier {
                 .line_number(true)
                 .default_value(text)
         });
-        self.editor = Some(FileEditor { path, kind, state });
+        let changes = cx.subscribe(&state, |_, _, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+        self.editor = Some(FileEditor {
+            path,
+            kind,
+            state,
+            _changes: changes,
+        });
         cx.notify();
+    }
+
+    /// The editor's Save button: "Save and resolve" for a conflicted file with no markers
+    /// left (saving marks it resolved), else "Save". With its tooltip.
+    pub(crate) fn save_button_text(&self, cx: &App) -> (&'static str, &'static str) {
+        match &self.editor {
+            Some(e) if e.kind == EditKind::MergeResult => {
+                if integrate::has_conflict_markers(&e.state.read(cx).value()) {
+                    (
+                        "Save",
+                        "Saves the file. It stays conflicted until no conflict markers are left.",
+                    )
+                } else {
+                    (
+                        "Save and resolve",
+                        "Saves the file and marks the conflict resolved",
+                    )
+                }
+            }
+            _ => ("Save", "Save the file"),
+        }
     }
 
     pub(crate) fn close_editor(&mut self, cx: &mut Context<Self>) {

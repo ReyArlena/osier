@@ -184,6 +184,12 @@ pub fn write_resolution(repo: &Repository, path: &str, content: &str) -> Result<
 }
 
 /// Text still containing conflict markers?
+/// Whether the working-tree copy of `path` still has conflict markers. A file that cannot be
+/// read as text (deleted, binary) has none to find, so it counts as clean.
+pub fn file_has_conflict_markers(repo: &Repository, path: &str) -> bool {
+    std::fs::read_to_string(repo.workdir().join(path)).is_ok_and(|t| has_conflict_markers(&t))
+}
+
 pub fn has_conflict_markers(text: &str) -> bool {
     text.lines().any(|l| {
         l.starts_with("<<<<<<< ")

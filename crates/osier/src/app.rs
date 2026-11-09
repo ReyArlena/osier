@@ -6720,6 +6720,85 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_mark_resolved_waits_for_markers_and_save_says_when_it_resolves(cx: &mut TestAppContext) {
+        use osier_git::ops::integrate::MergeMode;
+
+        let repo = TempRepo::new();
+        let both = |content: &str, message: &str| {
+            repo.write("c.txt", content);
+            repo.write("d.txt", content);
+            repo.git(["add", "c.txt", "d.txt"]);
+            repo.commit(message);
+        };
+        both("base\n", "base");
+        repo.checkout_new("feature");
+        both("theirs\n", "theirs");
+        repo.checkout("main");
+        both("ours\n", "ours");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            o.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        let conflicted = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                o.active_project()
+                    .unwrap()
+                    .snapshot
+                    .as_ref()
+                    .unwrap()
+                    .status
+                    .conflicted()
+                    .map(|e| e.path.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(conflicted(&h, cx), ["c.txt", "d.txt"]);
+
+        // Markers left: the button is disabled, a click records nothing.
+        h.click(cx, "mark-resolved:c.txt");
+        assert_eq!(conflicted(&h, cx).len(), 2);
+        assert!(repo.read("c.txt").contains("<<<<<<<"), "markers untouched");
+        // Called directly (the file may change after the frame was drawn), it refuses too.
+        h.act(cx, |o, window, cx| {
+            o.mark_resolved("c.txt".into(), window, cx)
+        });
+        assert_eq!(conflicted(&h, cx).len(), 2);
+        // Its error toast (kept open by its Command log button) would sit over the editor's
+        // buttons below.
+        h.act(cx, |_, window, cx| {
+            use gpui_kit::component::WindowExt as _;
+            window.clear_notifications(cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+
+        // Fixed in another editor: after the refresh the button marks it resolved.
+        repo.write("d.txt", "fixed elsewhere\n");
+        h.act(cx, |o, _, cx| o.refresh_active(cx));
+        h.click(cx, "mark-resolved:d.txt");
+        assert_eq!(conflicted(&h, cx), ["c.txt"]);
+
+        // Osier's editor: "Save" while markers remain, "Save and resolve" once they are gone.
+        h.act(cx, |o, _, cx| {
+            o.select_file("c.txt".into(), Area::Conflicted, cx)
+        });
+        h.act(cx, |o, window, cx| o.open_editor(window, cx));
+        assert_eq!(h.read(cx, |o, cx| o.save_button_text(cx).0), "Save");
+        h.act(cx, |o, window, cx| {
+            let state = o.editor.as_ref().unwrap().state.clone();
+            state.update(cx, |s, cx| s.set_value("merged\n", window, cx));
+        });
+        assert_eq!(
+            h.read(cx, |o, cx| o.save_button_text(cx).0),
+            "Save and resolve"
+        );
+        h.click(cx, "editor-save");
+        assert!(conflicted(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "merged\n");
+    }
+
+    #[gpui::test]
     fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");

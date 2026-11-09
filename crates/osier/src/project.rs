@@ -37,6 +37,9 @@ pub struct Snapshot {
     pub recent_messages: Vec<String>,
     pub identity: Identity,
     pub in_progress: Option<InProgress>,
+    /// Conflicted files whose working-tree copy still has conflict markers: "Mark resolved"
+    /// is disabled for them.
+    pub conflict_markers: std::collections::HashSet<String>,
 }
 
 /// Which area of the Changes tab a file lives in.
@@ -507,6 +510,11 @@ pub fn load_snapshot(
         tracing::debug!(error = %e, "submodule listing unavailable");
         Vec::new()
     });
+    let conflict_markers = status
+        .conflicted()
+        .filter(|e| osier_git::ops::integrate::file_has_conflict_markers(repo, &e.path))
+        .map(|e| e.path.clone())
+        .collect();
     Ok(Snapshot {
         status,
         branches,
@@ -524,6 +532,7 @@ pub fn load_snapshot(
         unpushed,
         identity,
         in_progress: repo.in_progress(),
+        conflict_markers,
     })
 }
 

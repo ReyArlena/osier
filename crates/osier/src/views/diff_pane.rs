@@ -384,11 +384,13 @@ impl Osier {
                         )
                     })
                     .when(editing, |this| {
+                        let (save_label, save_tip) = self.save_button_text(cx);
                         this.child(
                             Button::new("editor-save").test_id("editor-save")
                                 .primary()
                                 .xsmall()
-                                .label("Save")
+                                .label(save_label)
+                                .tooltip(save_tip)
                                 .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
                         )
                         .child(

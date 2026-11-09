@@ -322,6 +322,7 @@ impl Osier {
                         .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
                         .when(area == Area::Conflicted, |this| {
                             let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
+                            let has_markers = snapshot.conflict_markers.contains(&entry.path);
                             this.child(
                                 h_flex()
                                     .gap_1()
@@ -357,10 +358,17 @@ impl Osier {
                                     )
                                     .child(
                                         Button::new(SharedString::from(format!("resolved-{ix}")))
+                                            .test_id(format!("mark-resolved:{}", entry.path))
                                             .outline()
                                             .xsmall()
-                                            .label("Resolved")
-                                            .tooltip("Mark as resolved after editing the file")
+                                            .label("Mark resolved")
+                                            .disabled(has_markers)
+                                            .tooltip(if has_markers {
+                                                "Still has conflict markers: resolve them first, \
+                                                 or use Apply resolution"
+                                            } else {
+                                                "Use after fixing the file in another editor"
+                                            })
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.mark_resolved(p3.clone(), window, cx)
                                             })),

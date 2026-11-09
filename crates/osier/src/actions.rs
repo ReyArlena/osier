@@ -921,7 +921,16 @@ impl Osier {
     ) {
         self.run_op(
             format!("Marked {path} resolved"),
-            move |repo| integrate::mark_resolved(repo, std::slice::from_ref(&path)),
+            move |repo| {
+                // The button is disabled then, but the file may have changed since.
+                if integrate::file_has_conflict_markers(repo, &path) {
+                    return Err(osier_git::GitError::Refused(format!(
+                        "{path} still has conflict markers. Resolve them first, or use Apply \
+                         resolution."
+                    )));
+                }
+                integrate::mark_resolved(repo, std::slice::from_ref(&path))
+            },
             window,
             cx,
         );

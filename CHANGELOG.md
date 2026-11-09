@@ -40,6 +40,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- A conflicted file's "Resolved" button is now "Mark resolved", for files fixed in another
+  editor. It is disabled while the file still has conflict markers, with a tooltip saying
+  why, so the markers can no longer be recorded as the resolved file. The editor's Save
+  button says "Save and resolve" when saving will also mark the conflict resolved.
 - "Always use this account for this project" in the account picker starts unticked, so
   remembering an account is always your choice.
 - Common git refusals (unmerged branch, worktree with changes, missing remote branch,
