@@ -62,6 +62,88 @@ pub(crate) fn build_items(paths: &[String], expand_all: bool) -> Vec<TreeItem> {
 }
 
 /// Case-insensitive substring match on the whole path, the same rule as the sidebar filter.
+/// How an ignored row is shown: badges naming the files the rules come from, and a tooltip
+/// with the rules themselves.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct IgnoredRow {
+    pub(crate) sources: Vec<String>,
+    pub(crate) tooltip: String,
+}
+
+/// Ignored rows by tree id: every ignored file, and every folder whose files are all ignored
+/// (with each rule file that ignores something inside it).
+pub(crate) fn ignored_rows(
+    paths: &[String],
+    ignored: &crate::project::IgnoredFiles,
+) -> BTreeMap<String, IgnoredRow> {
+    use std::collections::BTreeSet;
+    let label = |source: &str| {
+        if source.starts_with('/') {
+            crate::format::tilde(std::path::Path::new(source))
+        } else {
+            source.to_string()
+        }
+    };
+    let ignored_set: std::collections::HashSet<&str> =
+        ignored.files.iter().map(String::as_str).collect();
+    let mut rows = BTreeMap::new();
+    // Per folder: (files inside, rule files of the ignored ones), or None once a file inside
+    // is not ignored.
+    let mut dirs: BTreeMap<&str, Option<BTreeSet<String>>> = BTreeMap::new();
+    for p in paths {
+        let is_ignored = ignored_set.contains(p.as_str());
+        let rule = ignored.rules.get(p);
+        if is_ignored {
+            let (sources, tooltip) = match rule {
+                Some(r) => (
+                    vec![label(&r.source)],
+                    format!(
+                        "Ignored by {} in {} (line {})",
+                        r.pattern,
+                        label(&r.source),
+                        r.line
+                    ),
+                ),
+                None => (Vec::new(), "Ignored".to_string()),
+            };
+            rows.insert(p.clone(), IgnoredRow { sources, tooltip });
+        }
+        let mut end = 0;
+        while let Some(slash) = p[end..].find('/') {
+            end += slash;
+            let dir = dirs
+                .entry(&p[..end])
+                .or_insert_with(|| Some(BTreeSet::new()));
+            match (dir.as_mut(), is_ignored) {
+                (Some(sources), true) => sources.extend(rule.map(|r| label(&r.source))),
+                (Some(_), false) => *dir = None,
+                (None, _) => {}
+            }
+            end += 1;
+        }
+    }
+    for (dir, sources) in dirs {
+        if let Some(sources) = sources {
+            let tooltip = if sources.is_empty() {
+                "Everything inside is ignored".to_string()
+            } else {
+                format!(
+                    "Everything inside is ignored (rules in {})",
+                    sources.iter().cloned().collect::<Vec<_>>().join(", ")
+                )
+            };
+            rows.insert(
+                dir.to_string(),
+                IgnoredRow {
+                    sources: sources.into_iter().collect(),
+                    tooltip,
+                },
+            );
+        }
+    }
+    rows
+}
+
 /// Every id `build_items` gives `paths`: each file and each folder above one.
 fn tree_ids(paths: &[String]) -> std::collections::HashSet<&str> {
     let mut ids = std::collections::HashSet::new();
@@ -186,11 +268,15 @@ impl Osier {
         }
         let tracked = std::rc::Rc::new(tracked);
         let mut paths = files;
-        if let Some(ignored) = ignored {
-            paths.extend(ignored);
-            paths.sort();
-            paths.dedup();
-        }
+        let ignored_rows = std::rc::Rc::new(match ignored {
+            Some(ignored) => {
+                paths.extend(ignored.files.iter().cloned());
+                paths.sort();
+                paths.dedup();
+                ignored_rows(&paths, &ignored)
+            }
+            None => BTreeMap::new(),
+        });
         let total = paths.len();
         let filter = self.files_filter.read(cx).value().to_string();
         filter_paths(&mut paths, &filter);
@@ -317,6 +403,7 @@ impl Osier {
                         let weak = weak.clone();
                         let status = status.clone();
                         let dirty_dirs = dirty_dirs.clone();
+                        let ignored_rows = ignored_rows.clone();
                         move |ix, entry, _selected, _window, cx| {
                             let item = entry.item();
                             let id = item.id.to_string();
@@ -338,6 +425,8 @@ impl Osier {
                             } else {
                                 Lucide::Folder
                             };
+                            let ignored_row = ignored_rows.get(&id);
+                            let dim = ignored_row.is_some();
                             let weak = weak.clone();
                             let click_id = id.clone();
                             let is_selected = selected_path.as_deref() == Some(id.as_str());
@@ -368,7 +457,10 @@ impl Osier {
                                                 Icon::new(icon).xsmall().text_color(changes_color),
                                             )
                                             .into_any_element(),
-                                            _ => Icon::new(icon).xsmall().into_any_element(),
+                                            _ => Icon::new(icon)
+                                                .xsmall()
+                                                .when(dim, |i| i.text_color(muted))
+                                                .into_any_element(),
                                         })
                                         .child(
                                             div()
@@ -376,8 +468,28 @@ impl Osier {
                                                 .truncate()
                                                 .min_w_0()
                                                 .flex_1()
+                                                .when(dim, |d| d.text_color(muted))
                                                 .child(item.label.clone()),
                                         )
+                                        // Ignored: where the rule lives, the rule itself in
+                                        // the tooltip.
+                                        .when_some(ignored_row, |this, row| {
+                                            this.child(
+                                                super::hint(
+                                                    SharedString::from(format!("ignored:{id}")),
+                                                    row.tooltip.clone(),
+                                                    "files-ignored-tooltip",
+                                                    cx,
+                                                )
+                                                .test_id(format!("files-ignored:{id}"))
+                                                .flex_none()
+                                                .flex()
+                                                .gap_1()
+                                                .children(row.sources.iter().map(|source| {
+                                                    Tag::secondary().xsmall().child(source.clone())
+                                                })),
+                                            )
+                                        })
                                         // Dot style: a dot in the sidebar's colour.
                                         .when_some(
                                             changed_inside.filter(|_| changes_dot),
@@ -571,7 +683,65 @@ impl Osier {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_items, filter_paths};
+    use super::{IgnoredRow, build_items, filter_paths, ignored_rows};
+
+    #[test]
+    fn ignored_rows_badge_files_and_wholly_ignored_folders() {
+        use osier_git::files::IgnoreRule;
+        let rule = |source: &str, line: u32, pattern: &str| IgnoreRule {
+            source: source.into(),
+            line,
+            pattern: pattern.into(),
+        };
+        let ignored = crate::project::IgnoredFiles {
+            files: vec![
+                "build/x.o".into(),
+                "build/gen/y.log".into(),
+                "site/b.tmp".into(),
+                "odd.bin".into(),
+            ],
+            rules: [
+                ("build/x.o".to_string(), rule(".gitignore", 2, "/build")),
+                (
+                    "build/gen/y.log".into(),
+                    rule("/etc/osier/ignore", 1, "*.log"),
+                ),
+                ("site/b.tmp".into(), rule("site/.gitignore", 1, "*.tmp")),
+            ]
+            .into(),
+        };
+        let mut paths: Vec<String> = ["a.txt", "site/keep.txt"]
+            .into_iter()
+            .map(String::from)
+            .chain(ignored.files.iter().cloned())
+            .collect();
+        paths.sort();
+        let rows = ignored_rows(&paths, &ignored);
+        let row = |sources: &[&str], tooltip: &str| IgnoredRow {
+            sources: sources.iter().map(|s| s.to_string()).collect(),
+            tooltip: tooltip.into(),
+        };
+        assert_eq!(
+            rows.get("site/b.tmp"),
+            Some(&row(
+                &["site/.gitignore"],
+                "Ignored by *.tmp in site/.gitignore (line 1)"
+            ))
+        );
+        // A file git ignores without saying why still shows as ignored.
+        assert_eq!(rows.get("odd.bin"), Some(&row(&[], "Ignored")));
+        // Folders: only when every file inside is ignored, with each rule file involved.
+        assert_eq!(
+            rows.get("build"),
+            Some(&row(
+                &[".gitignore", "/etc/osier/ignore"],
+                "Everything inside is ignored (rules in .gitignore, /etc/osier/ignore)"
+            ))
+        );
+        assert!(rows.contains_key("build/gen"));
+        assert!(!rows.contains_key("site"), "site/keep.txt is not ignored");
+        assert!(!rows.contains_key("a.txt"));
+    }
 
     #[test]
     fn filter_matches_anywhere_in_the_path_case_insensitively() {

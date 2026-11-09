@@ -31,9 +31,9 @@ pub struct Snapshot {
     pub reflog: Vec<ReflogEntry>,
     /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
     pub files: Vec<String>,
-    /// Ignored files, loaded only while the Files tab shows them ("Ignored" on); `None`
-    /// otherwise.
-    pub ignored: Option<Vec<String>>,
+    /// Ignored files and why, loaded only while the Files tab shows them ("Ignored" on);
+    /// `None` otherwise.
+    pub ignored: Option<IgnoredFiles>,
     pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
     pub submodules: Vec<osier_git::submodule::Submodule>,
     /// Last five commit messages on HEAD, for the commit box history menu.
@@ -43,6 +43,14 @@ pub struct Snapshot {
     /// Conflicted files whose working-tree copy still has conflict markers: "Mark resolved"
     /// is disabled for them.
     pub conflict_markers: std::collections::HashSet<String>,
+}
+
+/// Ignored files for the Files tab, with the rule that ignores each one.
+#[derive(Debug, Clone, Default)]
+pub struct IgnoredFiles {
+    pub files: Vec<String>,
+    /// Missing for a file when git could not say (the list still shows it).
+    pub rules: std::collections::HashMap<String, osier_git::files::IgnoreRule>,
 }
 
 /// Which area of the Changes tab a file lives in.
@@ -507,10 +515,18 @@ pub fn load_snapshot(
     files.dedup();
     // An empty list rather than an error: the Files tab asks again for a missing one.
     let ignored = with_ignored.then(|| {
-        osier_git::files::ignored(repo).unwrap_or_else(|e| {
+        let files = osier_git::files::ignored(repo).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "ignored files unavailable");
             Vec::new()
-        })
+        });
+        let rules = osier_git::files::ignore_rules(repo, &files)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "ignore rules unavailable");
+                Vec::new()
+            })
+            .into_iter()
+            .collect();
+        IgnoredFiles { files, rules }
     });
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;

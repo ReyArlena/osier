@@ -5332,6 +5332,34 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_files_tab_shows_why_a_file_is_ignored(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file(".gitignore", "/build\n*.log\n", "first");
+        repo.write("debug.log", "x\n");
+        repo.write("build/out.o", "x\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        h.click(cx, "show-ignored");
+        assert!(h.bounds(cx, "files-ignored:debug.log").is_some());
+        assert!(
+            h.bounds(cx, "files-ignored:build").is_some(),
+            "wholly ignored folder"
+        );
+        assert!(h.bounds(cx, "files-ignored:.gitignore").is_none());
+        // Hovering the badge explains the rule.
+        let at = h.bounds(cx, "files-ignored:debug.log").unwrap().center();
+        h.visual(cx)
+            .simulate_mouse_move(at, None, gpui::Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(2000));
+        cx.run_until_parked();
+        assert!(
+            h.bounds(cx, "files-ignored-tooltip").is_some(),
+            "tooltip shown"
+        );
+    }
+
+    #[gpui::test]
     fn ui_files_tab_with_ignored_shown_stays_on_an_ignored_file(cx: &mut TestAppContext) {
         use crate::row_actions::RowKind;
         let repo = TempRepo::new();

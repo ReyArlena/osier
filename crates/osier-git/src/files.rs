@@ -1,6 +1,6 @@
 //! Working tree file listings, gitignore-aware through git itself.
 
-use crate::error::Result;
+use crate::error::{GitError, Result};
 use crate::repo::Repository;
 
 /// Paths tracked in the index (NUL separated, so any file name works).
@@ -26,6 +26,75 @@ pub fn ignored(repo: &Repository) -> Result<Vec<String>> {
         "--exclude-standard",
     ])?;
     Ok(split(&out.stdout))
+}
+
+/// The rule that makes git ignore a path: the last pattern that matches it, which is the one
+/// that decides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoreRule {
+    /// The file holding the pattern, as git names it: relative to the working tree
+    /// (`.gitignore`, `site/.gitignore`, `.git/info/exclude`) or absolute (the global excludes
+    /// file, or `info/exclude` of a linked worktree's main repository).
+    pub source: String,
+    /// 1-based line of the pattern in `source`.
+    pub line: u32,
+    pub pattern: String,
+}
+
+/// The deciding rule for each of `paths` (ignored files, eg from [`ignored`]), in git's
+/// order. Paths git does not ignore are left out.
+pub fn ignore_rules(repo: &Repository, paths: &[String]) -> Result<Vec<(String, IgnoreRule)>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut input = Vec::new();
+    for p in paths {
+        input.extend_from_slice(p.as_bytes());
+        input.push(0);
+    }
+    // Exit 1: none of the paths is ignored.
+    let out = repo.runner().run_allowing_with_stdin(
+        Some(repo.workdir()),
+        ["check-ignore", "--verbose", "-z", "--stdin"],
+        &input,
+        &[0, 1],
+    )?;
+    parse_ignore_rules(&out.stdout)
+}
+
+/// Parse `git check-ignore --verbose -z`: `source NUL line NUL pattern NUL path NUL` per path.
+pub fn parse_ignore_rules(bytes: &[u8]) -> Result<Vec<(String, IgnoreRule)>> {
+    let mut fields: Vec<&[u8]> = bytes.split(|b| *b == 0).collect();
+    if fields.last().is_some_and(|f| f.is_empty()) {
+        fields.pop();
+    }
+    if !fields.len().is_multiple_of(4) {
+        return Err(GitError::parse(
+            "check-ignore",
+            format!("{} fields, expected groups of 4", fields.len()),
+        ));
+    }
+    let text = |f: &[u8]| String::from_utf8_lossy(f).into_owned();
+    fields
+        .chunks(4)
+        .map(|c| {
+            let line = std::str::from_utf8(c[1])
+                .ok()
+                .and_then(|l| l.parse().ok())
+                .ok_or_else(|| GitError::parse("check-ignore", format!("line {:?}", text(c[1]))))?;
+            if c[0].is_empty() || c[3].is_empty() {
+                return Err(GitError::parse("check-ignore", "empty source or path"));
+            }
+            Ok((
+                text(c[3]),
+                IgnoreRule {
+                    source: text(c[0]),
+                    line,
+                    pattern: text(c[2]),
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Ignored paths as git sees them, for the file watcher: whole ignored directories (git
@@ -143,6 +212,52 @@ mod tests {
         assert!(show_at(&repo, "HEAD", "notes.txt").unwrap().is_none());
         assert!(looks_binary(b"ab\0cd"));
         assert!(!looks_binary(b"plain text"));
+    }
+
+    #[test]
+    fn ignore_rules_name_the_deciding_file_line_and_pattern() {
+        let t = TempRepo::new();
+        t.commit_file(".gitignore", "# build output\n/build\n*.log\n", "ignore");
+        t.commit_file("site/.gitignore", "*.tmp\n", "site");
+        std::fs::write(t.git_dir().join("info/exclude"), "secret.txt\n").unwrap();
+        for f in [
+            "a.log",
+            "build/deep/x.o",
+            "site/b.tmp",
+            "site/c.log",
+            "secret.txt",
+        ] {
+            t.write(f, "x\n");
+        }
+        t.write("kept.txt", "k\n");
+        let repo = t.repo();
+        let files = ignored(&repo).unwrap();
+        let rules = ignore_rules(&repo, &files).unwrap();
+        let rule = |source: &str, line: u32, pattern: &str| IgnoreRule {
+            source: source.into(),
+            line,
+            pattern: pattern.into(),
+        };
+        assert_eq!(
+            rules,
+            [
+                ("a.log".to_string(), rule(".gitignore", 3, "*.log")),
+                ("build/deep/x.o".into(), rule(".gitignore", 2, "/build")),
+                (
+                    "secret.txt".into(),
+                    rule(".git/info/exclude", 1, "secret.txt")
+                ),
+                ("site/b.tmp".into(), rule("site/.gitignore", 1, "*.tmp")),
+                ("site/c.log".into(), rule(".gitignore", 3, "*.log")),
+            ]
+        );
+        // Not ignored: no rule, and git's "nothing matched" exit is not an error.
+        assert!(
+            ignore_rules(&repo, &["kept.txt".into()])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(ignore_rules(&repo, &[]).unwrap().is_empty());
     }
 
     #[test]

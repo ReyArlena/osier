@@ -17,6 +17,9 @@ fn parsers_fail_closed_on_garbage() {
     assert!(crate::blame::parse("not porcelain blame").is_err());
     assert!(crate::reflog::parse(b"no separators here").is_err());
     assert!(crate::version::GitVersion::parse("gti verison").is_err());
+    assert!(crate::files::parse_ignore_rules(b".gitignore\0x\0*.log\0a.log\0").is_err());
+    assert!(crate::files::parse_ignore_rules(b".gitignore\x003\0*.log\0").is_err());
+    assert!(crate::files::parse_ignore_rules(b"").unwrap().is_empty());
     // Empty output is a valid empty result where that makes sense.
     assert!(crate::status::parse(b"").unwrap().entries.is_empty());
     assert!(crate::diff::parse("").unwrap().is_empty());
