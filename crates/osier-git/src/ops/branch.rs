@@ -149,10 +149,104 @@ pub fn gone_upstream(repo: &Repository) -> Option<GoneUpstream> {
     })
 }
 
+/// A local branch whose upstream was deleted on the remote (git's `[gone]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoneBranch {
+    pub name: String,
+    /// Every commit of it is on its remote's default branch: deleting it loses nothing.
+    pub merged: bool,
+}
+
+/// Local branches (not the current one) whose upstream is gone, as seen since the last
+/// fetch with prune.
+pub fn gone_branches(repo: &Repository) -> Result<Vec<GoneBranch>> {
+    let out = repo.git([
+        "for-each-ref",
+        "--format=%(refname:short)%00%(upstream:track)%00%(HEAD)",
+        "refs/heads",
+    ])?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut gone = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split('\0');
+        let (Some(name), Some(track), Some(head)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        if track != "[gone]" || head == "*" {
+            continue;
+        }
+        let key = format!("branch.{name}.remote");
+        let remote = repo
+            .git(["config", "--get", &key])
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|r| !r.is_empty() && r != ".")
+            .unwrap_or_else(|| "origin".to_string());
+        let merged = default_branch(repo, &remote)
+            .filter(|d| d != name)
+            .is_some_and(|d| is_merged_into(repo, name, &format!("{remote}/{d}")));
+        gone.push(GoneBranch {
+            name: name.to_string(),
+            merged,
+        });
+    }
+    Ok(gone)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::GitError;
+
+    #[test]
+    fn pruned_branches_are_listed_with_whether_they_are_merged() {
+        let t = crate::testing::TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "main"]);
+        t.git(["remote", "set-head", "origin", "main"]);
+        // merged: pushed, merged into main on the remote, deleted there.
+        t.checkout_new("merged");
+        t.commit_file("m.txt", "m\n", "merged work");
+        t.git(["push", "-q", "-u", "origin", "merged"]);
+        t.git(["push", "-q", "origin", "merged:main"]);
+        // unmerged: pushed, deleted on the remote without merging.
+        t.checkout("main");
+        t.checkout_new("unmerged");
+        t.commit_file("u.txt", "u\n", "unmerged work");
+        t.git(["push", "-q", "-u", "origin", "unmerged"]);
+        // kept: its upstream still exists.
+        t.checkout("main");
+        t.checkout_new("kept");
+        t.git(["push", "-q", "-u", "origin", "kept"]);
+        t.checkout("main");
+        for b in ["merged", "unmerged"] {
+            t.git(["--git-dir", bare.to_str().unwrap(), "branch", "-D", b]);
+        }
+        let repo = t.repo();
+        assert!(
+            gone_branches(&repo).unwrap().is_empty(),
+            "not gone before a prune"
+        );
+        t.git(["fetch", "-q", "--prune", "origin"]);
+        assert_eq!(
+            gone_branches(&repo).unwrap(),
+            vec![
+                GoneBranch {
+                    name: "merged".into(),
+                    merged: true
+                },
+                GoneBranch {
+                    name: "unmerged".into(),
+                    merged: false
+                },
+            ]
+        );
+        // The current branch is never offered.
+        t.checkout("merged");
+        assert_eq!(gone_branches(&repo).unwrap().len(), 1);
+    }
 
     #[test]
     fn a_merged_and_deleted_upstream_is_typed_and_explained() {

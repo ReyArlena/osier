@@ -109,6 +109,15 @@ pub fn count(n: usize, noun: &str) -> String {
     }
 }
 
+/// "a", "a and b", "a, b and c".
+pub fn list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// `↑a ↓b` for commits ahead of and behind the upstream, only the non-zero parts; `None`
 /// when in sync.
 pub fn ahead_behind(ahead: u32, behind: u32) -> Option<String> {
@@ -122,6 +131,16 @@ pub fn ahead_behind(ahead: u32, behind: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn lists_read_like_a_sentence() {
+        let l = |v: &[&str]| super::list(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(l(&[]), "");
+        assert_eq!(l(&["a"]), "a");
+        assert_eq!(l(&["a", "b"]), "a and b");
+        assert_eq!(l(&["a", "b", "c"]), "a, b and c");
+    }
+
     use super::*;
 
     #[test]

@@ -1,6 +1,7 @@
 //! Fetch, pull and push from the UI: account resolution, progress, cancellation and the
 //! dialogs for the cases that must stop and ask.
 
+use std::path::PathBuf;
 use std::sync::mpsc;
 
 use gpui_kit::component::WindowExt as _;
@@ -337,6 +338,13 @@ impl Osier {
                         cx,
                     );
                 }
+                if matches!(
+                    op,
+                    RemoteOp::Fetch(_) | RemoteOp::Pull(_) | RemoteOp::Update(_)
+                ) && result.is_ok()
+                {
+                    this.offer_delete_gone(path.clone(), window, cx);
+                }
                 if let Err(error) = result {
                     this.handle_remote_error(op, error, window, cx);
                 }
@@ -345,6 +353,103 @@ impl Osier {
         })
         .detach();
         cx.notify();
+    }
+
+    /// After a fetch or pull: branches whose upstream was deleted on the remote and whose
+    /// commits are all on its default branch (merged pull requests, usually) are offered for
+    /// deletion, once per session. Branches with commits of their own are never offered.
+    fn offer_delete_gone(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repo) = self
+            .projects
+            .iter()
+            .find(|p| p.path == path)
+            .map(|p| p.repo.clone())
+        else {
+            return;
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let gone = cx
+                .background_spawn(async move { osier_git::ops::branch::gone_branches(&repo) })
+                .await
+                .unwrap_or_default();
+            let _ = this.update_in(cx, |this, window, cx| {
+                // Only for the project still on screen: the deletion runs in the active one.
+                if this.active_project().map(|p| &p.path) != Some(&path) {
+                    return;
+                }
+                let names: Vec<String> = gone
+                    .into_iter()
+                    .filter(|b| b.merged)
+                    .map(|b| b.name)
+                    .filter(|n| !this.gone_offered.contains(&(path.clone(), n.clone())))
+                    .collect();
+                if names.is_empty() {
+                    return;
+                }
+                for n in &names {
+                    this.gone_offered.insert((path.clone(), n.clone()));
+                }
+                this.confirm_delete_gone(path.clone(), names, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn confirm_delete_gone(
+        &mut self,
+        path: PathBuf,
+        names: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (title, body, ok) = match names.as_slice() {
+            [one] => (
+                "Delete a merged branch?".to_string(),
+                format!(
+                    "{one} was deleted on the remote and all of its commits are already on the \
+                     remote's default branch, so deleting it here loses nothing."
+                ),
+                format!("Delete {one}"),
+            ),
+            many => (
+                format!("Delete {} merged branches?", many.len()),
+                format!(
+                    "{} were deleted on the remote and all of their commits are already on the \
+                     remote's default branch, so deleting them here loses nothing.",
+                    crate::format::list(many)
+                ),
+                format!("Delete {} branches", many.len()),
+            ),
+        };
+        self.confirm(
+            title,
+            body,
+            ok,
+            false,
+            move |this, window, cx| {
+                if this.active_project().map(|p| &p.path) != Some(&path) {
+                    return;
+                }
+                let names = names.clone();
+                let summary = match names.as_slice() {
+                    [one] => format!("Deleted branch {one}"),
+                    many => format!("Deleted {} merged branches", many.len()),
+                };
+                this.run_op(
+                    summary,
+                    move |repo| {
+                        for name in &names {
+                            osier_git::ops::branch::delete(repo, name, true)?;
+                        }
+                        Ok(())
+                    },
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
     }
 
     fn handle_remote_error(

@@ -180,6 +180,9 @@ pub struct Osier {
     pub(crate) diff_expanded: bool,
     /// The selected conflicted file has no conflict markers left (inline view).
     pub(crate) diff_no_markers: bool,
+    /// Merged branches with a deleted upstream already offered for deletion this session
+    /// (project, branch), so a dismissed offer does not come back after every fetch.
+    pub(crate) gone_offered: std::collections::HashSet<(PathBuf, String)>,
     /// File of a multi-file diff the toolbar's file arrows last moved to.
     pub(crate) diff_file_ix: usize,
     /// File viewer for the Files tab (code, markdown, image, binary).
@@ -397,6 +400,7 @@ impl Osier {
             diff_expanded: false,
             diff_no_markers: false,
             diff_file_ix: 0,
+            gone_offered: std::collections::HashSet::new(),
             viewer: None,
             markdown_as_code: false,
             files_filter,
@@ -8183,5 +8187,52 @@ mod tests {
             "the merged branch is deleted"
         );
         assert_eq!(t.read("b.txt"), "b\n", "main was pulled");
+    }
+
+    #[gpui::test]
+    fn ui_fetch_and_prune_offers_to_delete_merged_branches_once(cx: &mut TestAppContext) {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "main"]);
+        t.git(["remote", "set-head", "origin", "main"]);
+        for (b, merge) in [("one", true), ("two", true), ("wip", false)] {
+            t.checkout("main");
+            t.git(["merge", "-q", "--ff-only", "origin/main"]);
+            t.checkout_new(b);
+            t.commit_file(&format!("{b}.txt"), "x\n", b);
+            t.git(["push", "-q", "-u", "origin", b]);
+            if merge {
+                t.git(["push", "-q", "origin", &format!("{b}:main")]);
+                t.git(["fetch", "-q", "origin"]);
+            }
+        }
+        t.checkout("main");
+        for b in ["one", "two", "wip"] {
+            t.git(["--git-dir", bare.to_str().unwrap(), "branch", "-D", b]);
+        }
+        let h = Harness::open(cx, &t);
+        let prune = || {
+            crate::remote_ops::RemoteOp::Fetch(osier_git::ops::remote::FetchOptions {
+                remote: None,
+                prune: true,
+                tags: false,
+            })
+        };
+        h.act(cx, |o, window, cx| o.start_remote(prune(), window, cx));
+        assert!(h.has_settings(cx), "offers the merged branches");
+        h.click(cx, "dialog-cancel");
+        // Declined: the next fetch does not ask about the same branches again.
+        h.act(cx, |o, window, cx| o.start_remote(prune(), window, cx));
+        assert!(!h.has_settings(cx));
+        // Offered again in a later session: delete them.
+        h.act(cx, |o, _, _| o.gone_offered.clear());
+        h.act(cx, |o, window, cx| o.start_remote(prune(), window, cx));
+        assert!(h.has_settings(cx));
+        h.click(cx, "dialog-ok");
+        let branches = t.git(["branch", "--format=%(refname:short)"]);
+        let mut branches: Vec<&str> = branches.lines().collect();
+        branches.sort();
+        assert_eq!(branches, ["main", "wip"], "unmerged work is kept");
     }
 }

@@ -8,6 +8,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- After a fetch or pull, Osier offers to delete local branches whose branch on the remote
+  was deleted (after a prune) and whose commits are all on the remote's default branch, such
+  as merged pull requests. It asks once per session; branches with work of their own are
+  never offered.
 - Three-way merge tool: a **3-way** layout next to Unified and Split shows conflicted files
   as your version, the result and their version side by side, like PhpStorm's merge dialog.
   Apply (`>>` / `<<`) or ignore (`X`) each change, apply every non-conflicting change from
