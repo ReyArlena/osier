@@ -39,6 +39,8 @@ use crate::test_ids::TestId as _;
 const GUTTER: f32 = 72.;
 /// The straight part of a band next to the side pane, where its chunk's buttons sit.
 const FLAT: f32 = 44.;
+/// Opacity of chunk fills, bands and the line marking an empty range.
+const BAND_ALPHA: f32 = 0.16;
 
 /// What to merge.
 #[derive(Debug, Clone)]
@@ -823,14 +825,15 @@ fn paint_pane(window: &mut Window, g: &PaneGeometry, pane: usize, chunks: &[Chun
             }
         } else if c.filled[pane] {
             if r.is_empty() {
+                // The same tone as the band that leads to it.
                 window.paint_quad(fill(
                     Bounds::new(point(left, top - px(1.)), size(right - left, px(2.))),
-                    c.color.opacity(0.8),
+                    c.color.opacity(BAND_ALPHA),
                 ));
             } else {
                 window.paint_quad(fill(
                     Bounds::new(point(left, top), size(right - left, bottom - top)),
-                    c.color.opacity(0.16),
+                    c.color.opacity(BAND_ALPHA),
                 ));
             }
         }
@@ -875,7 +878,7 @@ fn paint_band(
         p.move_to(point(x0, a.0));
         band_edge(&mut p, x0, x1, a.0, b.0, fl, fr);
         if let Ok(path) = p.build() {
-            window.paint_path(path, color.opacity(0.8));
+            window.paint_path(path, color.opacity(BAND_ALPHA));
         }
         return;
     }
@@ -887,7 +890,7 @@ fn paint_band(
     band_edge(&mut p, x1, x0, b1, a1, fr, fl);
     p.close();
     if let Ok(path) = p.build() {
-        window.paint_path(path, color.opacity(0.16));
+        window.paint_path(path, color.opacity(BAND_ALPHA));
     }
 }
 
