@@ -20,6 +20,7 @@ mod faults;
 pub mod files;
 pub mod graph;
 pub mod log;
+pub mod merge3;
 pub mod reflog;
 pub mod refs;
 pub mod repo;
