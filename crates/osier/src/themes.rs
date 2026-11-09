@@ -394,3 +394,23 @@ mod parse_tests {
         }
     }
 }
+
+/// Apply the user's saved theme without watching anything: for the short-lived windows
+/// (askpass, `osier merge`, `osier diff`). Mode "system" counts as dark.
+pub(crate) fn apply_saved(cx: &mut gpui_kit::App) {
+    if let Ok(paths) = osier_config::Paths::discover() {
+        let settings = osier_config::Settings::load(&paths).unwrap_or_default();
+        ThemeStore::ensure(paths.themes_dir(), false, cx);
+        let a = &settings.appearance;
+        let dark = a.mode != osier_config::settings::ThemeMode::Light;
+        let name = if dark { &a.dark_theme } else { &a.light_theme };
+        if !apply(name, a, cx) {
+            let fallback = if dark {
+                "Catppuccin Mocha"
+            } else {
+                "Catppuccin Latte"
+            };
+            apply(fallback, a, cx);
+        }
+    }
+}
