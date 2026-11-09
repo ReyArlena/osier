@@ -85,8 +85,55 @@ impl fmt::Display for RuntimeInfo {
     }
 }
 
+/// What Linux appends to `/proc/self/exe` once the running binary's file is replaced (a
+/// rebuild, `osier --update`, a package upgrade).
+const DELETED_SUFFIX: &str = " (deleted)";
+
+/// The path of this Osier binary, for handing to git and ssh (credential helper, askpass)
+/// and gh. After the file was replaced while Osier runs, `current_exe` names the old file
+/// with " (deleted)" on the end, which no program can start; the new binary sits at the
+/// original path, so use that.
+pub fn own_binary() -> std::io::Result<std::path::PathBuf> {
+    std::env::current_exe().map(|p| undeleted(p, |p| p.exists()))
+}
+
+fn undeleted(
+    path: std::path::PathBuf,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> std::path::PathBuf {
+    if exists(&path) {
+        return path;
+    }
+    match path.to_str().and_then(|s| s.strip_suffix(DELETED_SUFFIX)) {
+        Some(original) => std::path::PathBuf::from(original),
+        None => path,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_replaced_binary_is_found_at_its_original_path() {
+        use std::path::{Path, PathBuf};
+        let new_build = |p: &Path| p == Path::new("/x/bin/osier");
+        assert_eq!(
+            super::undeleted(PathBuf::from("/x/bin/osier (deleted)"), new_build),
+            PathBuf::from("/x/bin/osier")
+        );
+        // Not replaced: kept as it is, even with an odd name.
+        let anything = |_: &Path| true;
+        assert_eq!(
+            super::undeleted(PathBuf::from("/x/my (deleted) osier"), anything),
+            PathBuf::from("/x/my (deleted) osier")
+        );
+        // Removed without a replacement: nothing better to offer.
+        let nothing = |_: &Path| false;
+        assert_eq!(
+            super::undeleted(PathBuf::from("/x/osier"), nothing),
+            PathBuf::from("/x/osier")
+        );
+    }
+
     use super::RuntimeInfo;
 
     #[test]

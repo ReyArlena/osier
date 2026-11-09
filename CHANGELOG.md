@@ -95,6 +95,15 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Pulling (or Update project) on a branch whose upstream was deleted on GitHub, usually after
+  its pull request was merged, explains that instead of showing git's error, and offers to
+  switch to the default branch and pull it. It also offers to delete the local branch when
+  all of its commits are already on the default branch.
+- Sign-in (git's credential helper, the askpass prompt, GitHub calls) kept working only until
+  the Osier binary was replaced while it ran (an update or a rebuild): Osier then handed git
+  a path ending in " (deleted)". It now uses the new binary at the original path.
+- Starting git retries for a moment when the executable is briefly busy ("Text file busy"),
+  which made a test fail now and then on CI.
 - Pulling a diverged branch now closes its dialog and asks which GitHub account to use when
   the project has none chosen, instead of leaving the dialog open and doing nothing.
 - Keyboard shortcuts work again straight after a dialog closes, instead of doing nothing

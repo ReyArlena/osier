@@ -46,7 +46,7 @@ impl InstallRoute {
     /// Detect for the running binary. Runs the package managers' owner queries, so call it
     /// once and keep the result.
     pub fn detect() -> Self {
-        let exe = std::env::current_exe()
+        let exe = crate::runtime_info::own_binary()
             .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
             .unwrap_or_default();
         let env = |k: &str| std::env::var_os(k);

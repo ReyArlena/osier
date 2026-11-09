@@ -213,7 +213,7 @@ impl Osier {
         let Some(project) = self.active_project() else {
             return Ok(ctx);
         };
-        let exe = std::env::current_exe().ok();
+        let exe = crate::runtime_info::own_binary().ok();
         if self.settings.auth.askpass
             && let Some(exe) = &exe
         {

@@ -72,8 +72,8 @@ impl GhHub {
         a: &GhAccount,
         call: impl FnOnce(&osier_auth::hub::Gh) -> osier_auth::Result<T>,
     ) -> Result<T, String> {
-        let exe =
-            std::env::current_exe().map_err(|e| format!("cannot find the Osier binary: {e}"))?;
+        let exe = crate::runtime_info::own_binary()
+            .map_err(|e| format!("cannot find the Osier binary: {e}"))?;
         let observe = |c: &osier_auth::hub::ApiCall| {
             // Shown like the git rows: the program by name, not its full path.
             let mut argv = c.argv.clone();
@@ -696,7 +696,7 @@ impl Osier {
             cancel: Some(CancelToken::new()),
             ..Default::default()
         };
-        let Ok(exe) = std::env::current_exe() else {
+        let Ok(exe) = crate::runtime_info::own_binary() else {
             return ctx;
         };
         if self.settings.auth.askpass {
