@@ -1199,6 +1199,11 @@ kbd {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* An odd card count would leave a hole in two columns: the last card takes the row. */
+  .cards > .card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
   .section-head {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
