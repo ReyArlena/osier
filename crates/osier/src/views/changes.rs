@@ -150,8 +150,8 @@ impl Osier {
                             let weak = cx.entity().downgrade();
                             let p = path.clone();
                             move |menu, _, _| {
-                                let w9 = weak.clone();
-                                let p9 = p.clone();
+                                let (w9, w10) = (weak.clone(), weak.clone());
+                                let (p9, p10) = (p.clone(), p.clone());
                                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                                 let (p1, p2, p3) = (p.clone(), p.clone(), p.clone());
                                 let (w4, w5, w6) = (weak.clone(), weak.clone(), weak.clone());
@@ -293,7 +293,22 @@ impl Osier {
                                     tracked: area != Area::Untracked,
                                 };
                                 let path = p9.trim_end_matches('/').to_string();
+                                // Same as the row's hover button.
+                                let discard = if area == Area::Untracked {
+                                    "Move to trash…"
+                                } else {
+                                    "Discard changes…"
+                                };
                                 Osier::ignore_menu(menu.separator(), w9, path, row)
+                                    .separator()
+                                    .item(
+                                        crate::row_actions::action_menu_item(discard, "discard")
+                                            .on_click(move |_, window, cx| {
+                                                let _ = w10.update(cx, |this, cx| {
+                                                    this.discard_file(p10.clone(), area, window, cx)
+                                                });
+                                            }),
+                                    )
                             }
                         })
                         .child(

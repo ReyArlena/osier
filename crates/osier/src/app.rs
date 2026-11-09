@@ -5154,6 +5154,25 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ui_discard_from_the_changes_menu(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("a.txt", "changed\n");
+        let h = Harness::open(cx, &repo);
+        h.right_click(cx, "change-row:unstaged:a.txt");
+        // Open in editor, Open in file manager, Copy path, Blame, History, Copy as patch,
+        // Save to Patches, Shelve, Add to .gitignore, Add all *.txt files, Ignore only on this
+        // machine, Untrack, then Discard changes.
+        h.keys(cx, &["down"; 13].join(" "));
+        h.keys(cx, "enter");
+        assert!(h.has_settings(cx), "discard asks first");
+        assert_eq!(repo.read("a.txt"), "changed\n", "nothing discarded yet");
+        h.click(cx, "dialog-ok");
+        assert_eq!(repo.read("a.txt"), "a\n");
+        assert!(!status_has(&h, cx, "a.txt"));
+    }
+
+    #[gpui::test]
     fn ui_confirm_dialogs_have_working_buttons(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");

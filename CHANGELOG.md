@@ -6,6 +6,11 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The right-click menu in Changes has "Discard changes…" (or "Move to trash…" for untracked
+  files), the same as the row's hover button.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added

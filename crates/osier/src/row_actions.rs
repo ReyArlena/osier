@@ -747,11 +747,26 @@ pub(crate) fn menu_item(
     label: impl Into<SharedString>,
     kind: RowKind,
 ) -> gpui_kit::component::menu::PopupMenuItem {
+    hinted_item(label.into(), move |cx| key_hint(kind, cx))
+}
+
+/// A menu entry showing the key bound to the keymap action `id` (for entries that run a
+/// regular action rather than a [`RowKind`], such as Changes' "Discard changes").
+pub(crate) fn action_menu_item(
+    label: impl Into<SharedString>,
+    id: &'static str,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    hinted_item(label.into(), move |cx| action_key_hint(id, cx))
+}
+
+fn hinted_item(
+    label: SharedString,
+    hint: impl Fn(&App) -> Option<String> + 'static,
+) -> gpui_kit::component::menu::PopupMenuItem {
     use gpui_kit::component::{ActiveTheme as _, h_flex};
     use gpui_kit::prelude::FluentBuilder as _;
-    let label = label.into();
     gpui_kit::component::menu::PopupMenuItem::element(move |_, cx| {
-        let hint = key_hint(kind, cx);
+        let hint = hint(cx);
         h_flex()
             .w_full()
             .gap_6()
@@ -771,8 +786,12 @@ pub(crate) fn menu_item(
 
 /// "I", "Prefix I", or `None` when `kind` has no key.
 pub(crate) fn key_hint(kind: RowKind, cx: &App) -> Option<String> {
+    action_key_hint(ROWS.iter().find(|r| r.3 == kind)?.0, cx)
+}
+
+/// The first key bound to the keymap action `id`, as shown in menus.
+fn action_key_hint(id: &str, cx: &App) -> Option<String> {
     use crate::keymap::{KeyMode, Keymap, pretty_key, split_mode};
-    let id = ROWS.iter().find(|r| r.3 == kind)?.0;
     let first = Keymap::global(cx).keys_for(id).first()?;
     let (mode, key) = split_mode(first);
     Some(match mode {
