@@ -86,7 +86,7 @@ pub(crate) fn filter_paths(paths: &mut Vec<String>, filter: &str) {
 
 impl Osier {
     pub(crate) fn render_files(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (repo, entries, files, selection) = {
+        let (repo, entries, files, ignored, selection) = {
             let Some(project) = self.active_project() else {
                 return self
                     .empty_state(
@@ -102,10 +102,25 @@ impl Osier {
                     .empty_state(&name, "Reading files…", cx)
                     .into_any_element();
             };
+            // The ignored list comes with the snapshot. Ask for one when it is missing (just
+            // switched on, or the last refresh ran on another tab); `loading` and `error` keep
+            // this from asking again while a load runs or after one failed.
+            if self.show_ignored
+                && snapshot.ignored.is_none()
+                && !project.loading
+                && project.error.is_none()
+                && let Some(ix) = self.active
+            {
+                let weak = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    let _ = weak.update(cx, |this, cx| this.refresh_project(ix, cx));
+                });
+            }
             (
                 project.repo.clone(),
                 snapshot.status.entries.clone(),
                 snapshot.files.clone(),
+                snapshot.ignored.clone().filter(|_| self.show_ignored),
                 project.selection.clone(),
             )
         };
@@ -171,9 +186,7 @@ impl Osier {
         }
         let tracked = std::rc::Rc::new(tracked);
         let mut paths = files;
-        if self.show_ignored
-            && let Ok(ignored) = osier_git::files::ignored(&repo)
-        {
+        if let Some(ignored) = ignored {
             paths.extend(ignored);
             paths.sort();
             paths.dedup();

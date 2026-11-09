@@ -31,6 +31,9 @@ pub struct Snapshot {
     pub reflog: Vec<ReflogEntry>,
     /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
     pub files: Vec<String>,
+    /// Ignored files, loaded only while the Files tab shows them ("Ignored" on); `None`
+    /// otherwise.
+    pub ignored: Option<Vec<String>>,
     pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
     pub submodules: Vec<osier_git::submodule::Submodule>,
     /// Last five commit messages on HEAD, for the commit box history menu.
@@ -241,10 +244,12 @@ impl Project {
     }
 
     /// Watch the whole tree, ignored files included (Files tab with "Show ignored" on).
-    pub fn set_watch_all(&mut self, all: bool) {
-        if let Some(w) = self.watch.as_mut() {
-            w.set_watch_all(all);
-        }
+    /// Returns true when this just switched it on: changes to ignored files went unseen
+    /// until now, so the caller should refresh.
+    pub fn set_watch_all(&mut self, all: bool) -> bool {
+        self.watch
+            .as_mut()
+            .is_some_and(|w| w.set_watch_all(all) && all)
     }
 
     pub fn mark_refreshed(&mut self) {
@@ -474,6 +479,7 @@ pub fn load_snapshot(
     repo: &Repository,
     log_page_size: usize,
     log_path: Option<&str>,
+    with_ignored: bool,
 ) -> Result<Snapshot, String> {
     let status = osier_git::status::status(repo, StatusOptions::default())
         .map_err(|e| format!("status: {e}"))?;
@@ -499,6 +505,13 @@ pub fn load_snapshot(
     files.extend(osier_git::files::untracked(repo).map_err(|e| format!("ls-files: {e}"))?);
     files.sort();
     files.dedup();
+    // An empty list rather than an error: the Files tab asks again for a missing one.
+    let ignored = with_ignored.then(|| {
+        osier_git::files::ignored(repo).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "ignored files unavailable");
+            Vec::new()
+        })
+    });
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
     let recent_messages = osier_git::log::recent_messages(repo, 5).unwrap_or_default();
@@ -526,6 +539,7 @@ pub fn load_snapshot(
         remotes,
         reflog,
         files,
+        ignored,
         worktrees,
         submodules,
         recent_messages,

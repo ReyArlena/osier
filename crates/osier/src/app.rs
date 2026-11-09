@@ -1392,9 +1392,13 @@ impl Osier {
         let path = project.path.clone();
         let page = project.log_page_size;
         let log_path = project.log_path.clone();
+        let with_ignored = self.show_ignored && self.tab == Tab::Files && self.active == Some(ix);
+        let project = &mut self.projects[ix];
         project.task = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { load_snapshot(&repo, page, log_path.as_deref()) })
+                .background_spawn(async move {
+                    load_snapshot(&repo, page, log_path.as_deref(), with_ignored)
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.install_snapshot(&path, revision, result, cx)
@@ -1602,15 +1606,25 @@ impl Osier {
                     // Live updates for ignored files only while the Files tab lists them.
                     let watch_all = this.tab == Tab::Files && this.show_ignored;
                     let active = this.active;
+                    let mut due: Vec<usize> = Vec::new();
                     for (ix, p) in this.projects.iter_mut().enumerate() {
-                        p.set_watch_all(watch_all && active == Some(ix));
+                        // Just switched on: the ignored list may predate changes nobody
+                        // watched, so read it again.
+                        if p.set_watch_all(watch_all && active == Some(ix)) {
+                            due.push(ix);
+                        }
                     }
-                    let due: Vec<usize> = this
+                    let polled: Vec<usize> = this
                         .projects
                         .iter_mut()
                         .enumerate()
                         .filter_map(|(ix, p)| p.poll_watcher().then_some(ix))
                         .collect();
+                    for ix in polled {
+                        if !due.contains(&ix) {
+                            due.push(ix);
+                        }
+                    }
                     for ix in due {
                         this.refresh_project(ix, cx);
                     }
@@ -5277,6 +5291,44 @@ mod tests {
         );
         h.keys(cx, "up");
         assert_eq!(files_cursor(&h, cx).0.as_deref(), Some("one.tmp"));
+    }
+
+    #[gpui::test]
+    fn ui_files_tab_reads_ignored_files_once_not_per_frame(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file(".gitignore", "*.log\n", "first");
+        repo.commit_file("a.txt", "a\n", "second");
+        repo.write("debug.log", "x\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        let listings = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| {
+                o.sink
+                    .records()
+                    .iter()
+                    .filter(|r| r.argv.iter().any(|a| a == "--ignored"))
+                    .count()
+            })
+        };
+        assert!(h.bounds(cx, "files-row:debug.log").is_none());
+        h.click(cx, "show-ignored");
+        assert!(
+            h.bounds(cx, "files-row:debug.log").is_some(),
+            "listed once loaded"
+        );
+        let after_toggle = listings(&h, cx);
+        assert_eq!(after_toggle, 1);
+        // Redraws (hovering rows) reuse the list.
+        for i in 0..6 {
+            let row = ["files-row:a.txt", "files-row:debug.log"][i % 2];
+            let at = h.bounds(cx, row).unwrap().center();
+            h.visual(cx)
+                .simulate_mouse_move(at, None, gpui::Modifiers::none());
+            cx.run_until_parked();
+        }
+        assert_eq!(listings(&h, cx), after_toggle);
+        h.click(cx, "show-ignored");
+        assert!(h.bounds(cx, "files-row:debug.log").is_none());
     }
 
     #[gpui::test]

@@ -13,6 +13,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- With "Ignored" on, the Files tab no longer runs git each time it redraws (every hover and
+  key press). The ignored list is read in the background when files change, so the tab
+  stays smooth in repositories with many ignored files (eg `target/` or `node_modules`).
 - The Files tab keeps its highlighted row when the file list changes, instead of losing it
   so the arrow keys start again from the top. When the highlighted file leaves the list (eg
   after adding it to .gitignore), the row and the viewer move to the next file.

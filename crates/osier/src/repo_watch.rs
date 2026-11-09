@@ -148,11 +148,14 @@ impl RepoWatch {
         Some(watch)
     }
 
-    /// Watch the whole tree recursively (true) or only what git cares about (false).
-    pub(crate) fn set_watch_all(&mut self, all: bool) {
-        if self.shared.all.swap(all, Ordering::SeqCst) != all {
+    /// Watch the whole tree recursively (true) or only what git cares about (false). Returns
+    /// whether this changed the mode.
+    pub(crate) fn set_watch_all(&mut self, all: bool) -> bool {
+        let changed = self.shared.all.swap(all, Ordering::SeqCst) != all;
+        if changed {
             self.spawn_resync();
         }
+        changed
     }
 
     /// The kernel's watch limit was reached: some directories are not watched.
