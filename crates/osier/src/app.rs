@@ -512,6 +512,10 @@ impl Osier {
         this.apply_appearance(cx);
         let diff_entity = this.diff.clone();
         this.diff_subscription = Some(Self::subscribe_diff(&diff_entity, cx));
+        // Arrow keys move the Files tree's cursor: the viewer follows it.
+        let files_tree = this.files_tree.clone();
+        this._subscriptions
+            .push(cx.observe(&files_tree, |this, _, cx| this.follow_files_cursor(cx)));
         this._subscriptions
             .push(cx.observe_window_appearance(window, |this, _, cx| {
                 if this.settings.appearance.mode == ThemeMode::System {
@@ -5356,6 +5360,29 @@ mod tests {
         assert!(
             h.bounds(cx, "files-ignored-tooltip").is_some(),
             "tooltip shown"
+        );
+    }
+
+    #[gpui::test]
+    fn ui_files_tab_viewer_follows_the_arrow_keys(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("src/lib.rs", "l\n", "first");
+        repo.commit_file("a.txt", "a\n", "second");
+        repo.commit_file("b.txt", "b\n", "third");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        // Folders first: src, src/lib.rs, a.txt, b.txt.
+        h.click(cx, "files-row:a.txt");
+        let at = |f: &str| (Some(f.to_string()), Some(f.to_string()));
+        h.keys(cx, "down");
+        assert_eq!(files_cursor(&h, cx), at("b.txt"));
+        h.keys(cx, "up up");
+        assert_eq!(files_cursor(&h, cx), at("src/lib.rs"));
+        // A folder row leaves the viewer on the last file.
+        h.keys(cx, "up");
+        assert_eq!(
+            files_cursor(&h, cx),
+            (Some("src".to_string()), Some("src/lib.rs".to_string()))
         );
     }
 

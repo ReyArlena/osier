@@ -167,6 +167,28 @@ pub(crate) fn filter_paths(paths: &mut Vec<String>, filter: &str) {
 }
 
 impl Osier {
+    /// Show the file under the Files tree's cursor when the cursor moved to another file (arrow
+    /// keys, or the closest row after the file it was on left the tree). Folders leave the
+    /// viewer alone, and so does the file it already shows (at any revision).
+    pub(crate) fn follow_files_cursor(&mut self, cx: &mut Context<Self>) {
+        if self.tab != crate::app::Tab::Files {
+            return;
+        }
+        let Some(entry) = self.files_tree.read(cx).selected_entry() else {
+            return;
+        };
+        if entry.is_folder() {
+            return;
+        }
+        let path = entry.item().id.to_string();
+        let showing = self.active_project().is_some_and(|p| {
+            matches!(&p.selection, crate::project::Selection::WorkFile { path: q, .. } if *q == path)
+        });
+        if !showing {
+            self.select_work_file(path, None, cx);
+        }
+    }
+
     pub(crate) fn render_files(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let (repo, entries, files, ignored, selection) = {
             let Some(project) = self.active_project() else {
@@ -315,18 +337,12 @@ impl Osier {
                     state.set_selected_item(Some(&TreeItem::new(id.clone(), id.clone())), cx);
                 }
             });
-            // The viewer follows when the file it showed left the tree, like the Changes
-            // list does.
-            if let crate::project::Selection::WorkFile { path, rev: None } = &selection
-                && same_project
-                && !ids.contains(path.as_str())
-                && let Some(next) = next.filter(|n| paths.iter().any(|p| p == n.as_ref()))
-            {
+            // The viewer follows the cursor to its new row. The tree's own notify comes
+            // during this draw, which its observer does not hear, so follow after it.
+            if next.is_some() {
                 let weak = cx.entity().downgrade();
                 cx.defer(move |cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.select_work_file(next.to_string(), None, cx)
-                    });
+                    let _ = weak.update(cx, |this, cx| this.follow_files_cursor(cx));
                 });
             }
         }

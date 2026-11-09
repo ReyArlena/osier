@@ -8,6 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- In the Files tab, moving with the arrow keys opens each file in the viewer, as clicking
+  does. Folder rows leave the viewer on the last file.
 - With "Ignored" on, the Files tab dims ignored files and shows where the rule comes from
   as a badge (eg `.gitignore`, `site/.gitignore`, `.git/info/exclude` or your global
   excludes file). The tooltip names the pattern and its line. Folders whose files are all
