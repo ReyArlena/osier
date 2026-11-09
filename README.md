@@ -303,6 +303,20 @@ last fetched.
 **Does it work on X11?** gpui supports X11, and Osier runs there, but development and testing
 happen on Wayland (Hyprland).
 
+**The password prompt opens as a tiled window.** Osier's ssh/git prompt (`[auth] askpass`)
+is its own small window with the class (app id) `com.reyarlena.osier.askpass`. Tiling window
+managers tile it like any other window unless a rule floats it. Hyprland (Lua config):
+
+```lua
+hl.window_rule({ match = { class = "^(com\\.reyarlena\\.osier\\.askpass)$" }, float = true, center = true })
+```
+
+Sway:
+
+```
+for_window [app_id="com.reyarlena.osier.askpass"] floating enable
+```
+
 **Where is the three-pane merge tool?** Conflicts are resolved inside the diff pane: each
 conflict block has accept-current / accept-incoming / accept-both controls, and the result can
 be edited in place before it is marked resolved.
