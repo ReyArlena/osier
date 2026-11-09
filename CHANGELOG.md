@@ -24,6 +24,11 @@ All notable changes to Osier are documented here. The format follows
   the same entry. Bindable as "Pull requests on GitHub" under Context menus in the keymap.
 - The command log shows when each command started (time of day on the row, the full date
   when expanded, and in "Copy details").
+- Syntax colours that sit too close to the editor background are lifted until they read,
+  whatever the theme: comments above all, which most themes draw in a border grey (1.2:1
+  inside a changed word on Catppuccin Mocha). Hue stays, so the theme still looks like
+  itself. On by default; "Readable syntax colours" under Settings > Appearance > Theme turns
+  it off (`syntax_contrast` in config.toml).
 - A Notifications panel: every toast the app showed this session, newest first, with its
   time and, for git failures, the same "View command log" button, so a message that slid
   away can still be read. It shares the bottom panel with the git command log as a second

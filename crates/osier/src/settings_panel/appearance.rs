@@ -142,6 +142,19 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     let v = view.clone();
                     move |_, _, cx| theme_section("Light theme", &v, false, cx)
                 }),
+                SettingItem::new(
+                    "Readable syntax colours",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.syntax_contrast),
+                        set(view, |o, v: bool, _| o.settings.appearance.syntax_contrast = v),
+                    )
+                    .default_value(true),
+                )
+                .description(
+                    "Lift syntax colours that sit too close to the editor background (comments \
+                     above all) until they read, whatever the theme. Hue stays, so the theme \
+                     still looks like itself. Off: the theme's colours as they are.",
+                ),
             ]))
         .group(
             SettingGroup::new().title("Sidebar").item(

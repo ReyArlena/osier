@@ -379,3 +379,50 @@ fn higher_contrast_makes_ref_badges_opaque(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui::test]
+fn readable_syntax_colours_lift_dim_comments_and_can_be_turned_off(cx: &mut TestAppContext) {
+    use gpui_kit::HighlightStyle;
+    use gpui_kit::component::ActiveTheme as _;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    let comment = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |_, cx| {
+            let theme = cx.theme();
+            let style = theme
+                .highlight_theme
+                .style
+                .syntax
+                .comment
+                .expect("comment style");
+            let color = HighlightStyle::from(style).color.expect("comment colour");
+            (color, crate::themes::contrast(color, theme.background))
+        })
+    };
+    // The default (on) lifts Catppuccin Mocha's comment grey past the floor.
+    let (lifted, ratio) = comment(&h, cx);
+    assert!(ratio >= 4.5, "comment contrast {ratio} with the floor on");
+    h.act(cx, |o, _, cx| {
+        o.settings.appearance.syntax_contrast = false;
+        o.apply_appearance(cx);
+    });
+    let (original, ratio) = comment(&h, cx);
+    assert!(
+        ratio < 4.5,
+        "the theme's own grey is below the floor ({ratio})"
+    );
+    assert_ne!(original, lifted);
+    // Hex rounding moves the hue of a near-grey a little; the lift itself keeps it.
+    assert!(
+        (original.h - lifted.h).abs() < 0.05,
+        "same hue, only lighter: {original:?} vs {lifted:?}"
+    );
+    // Back on, applied twice as startup does: the lift is idempotent.
+    h.act(cx, |o, _, cx| {
+        o.settings.appearance.syntax_contrast = true;
+        o.apply_appearance(cx);
+        o.apply_appearance(cx);
+    });
+    assert_eq!(comment(&h, cx).0, lifted);
+}

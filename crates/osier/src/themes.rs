@@ -312,8 +312,94 @@ pub fn apply(name: &str, appearance: &Appearance, cx: &mut App) -> bool {
         if appearance.high_contrast {
             high_contrast(theme);
         }
+        if appearance.syntax_contrast {
+            syntax_contrast(theme);
+        }
     });
     true
+}
+
+/// Contrast floor for syntax colours against the editor background: WCAG AA for body text.
+/// Comments included: the added-line tint of a diff costs about 0.8 on top, and the
+/// Catppuccin comment grey starts at 3.4 on Mocha and 2.3 on Latte.
+pub(crate) const SYNTAX_CONTRAST: f32 = 4.5;
+
+/// Lift every syntax colour under its floor away from the background: lighter on a dark
+/// theme, darker on a light one. Hue and saturation stay, so the theme still looks like
+/// itself. Themes map comments to a UI grey meant for borders, which is where it bites.
+fn syntax_contrast(theme: &mut Theme) {
+    let bg = theme
+        .highlight_theme
+        .style
+        .editor_background
+        .unwrap_or(theme.background);
+    // `ThemeStyle`'s fields are private: go through its JSON form.
+    let Ok(mut value) = serde_json::to_value(&*theme.highlight_theme) else {
+        return;
+    };
+    let Some(syntax) = value
+        .pointer_mut("/style/syntax")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    for style in syntax.values_mut() {
+        let Some(hex) = style.get("color").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Ok(rgba) = gpui_kit::Rgba::try_from(hex) else {
+            continue;
+        };
+        let lifted = with_contrast(rgba.into(), bg, SYNTAX_CONTRAST);
+        if let Ok(json) = serde_json::to_value(lifted) {
+            style["color"] = json;
+        }
+    }
+    if let Ok(highlight) = serde_json::from_value(value) {
+        theme.highlight_theme = std::sync::Arc::new(highlight);
+    }
+}
+
+/// WCAG relative luminance.
+fn luminance(color: gpui_kit::Hsla) -> f32 {
+    let rgb = color.to_rgb();
+    let channel = |v: f32| {
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
+}
+
+/// WCAG contrast ratio, 1 to 21.
+pub(crate) fn contrast(a: gpui_kit::Hsla, b: gpui_kit::Hsla) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `color` moved in lightness away from `background` until it reaches `floor`, or as far as
+/// it can go. Unchanged when it already passes.
+pub(crate) fn with_contrast(
+    color: gpui_kit::Hsla,
+    background: gpui_kit::Hsla,
+    floor: f32,
+) -> gpui_kit::Hsla {
+    let lighten = luminance(background) < 0.5;
+    let mut lifted = color;
+    while contrast(lifted, background) < floor {
+        let next = if lighten {
+            (lifted.l + 0.02).min(1.)
+        } else {
+            (lifted.l - 0.02).max(0.)
+        };
+        if next == lifted.l {
+            break;
+        }
+        lifted.l = next;
+    }
+    lifted
 }
 
 /// Rebuild the faint selection and hover colours from the primary colour, mixed in more
@@ -342,6 +428,49 @@ fn high_contrast(theme: &mut Theme) {
         accent = mix(bg, 0.42);
         sidebar_accent = mix(sidebar, 0.58);
         sidebar_border = mix(sidebar, 0.35);
+    }
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::{SYNTAX_CONTRAST, contrast, with_contrast};
+    use gpui_kit::{Hsla, Rgba};
+
+    fn hsla(hex: &str) -> Hsla {
+        Rgba::try_from(hex).expect("hex").into()
+    }
+
+    #[test]
+    fn dim_colours_are_lifted_to_the_floor_and_keep_their_hue() {
+        // Catppuccin Mocha: comment grey on base reads 3.4:1 on its own and 1.2:1 inside a
+        // changed word; the floor lifts it.
+        let base = hsla("#1e1e2e");
+        let comment = hsla("#6c7086");
+        let lifted = with_contrast(comment, base, SYNTAX_CONTRAST);
+        assert!(contrast(lifted, base) >= SYNTAX_CONTRAST);
+        assert!((lifted.h - comment.h).abs() < 0.001, "hue kept");
+        assert!(lifted.l > comment.l, "lighter on a dark theme");
+        // Latte: the same grey on a light base goes darker instead.
+        let light = hsla("#eff1f5");
+        let darkened = with_contrast(hsla("#9ca0b0"), light, SYNTAX_CONTRAST);
+        assert!(contrast(darkened, light) >= SYNTAX_CONTRAST);
+        assert!(darkened.l < hsla("#9ca0b0").l);
+    }
+
+    #[test]
+    fn colours_that_already_pass_are_untouched() {
+        let base = hsla("#1e1e2e");
+        let green = hsla("#a6e3a1");
+        assert_eq!(with_contrast(green, base, 4.5), green);
+    }
+
+    #[test]
+    fn a_colour_that_cannot_reach_the_floor_stops_at_the_end() {
+        // Pure white on near-white: darkening ends at black, which does pass; a mid grey on a
+        // mid grey background can only go so far.
+        let grey = hsla("#808080");
+        let far = with_contrast(grey, grey, 21.);
+        assert!(far.l == 0. || far.l == 1.);
     }
 }
 

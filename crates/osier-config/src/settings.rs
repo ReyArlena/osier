@@ -84,6 +84,9 @@ pub struct Appearance {
     /// Selections, hovers and the sidebar highlight in a stronger tint of the theme's
     /// primary colour (like the switches), for more contrast. Off: the theme as designed.
     pub high_contrast: bool,
+    /// Lift syntax colours that sit too close to the editor background (comments above all)
+    /// until they read, whatever the theme. Off: the theme's colours as they are.
+    pub syntax_contrast: bool,
     /// A spinner and label in the status bar while Osier works quietly in the background
     /// (refreshes, project scans, GitHub lists, diff and branch lookups). Fetch, pull, push,
     /// clone and create always show.
@@ -123,6 +126,7 @@ impl Default for Appearance {
             row_menu_buttons: false,
             tooltip_delay_ms: 0,
             high_contrast: false,
+            syntax_contrast: true,
             show_background_tasks: false,
         }
     }
