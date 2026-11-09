@@ -26,6 +26,9 @@ mod inline_code;
 mod install_route;
 mod instance;
 mod keymap;
+mod merge_ops;
+mod merge_view;
+mod merge_window;
 mod new_repo;
 mod ops;
 mod palette;
@@ -132,6 +135,19 @@ fn main() {
                 );
             }
             return;
+        }
+        cli::Mode::Merge {
+            left,
+            base,
+            right,
+            output,
+        } => {
+            init_logging();
+            std::process::exit(merge_window::run_merge(left, base, right, output));
+        }
+        cli::Mode::Diff { left, right } => {
+            init_logging();
+            std::process::exit(merge_window::run_diff(left, right));
         }
         cli::Mode::Help => {
             println!("{}", cli::HELP);

@@ -213,8 +213,18 @@ pub struct Diff {
     pub context_lines: u32,
     pub line_numbers: bool,
     pub soft_wrap: bool,
-    /// `unified` or `split`.
+    /// `unified` or `split`, for files without conflicts.
     pub mode: DiffMode,
+    /// How conflicted files show: `three-way` (the merge tool) or `inline` (conflict blocks
+    /// with accept buttons).
+    pub conflicts: ConflictView,
+    /// Whitespace differences to hide: `none`, `trim` (amount of whitespace and line ends)
+    /// or `all`. Commits, comparisons and the merge tool; never stageable changes.
+    pub whitespace: DiffWhitespace,
+    /// Highlight the changed words inside changed lines.
+    pub word_highlights: bool,
+    /// The merge tool's panes scroll together.
+    pub sync_scroll: bool,
     /// Files larger than this (bytes) ask before rendering.
     pub large_file_bytes: u64,
 }
@@ -226,6 +236,10 @@ impl Default for Diff {
             line_numbers: true,
             soft_wrap: true,
             mode: DiffMode::Unified,
+            conflicts: ConflictView::ThreeWay,
+            whitespace: DiffWhitespace::None,
+            word_highlights: true,
+            sync_scroll: true,
             large_file_bytes: 2 * 1024 * 1024,
         }
     }
@@ -236,7 +250,28 @@ impl Default for Diff {
 pub enum DiffMode {
     #[default]
     Unified,
+    // Development builds wrote "three-way" here before it moved to `conflicts`.
+    #[serde(alias = "three-way")]
     Split,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffWhitespace {
+    #[default]
+    None,
+    Trim,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConflictView {
+    /// Yours, the result and theirs side by side.
+    #[default]
+    ThreeWay,
+    /// The working file's conflict blocks with Accept Current / Incoming / Both.
+    Inline,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

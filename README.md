@@ -28,6 +28,10 @@ none of the IDE.
   conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
 - **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
+- **Three-way merge tool**, like PhpStorm's: yours, the result and theirs side by side, with
+  apply / ignore on each change, "apply non-conflicting changes", word highlights and the
+  panes scrolling together. Expand it to the whole window, or use it from the terminal as
+  git's `mergetool` (and Osier's diff view as `difftool`).
 - **Patches**: copy files or commits as a patch, apply from clipboard or file with a dry run
   and a three-way fallback, and a patch clipboard that shelves changes and carries them
   between projects.
@@ -95,6 +99,11 @@ osier -n [path]       start a separate window instead (--new-instance)
 osier --update        install the latest release (installs from the install script;
                       --check only reports, --force reinstalls)
 osier --version --verbose
+osier merge <left> [<base>] <right> <output>
+                      merge two versions of a file in a window of its own and write the
+                      result to <output> (exit 0 after Apply, 1 on Cancel)
+osier diff <left> <right>
+                      compare two files in a window of its own
 ```
 
 Installed with a package manager, Flatpak or cargo? Update it that way; `osier --update`
@@ -143,6 +152,66 @@ overlay list them.
 
 ![Settings sheet](docs/screenshots/settings.png)
 
+### Merge tool
+
+Conflicted files open in the merge tool: your version on the left, the result in the middle
+and theirs on the right. **Unified** at the top of the diff pane shows the conflict blocks
+inline instead (with Accept Current / Incoming / Both), **3-way** goes back; the choice is
+remembered (`diff.conflicts` in the config). During a rebase the left side is still your commit and the right
+side is the branch you are rebasing onto.
+
+- `>>` / `<<` beside a change copies it into the result; `X` ignores it. Applying the second
+  side of a conflict adds it below the first.
+- **Apply non-conflicting changes**: Left, All or Right takes every change that does not
+  clash in one go.
+- The result is an ordinary editor: type in it freely, the changes move with your edits.
+- `F7` / `shift-F7` jump to the next / previous change; the gear menu has synchronised
+  scrolling, whitespace handling, word highlighting and wrapping. The panes stay lined up
+  even when one has many more lines above or below: it gets blank space instead.
+- **Accept Left** / **Accept Right** use one side for the whole file. **Save** writes the
+  result and leaves the file conflicted; **Apply** (`ctrl-enter` in the result) writes it and
+  marks it resolved (it asks first if changes are still undecided).
+- Long lines wrap with the diff pane's wrap button; the panes stay lined up.
+- Unified and Split get the same bar: previous / next change (`F7` / `shift-F7`), the number
+  of changes and the gear menu, whose settings are shared with the merge tool and saved.
+  Hiding whitespace applies to commits and comparisons only, never to changes you can stage.
+- **Expand** at the top right of the diff pane (or `ctrl-shift-m`) hides the sidebar and file
+  list for any layout, and stays on while you switch layouts; `Esc` or **Collapse** brings
+  them back. While expanded, the merge tool's arrows step through the conflicted files and
+  Apply moves on to the next one.
+
+### git mergetool and difftool
+
+`osier merge` and `osier diff` open a window of their own, without a repository, and git
+waits for it to close. Register them once:
+
+```sh
+git config --global merge.tool osier
+git config --global mergetool.osier.cmd 'osier merge "$LOCAL" "$BASE" "$REMOTE" "$MERGED"'
+git config --global mergetool.osier.trustExitCode true
+git config --global mergetool.keepBackup false
+
+git config --global diff.tool osier
+git config --global difftool.osier.cmd 'osier diff "$LOCAL" "$REMOTE"'
+git config --global difftool.prompt false
+```
+
+Then `git mergetool` opens each conflicted file in turn: Apply writes the result and git marks
+the file resolved, Cancel (or closing the window) leaves it conflicted. `git difftool` shows
+each changed file. With `trustExitCode` git believes Osier's exit code instead of asking
+whether the merge worked.
+
+Any two files work too, from anywhere, with or without a common ancestor:
+
+```sh
+osier merge mine.conf original.conf theirs.conf merged.conf
+osier merge a.txt b.txt result.txt     # no base: every difference is a conflict
+osier diff old.json new.json
+```
+
+A file literally named `merge` or `diff` in the current directory opens as a path with
+`osier ./merge`.
+
 ## Configuration
 
 Settings live in `~/.config/osier/config.toml` and are safe to keep in dotfiles: the file is
@@ -184,6 +253,10 @@ context_lines = 3
 line_numbers = true
 soft_wrap = true
 mode = "unified"              # unified | split
+conflicts = "three-way"       # three-way (merge tool) | inline (conflict blocks)
+whitespace = "none"           # none | trim | all: hide whitespace changes (commits, merges)
+word_highlights = true        # highlight the changed words in changed lines
+sync_scroll = true            # merge tool panes scroll together
 large_file_bytes = 2097152
 
 [git]

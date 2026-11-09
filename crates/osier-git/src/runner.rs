@@ -110,6 +110,9 @@ impl Output {
     }
 }
 
+/// How long `spawn` keeps retrying an executable that is busy being written.
+const BUSY_RETRY_FOR: Duration = Duration::from_millis(500);
+
 /// Executes git with a controlled environment.
 ///
 /// Cheap to clone: the sink is shared, everything else is small.
@@ -143,6 +146,32 @@ impl Default for GitRunner {
 const STDERR_CAP: usize = 64 * 1024;
 
 impl GitRunner {
+    /// Start the process. Linux refuses to run a file that some process still has open for
+    /// writing ("Text file busy"); that window is short (a just-written script, or a fork in
+    /// another thread that inherited the handle), so try again for a moment.
+    fn spawn(&self, cmd: &mut Command) -> Result<std::process::Child> {
+        let started = Instant::now();
+        let mut wait = Duration::from_millis(5);
+        loop {
+            match cmd.spawn() {
+                Ok(child) => return Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(GitError::GitNotFound(
+                        self.git.to_string_lossy().into_owned(),
+                    ));
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && started.elapsed() < BUSY_RETRY_FOR =>
+                {
+                    std::thread::sleep(wait);
+                    wait = (wait * 2).min(Duration::from_millis(50));
+                }
+                Err(e) => return Err(GitError::Io(e)),
+            }
+        }
+    }
+
     pub fn new(sink: Arc<dyn CommandSink>) -> Self {
         let mut env = BTreeMap::new();
         // Never hang on a hidden prompt.
@@ -302,13 +331,7 @@ impl GitRunner {
         let clock = Instant::now();
         tracing::debug!(id, argv = %argv.join(" "), "git");
 
-        let mut child = cmd.spawn().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                GitError::GitNotFound(self.git.to_string_lossy().into_owned())
-            } else {
-                GitError::Io(e)
-            }
-        })?;
+        let mut child = self.spawn(&mut cmd)?;
 
         if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
             use std::io::Write;
@@ -569,13 +592,7 @@ impl GitRunner {
         let clock = Instant::now();
         tracing::debug!(id, argv = %redact(&argv).join(" "), "git (streaming)");
 
-        let mut child = cmd.spawn().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                GitError::GitNotFound(self.git.to_string_lossy().into_owned())
-            } else {
-                GitError::Io(e)
-            }
-        })?;
+        let mut child = self.spawn(&mut cmd)?;
 
         // Reader threads write into shared buffers and are never joined after a kill: an
         // orphaned child (ssh, a remote helper) can keep the pipe open for a while.
@@ -755,6 +772,25 @@ mod streaming_tests {
         let r = runner.run_streaming(None, ["fetch"], Some(cancel), |_| {});
         assert!(matches!(r, Err(GitError::Cancelled(_))), "{r:?}");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_briefly_busy_executable_still_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("git");
+        std::fs::write(&fake, "#!/bin/sh\necho ok\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Held open for writing, the file cannot be executed ("Text file busy") until it is
+        // let go, as when another thread forks while a test writes its fake git.
+        let busy = std::fs::OpenOptions::new().write(true).open(&fake).unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(busy);
+        });
+        let runner = GitRunner::default().with_git(&fake);
+        let out = runner.run(None, ["status"]).unwrap();
+        assert_eq!(out.stdout_str().unwrap(), "ok\n");
     }
 
     #[test]

@@ -36,6 +36,19 @@ pub enum Mode {
         check: bool,
         force: bool,
     },
+    /// `osier merge <left> [<base>] <right> <output>`: the merge tool in a window of its own
+    /// (`git mergetool`). Without a base every difference is a conflict.
+    Merge {
+        left: PathBuf,
+        base: Option<PathBuf>,
+        right: PathBuf,
+        output: PathBuf,
+    },
+    /// `osier diff <left> <right>`: a read-only diff window (`git difftool`).
+    Diff {
+        left: PathBuf,
+        right: PathBuf,
+    },
     Help,
     /// Arguments that make no sense: the message says why.
     Invalid(String),
@@ -81,6 +94,42 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
             }
         }
         Some("--askpass") => Mode::Askpass(args.get(1).cloned().unwrap_or_default()),
+        Some("merge") => {
+            let files = match positionals(&args[1..]) {
+                Ok(f) => f,
+                Err(why) => return Mode::Invalid(why),
+            };
+            match files.as_slice() {
+                [left, right, output] => Mode::Merge {
+                    left: left.clone(),
+                    base: None,
+                    right: right.clone(),
+                    output: output.clone(),
+                },
+                [left, base, right, output] => Mode::Merge {
+                    left: left.clone(),
+                    base: Some(base.clone()),
+                    right: right.clone(),
+                    output: output.clone(),
+                },
+                _ => Mode::Invalid(
+                    "merge takes <left> [<base>] <right> <output>: three or four files".into(),
+                ),
+            }
+        }
+        Some("diff") => {
+            let files = match positionals(&args[1..]) {
+                Ok(f) => f,
+                Err(why) => return Mode::Invalid(why),
+            };
+            match files.as_slice() {
+                [left, right] => Mode::Diff {
+                    left: left.clone(),
+                    right: right.clone(),
+                },
+                _ => Mode::Invalid("diff takes two files: <left> <right>".into()),
+            }
+        }
         Some("--version" | "-V") => Mode::Version {
             verbose: args.iter().skip(1).any(|a| a == "--verbose" || a == "-v"),
         },
@@ -127,6 +176,24 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Mode {
             Mode::Gui { path, new_instance }
         }
     }
+}
+
+/// File arguments of `merge` and `diff`; `--` ends options so a file may start with `-`.
+fn positionals(args: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let mut only_paths = false;
+    for a in args {
+        if !only_paths && a == "--" {
+            only_paths = true;
+        } else if !only_paths && a.starts_with('-') && a.len() > 1 {
+            return Err(format!(
+                "unknown option {a} (a file starting with - goes after --)"
+            ));
+        } else {
+            out.push(PathBuf::from(a));
+        }
+    }
+    Ok(out)
 }
 
 /// Answer git's credential request from gh. Exit code for the process.
@@ -177,9 +244,16 @@ pub fn run_gh_api(account: &str, host: &str, args: &[String]) -> i32 {
 
 pub const HELP: &str = "\
 osier [options] [path]
+osier merge <left> [<base>] <right> <output>
+osier diff <left> <right>
 
   path                  a repository (or a folder inside one); without one, Osier reopens
                         the last session. A running Osier opens it and comes to the front.
+  merge                 merge two versions of a file in a window of its own and write the
+                        result to <output>. <base> is the version both started from; without
+                        it every difference is a conflict. Exits 0 after Apply, 1 on Cancel.
+                        Works as git's mergetool (see the README).
+  diff                  compare two files in a window of its own (git's difftool).
 
   -n, --new-instance    start a separate window instead
       --update          install the latest release over this Osier (install-script installs)
@@ -260,6 +334,48 @@ mod tests {
         assert!(matches!(p(&["--update", "now"]), Mode::Invalid(_)));
         assert!(matches!(p(&["--udpate"]), Mode::Invalid(_)));
         assert!(matches!(p(&["/a", "/b"]), Mode::Invalid(_)));
+        assert_eq!(
+            p(&["merge", "l", "b", "r", "out"]),
+            Mode::Merge {
+                left: "l".into(),
+                base: Some("b".into()),
+                right: "r".into(),
+                output: "out".into()
+            }
+        );
+        assert_eq!(
+            p(&["merge", "l", "r", "out"]),
+            Mode::Merge {
+                left: "l".into(),
+                base: None,
+                right: "r".into(),
+                output: "out".into()
+            }
+        );
+        assert!(matches!(p(&["merge", "l", "r"]), Mode::Invalid(_)));
+        assert!(matches!(
+            p(&["merge", "--x", "l", "r", "o"]),
+            Mode::Invalid(_)
+        ));
+        assert_eq!(
+            p(&["merge", "--", "-l", "r", "o"]),
+            Mode::Merge {
+                left: "-l".into(),
+                base: None,
+                right: "r".into(),
+                output: "o".into()
+            }
+        );
+        assert_eq!(
+            p(&["diff", "a", "b"]),
+            Mode::Diff {
+                left: "a".into(),
+                right: "b".into()
+            }
+        );
+        assert!(matches!(p(&["diff", "a"]), Mode::Invalid(_)));
+        // A folder called merge still opens with a path that is not the bare word.
+        assert_eq!(p(&["./merge"]), gui(Some("./merge"), false));
         assert_eq!(
             p(&["--version", "--verbose"]),
             Mode::Version { verbose: true }

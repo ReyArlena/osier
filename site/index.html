@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Osier - a fast, native Git GUI for Linux</title>
-  <meta name="description" content="Osier is a free, open source Git client for Linux, written in Rust and drawn on the GPU. Stage single lines, read your history as a graph, resolve conflicts in place and drive it all from the keyboard.">
+  <meta name="description" content="Osier is a free, open source Git client for Linux, written in Rust and drawn on the GPU. Stage single lines, read your history as a graph, merge in a three-way merge tool and drive it all from the keyboard.">
   <link rel="canonical" href="https://reyarlena.github.io/osier/">
   <meta name="theme-color" content="#11111b">
   <meta name="color-scheme" content="dark">
@@ -12,7 +12,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Osier">
   <meta property="og:title" content="Osier - a fast, native Git GUI for Linux">
-  <meta property="og:description" content="Stage single lines, read your history as a graph and resolve conflicts in place. Native Rust, drawn on the GPU, free and open source.">
+  <meta property="og:description" content="Stage single lines, read your history as a graph and merge in a three-way merge tool. Native Rust, drawn on the GPU, free and open source.">
   <meta property="og:url" content="https://reyarlena.github.io/osier/">
   <meta property="og:image" content="https://reyarlena.github.io/osier/assets/shots/hero.webp">
   <meta property="og:image:width" content="2672">
@@ -20,7 +20,7 @@
   <meta property="og:image:alt" content="Osier's Changes tab: a staged Rust file with its diff, the project sidebar and the commit box.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Osier - a fast, native Git GUI for Linux">
-  <meta name="twitter:description" content="Native Rust, drawn on the GPU. Line staging, a real commit graph, in-place conflict resolution and a keyboard for everything.">
+  <meta name="twitter:description" content="Native Rust, drawn on the GPU. Line staging, a real commit graph, a three-way merge tool and a keyboard for everything.">
   <meta name="twitter:image" content="https://reyarlena.github.io/osier/assets/shots/hero.webp">
 
   <link rel="icon" href="favicon.ico" sizes="any">
@@ -114,8 +114,8 @@
       </h1>
       <p class="lede">
         Osier is a Git client for Linux, written in Rust and drawn on your GPU.
-        Stage single lines, read your history as a graph and untangle merges
-        <strong>without waiting on your tools</strong>. It's on screen in about 140&nbsp;ms.
+        Stage single lines, read your history as a graph and untangle merges in a
+        three-way merge tool, <strong>without waiting on your tools</strong>. It's on screen in about 140&nbsp;ms.
       </p>
       <div class="hero-cta">
         <div class="cmd">
@@ -171,6 +171,30 @@
       </div>
 
       <div class="showcase">
+
+        <article class="feature wide reveal">
+          <div class="feature-copy">
+            <span class="feature-num">Merge tool</span>
+            <h3>Merge conflicts, minus the dread.</h3>
+            <p>A real three-way merge tool: your version, the result and theirs side by side,
+              joined by bands that show where each change lands. Take a change with
+              <code>&raquo;</code>, skip it with <code>&times;</code>, pull in every
+              non-conflicting change in one click, or just type in the result. Expand it to the
+              whole window and step through the conflicted files.</p>
+            <ul class="ticks">
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Changed words highlighted, panes that scroll together</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Your commit stays on the left, even mid-rebase</span></li>
+              <li><svg class="icon"><use href="#i-check"/></svg><span>Works as <code>git mergetool</code> and <code>git difftool</code>, from any terminal</span></li>
+            </ul>
+          </div>
+          <figure class="shot">
+            <img src="assets/shots/merge-tool.webp"
+                 srcset="assets/shots/merge-tool-1x.webp 870w, assets/shots/merge-tool.webp 1740w"
+                 sizes="(max-width: 1260px) 100vw, 1180px"
+                 width="1740" height="1055" loading="lazy" decoding="async"
+                 alt="The three-way merge tool on a TypeScript file: your version, the result and theirs side by side, with two conflicts in red, one-sided changes in blue, apply and ignore buttons and curved bands joining the panes.">
+          </figure>
+        </article>
 
         <article class="feature wide reveal">
           <div class="feature-copy">
@@ -239,27 +263,6 @@
         </article>
 
         <article class="feature flip reveal">
-          <div class="feature-copy">
-            <span class="feature-num">Conflicts</span>
-            <h3>Merge conflicts, minus the dread.</h3>
-            <p>Conflicts open right in the diff pane. Accept the current side, the incoming
-              side or both, block by block, or edit the result yourself. Interactive rebase,
-              cherry-pick and revert all land here when they collide.</p>
-            <ul class="ticks">
-              <li><svg class="icon"><use href="#i-check"/></svg><span>Continue or abort the merge from a banner, no terminal needed</span></li>
-              <li><svg class="icon"><use href="#i-check"/></svg><span>Take a whole file as ours or theirs in one click</span></li>
-            </ul>
-          </div>
-          <figure class="shot shot-narrow">
-            <img src="assets/shots/conflict.webp"
-                 srcset="assets/shots/conflict-1x.webp 531w, assets/shots/conflict.webp 1062w"
-                 sizes="(max-width: 860px) 100vw, 560px"
-                 width="1062" height="1060" loading="lazy" decoding="async"
-                 alt="A TypeScript merge conflict with Accept Current, Accept Incoming and Accept Both above each conflicting block.">
-          </figure>
-        </article>
-
-        <article class="feature reveal">
           <div class="feature-copy">
             <span class="feature-num">Looks</span>
             <h3>Easy on the eyes, day or night.</h3>
@@ -365,6 +368,26 @@
           <h3>Editable diffs</h3>
           <p>Fix a typo right in the diff, or revert a single hunk, without leaving the
             change you're reviewing.</p>
+        </div>
+        <div class="card" style="--tile: var(--green)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-square-terminal"/></svg></span>
+          <h3>Your git mergetool</h3>
+          <p>Point <code>git mergetool</code> and <code>git difftool</code> at Osier and every
+            conflict or diff opens in its own window, from any terminal. Any two files work too:
+            <code>osier merge</code>, <code>osier diff</code>.</p>
+        </div>
+        <div class="card" style="--tile: var(--teal)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-zap"/></svg></span>
+          <h3>Update project</h3>
+          <p>One button, like PhpStorm's: fetch, then merge or rebase, with your uncommitted
+            changes set aside and put back. It stops only for real conflicts, and remembers
+            your choice per repository if you want it to.</p>
+        </div>
+        <div class="card" style="--tile: var(--yellow)">
+          <span class="icon-tile"><svg class="icon"><use href="#i-git-graph"/></svg></span>
+          <h3>Rebase and squash</h3>
+          <p>Reorder, reword, squash or drop commits in an interactive rebase from the log, or
+            select a run of commits and squash them into one.</p>
         </div>
       </div>
     </div>
@@ -562,6 +585,16 @@
           <p>No. Osier runs your installed git, so it uses your config, hooks, credential
             helpers and SSH agent as they are. It keeps its own settings in
             <code>~/.config/osier</code> and only changes your repositories when you ask it to.</p>
+        </details>
+        <details>
+          <summary>Can I use it as git's mergetool and difftool?<svg class="icon"><use href="#i-plus"/></svg></summary>
+          <p>Yes. Register it once and <code>git mergetool</code> opens each conflicted file in
+            Osier's three-way merge tool, while <code>git difftool</code> opens each diff:</p>
+          <pre><code>git config --global merge.tool osier
+git config --global mergetool.osier.cmd 'osier merge "$LOCAL" "$BASE" "$REMOTE" "$MERGED"'
+git config --global mergetool.osier.trustExitCode true
+git config --global diff.tool osier
+git config --global difftool.osier.cmd 'osier diff "$LOCAL" "$REMOTE"'</code></pre>
         </details>
         <details>
           <summary>Is it safe on real work?<svg class="icon"><use href="#i-plus"/></svg></summary>

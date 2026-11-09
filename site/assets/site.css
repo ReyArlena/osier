@@ -1043,6 +1043,18 @@ kbd {
   color: var(--fg-muted);
 }
 
+.faq details pre {
+  margin: -10px 4px 22px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 /* ---------- final cta ---------- */
 
 .cta {
@@ -1185,6 +1197,11 @@ kbd {
 @media (max-width: 1000px) {
   .cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* An odd card count would leave a hole in two columns: the last card takes the row. */
+  .cards > .card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 
   .section-head {

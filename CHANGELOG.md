@@ -8,6 +8,28 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Three-way merge tool: a **3-way** layout next to Unified and Split shows conflicted files
+  as your version, the result and their version side by side, like PhpStorm's merge dialog.
+  Apply (`>>` / `<<`) or ignore (`X`) each change, apply every non-conflicting change from
+  one side or both, type in the result, accept a whole side, and Save or Apply (marks the
+  file resolved). Changes are highlighted word by word, joined across the panes, and the
+  panes scroll together. During a rebase your commit stays on the left.
+- Conflicted files open in the merge tool by default; Unified shows the inline conflict
+  blocks instead, and the choice is remembered (`diff.conflicts`), separately from the
+  unified / split choice for other files. A conflicted file without markers left says so and
+  offers 3-way or Mark resolved instead of an empty diff.
+- Unified and Split have the merge tool's bar: previous / next change (`F7`), file arrows
+  while expanded, a change count and a gear menu. Its settings (hide whitespace, word
+  highlights, synchronised scrolling, wrapping) are shared with the merge tool and saved.
+- The merge tool's panes stay lined up when one has many more lines above or below the
+  others: the shorter pane gets blank space instead of stopping at its first or last line.
+- **Expand** in the diff pane header (or `ctrl-shift-m`, `Esc` to go back) hides the sidebar
+  and file list in every layout and stays on while switching. In the merge tool it adds
+  previous / next conflicted file, and Apply moves on to the next file.
+- `osier merge <left> [<base>] <right> <output>` and `osier diff <left> <right>` open the
+  merge tool or the diff view in a window of their own, for any files and as git's
+  `mergetool` / `difftool` (setup in the README). Without a base every difference is a
+  conflict.
 - "Update project" button, left of Fetch: fetches, then merges or rebases with your
   uncommitted changes set aside and put back, like PhpStorm's Update Project. It asks which
   method to use each time, preselecting your last choice (or the repository's `pull.rebase`

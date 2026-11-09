@@ -33,6 +33,7 @@ gpui_kit::actions!(
         ToggleSidebar,
         ToggleCommandLog,
         ToggleCommitDetails,
+        ToggleDiffExpanded,
         ToggleTheme,
         OpenSettings,
         OpenCommandPalette,
@@ -173,6 +174,14 @@ pub struct Osier {
     pub(crate) commit_message: Entity<TextareaState>,
     /// Editor shown in the diff pane for "edit result" / "edit file"; `None` when viewing.
     pub(crate) editor: Option<crate::edit_pane::FileEditor>,
+    /// Three-way merge tool views for conflicted files (`merge_ops.rs`).
+    pub(crate) merges: crate::merge_ops::Merges,
+    /// The diff pane fills the window: sidebar and centre column hidden.
+    pub(crate) diff_expanded: bool,
+    /// The selected conflicted file has no conflict markers left (inline view).
+    pub(crate) diff_no_markers: bool,
+    /// File of a multi-file diff the toolbar's file arrows last moved to.
+    pub(crate) diff_file_ix: usize,
     /// File viewer for the Files tab (code, markdown, image, binary).
     pub(crate) viewer: Option<crate::viewer::Viewer>,
     /// Markdown files show rendered by default; this toggles to source.
@@ -329,14 +338,17 @@ impl Osier {
         } else {
             crate::config_watch::ConfigWatch::new(&paths.settings_file())
         };
-        let mode = match settings.diff.mode {
-            osier_config::settings::DiffMode::Unified => DiffMode::Unified,
-            osier_config::settings::DiffMode::Split => DiffMode::Split,
-        };
+        let mode = kit_mode(settings.diff.mode);
         let diff = cx.new(|cx| {
             DiffState::new([], cx)
                 .with_mode(mode)
                 .with_context_lines(Some(settings.diff.context_lines as usize))
+                .with_inline_unit(
+                    settings
+                        .diff
+                        .word_highlights
+                        .then_some(gpui_kit::component::diff::DiffInlineUnit::Word),
+                )
         });
         let commit_message = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -381,6 +393,10 @@ impl Osier {
             focus_handle: cx.focus_handle(),
             commit_message,
             editor: None,
+            merges: crate::merge_ops::Merges::default(),
+            diff_expanded: false,
+            diff_no_markers: false,
+            diff_file_ix: 0,
             viewer: None,
             markdown_as_code: false,
             files_filter,
@@ -1821,6 +1837,7 @@ impl Osier {
         self.diff_revision += 1;
         let revision = self.diff_revision;
         let context = self.settings.diff.context_lines;
+        let whitespace = self.settings.diff.whitespace;
         let Some(project) = self.active_project() else {
             self.diff_model = std::rc::Rc::new(Vec::new());
             self.set_diff_files(Vec::new(), cx);
@@ -1843,6 +1860,8 @@ impl Osier {
         self.diff_loading = true;
         self.diff_error = None;
         self.diff_too_large = None;
+        self.diff_no_markers = false;
+        self.diff_file_ix = 0;
         let limit = if self.diff_force_large {
             u64::MAX
         } else {
@@ -1850,7 +1869,9 @@ impl Osier {
         };
         self.diff_task = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { load_patch(&repo, &selection, context, limit) })
+                .background_spawn(async move {
+                    load_patch(&repo, &selection, context, limit, whitespace)
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.diff_revision != revision {
@@ -1861,6 +1882,11 @@ impl Osier {
                     Ok((files, model)) => {
                         this.diff_model = std::rc::Rc::new(model);
                         this.set_diff_files(files, cx);
+                    }
+                    Err(LoadError::NoMarkers) => {
+                        this.diff_no_markers = true;
+                        this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.set_diff_files(Vec::new(), cx);
                     }
                     Err(LoadError::TooLarge(size)) => {
                         this.diff_too_large = Some(size);
@@ -1941,12 +1967,13 @@ impl Osier {
         }
     }
 
-    pub(crate) fn toggle_soft_wrap(&mut self, cx: &mut Context<Self>) {
-        self.settings.diff.soft_wrap = !self.settings.diff.soft_wrap;
-        self.save_settings();
-        cx.notify();
+    pub(crate) fn toggle_soft_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut o = self.diff_options();
+        o.soft_wrap = !o.soft_wrap;
+        self.set_diff_options(o, window, cx);
     }
 
+    /// Unified or split, for files without conflicts.
     pub(crate) fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         self.diff.update(cx, |state, cx| state.set_mode(mode, cx));
         self.settings.diff.mode = match mode {
@@ -1954,6 +1981,23 @@ impl Osier {
             _ => osier_config::settings::DiffMode::Unified,
         };
         self.save_settings();
+        cx.notify();
+    }
+
+    /// How conflicted files show: the 3-way merge tool or inline conflict blocks.
+    pub(crate) fn set_conflict_view(
+        &mut self,
+        view: osier_config::settings::ConflictView,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.diff.conflicts = view;
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// Expand the diff pane over the sidebar and the centre column, or back.
+    pub(crate) fn toggle_diff_expanded(&mut self, cx: &mut Context<Self>) {
+        self.diff_expanded = !self.diff_expanded;
         cx.notify();
     }
 
@@ -2454,6 +2498,14 @@ impl Osier {
 }
 
 /// Conflicts first, then staged, unstaged, untracked.
+/// gpui-kit's layout for a diff mode setting.
+pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
+    match mode {
+        osier_config::settings::DiffMode::Split => DiffMode::Split,
+        osier_config::settings::DiffMode::Unified => DiffMode::Unified,
+    }
+}
+
 pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
     status
         .conflicted()
@@ -2471,6 +2523,8 @@ pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(St
 pub(crate) enum LoadError {
     TooLarge(u64),
     Git(String),
+    /// A conflicted file whose working copy has no conflict markers left.
+    NoMarkers,
 }
 
 impl From<osier_git::GitError> for LoadError {
@@ -2480,12 +2534,27 @@ impl From<osier_git::GitError> for LoadError {
 }
 
 /// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
+/// Whether a selection's diff can hide whitespace changes: read-only ones only, since hunks
+/// of a diff that hides them cannot be staged or discarded.
+pub(crate) fn whitespace_applies(selection: &Selection) -> bool {
+    matches!(
+        selection,
+        Selection::Commit { .. } | Selection::Compare { .. }
+    )
+}
+
 fn load_patch(
     repo: &Repository,
     selection: &Selection,
     context: u32,
     size_limit: u64,
+    whitespace: osier_config::settings::DiffWhitespace,
 ) -> Result<(Vec<DiffFile>, Vec<osier_git::diff::DiffFile>), LoadError> {
+    let hide = |o: &mut DiffOptions| {
+        use osier_config::settings::DiffWhitespace as W;
+        o.ignore_whitespace = whitespace == W::All;
+        o.ignore_space_change = whitespace == W::Trim;
+    };
     if let Selection::File { path, .. } = selection
         && let Ok(meta) = std::fs::metadata(repo.workdir().join(path))
         && meta.len() > size_limit
@@ -2501,6 +2570,9 @@ fn load_patch(
         // Current / Incoming / Both controls.
         let text = std::fs::read_to_string(repo.workdir().join(path))
             .map_err(|e| LoadError::Git(format!("{path}: {e}")))?;
+        if !osier_git::ops::integrate::has_conflict_markers(&text) {
+            return Err(LoadError::NoMarkers);
+        }
         let file = DiffFile::parse_conflicts(path.clone(), &text)
             .map_err(|e| LoadError::Git(e.to_string()))?;
         return Ok((vec![file], Vec::new()));
@@ -2523,6 +2595,7 @@ fn load_patch(
         Selection::Commit { hash } => {
             let mut o = DiffOptions::new(DiffTarget::Commit(hash.clone()));
             o.context_lines = context;
+            hide(&mut o);
             osier_git::diff::patch_text(repo, &o)?
         }
         Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new())),
@@ -2548,6 +2621,7 @@ fn load_patch(
             };
             let mut o = DiffOptions::new(target);
             o.context_lines = context;
+            hide(&mut o);
             osier_git::diff::patch_text(repo, &o)?
         }
     };
@@ -2581,6 +2655,7 @@ impl Render for Osier {
             });
         }
         let has_project = self.active.is_some();
+        let merge_fills = self.diff_expanded;
         v_flex()
             .track_focus(&self.focus_handle)
             .key_context("Osier")
@@ -2605,6 +2680,44 @@ impl Render for Osier {
             .on_action(
                 cx.listener(|this, _: &ToggleCommitDetails, _, cx| this.toggle_commit_details(cx)),
             )
+            .on_action(
+                cx.listener(|this, _: &ToggleDiffExpanded, _, cx| this.toggle_diff_expanded(cx)),
+            )
+            // Escape leaves the expanded diff pane (from an input that has nothing to do
+            // with it, or from anywhere else).
+            .on_action(
+                cx.listener(|this, _: &gpui_kit::component::input::Escape, _, cx| {
+                    if this.diff_expanded {
+                        this.toggle_diff_expanded(cx);
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                let m = &e.keystroke.modifiers;
+                // F7 / shift-F7: next / previous change (the merge tool takes them first).
+                if e.keystroke.key == "f7" && !m.control && !m.alt && this.diff_files > 0 {
+                    this.diff.update(cx, |s, cx| {
+                        if m.shift {
+                            s.previous_change(cx)
+                        } else {
+                            s.next_change(cx)
+                        }
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
+                if e.keystroke.key == "escape"
+                    && this.diff_expanded
+                    && !window.has_active_dialog(cx)
+                    && !window.has_active_sheet(cx)
+                {
+                    this.toggle_diff_expanded(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
@@ -2664,7 +2777,7 @@ impl Render for Osier {
                 div().flex_1().min_h_0().child(
                     h_flex()
                         .size_full()
-                        .when(self.sidebar_visible, |this| {
+                        .when(self.sidebar_visible && !merge_fills, |this| {
                             this.child(self.render_sidebar(window, cx))
                         })
                         .child(
@@ -2672,7 +2785,16 @@ impl Render for Osier {
                                 .flex_1()
                                 .min_w_0()
                                 .size_full()
-                                .child(
+                                .when(merge_fills, |this| {
+                                    this.child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .child(self.render_diff_pane(window, cx)),
+                                    )
+                                })
+                                .when(!merge_fills, |this| {
+                                    this.child(
                                     div().flex_1().min_h_0().child(
                                         h_resizable("panes")
                                             .on_resize(cx.listener(
@@ -2708,6 +2830,7 @@ impl Render for Osier {
                                             ),
                                     ),
                                 )
+                                })
                                 .when(self.command_log_visible, |this| {
                                     this.child(self.render_command_log(cx))
                                 }),
@@ -7553,5 +7676,478 @@ mod tests {
         h.read(cx, |o, _| {
             assert_eq!(o.updates.install, crate::update_ui::InstallState::Idle)
         });
+    }
+
+    // ----- three-way merge tool -----
+
+    /// A merge stopped on conflicts in `c.txt` (line 2 changed on both sides, line 6 only on
+    /// theirs) and, with `two`, in `d.txt` too. The diff pane is switched to 3-way through its
+    /// button and `c.txt` is selected.
+    fn three_way_merge(cx: &mut TestAppContext, two: bool) -> (TempRepo, Harness) {
+        use osier_git::ops::integrate::MergeMode;
+        let repo = TempRepo::new();
+        let commit = |c: &str, d: &str, message: &str| {
+            repo.write("c.txt", c);
+            repo.write("d.txt", d);
+            repo.git(["add", "c.txt", "d.txt"]);
+            repo.commit(message);
+        };
+        commit("a\nb\nc\nd\ne\nf\n", "base\n", "base");
+        repo.checkout_new("feature");
+        commit(
+            "a\nB-theirs\nc\nd\ne\nF\n",
+            if two { "theirs\n" } else { "base\n" },
+            "theirs",
+        );
+        repo.checkout("main");
+        commit(
+            "a\nB-ours\nc\nd\ne\nf\n",
+            if two { "ours\n" } else { "base\n" },
+            "ours",
+        );
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            o.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("c.txt".into(), Area::Conflicted, cx)
+        });
+        h.click(cx, "three-way");
+        // The versions load in the background; the gutter buttons appear once the panes
+        // have been laid out.
+        h.act(cx, |_, _, cx| cx.notify());
+        h.act(cx, |_, _, cx| cx.notify());
+        (repo, h)
+    }
+
+    fn merge_view(h: &Harness, cx: &mut TestAppContext) -> Entity<crate::merge_view::MergeView> {
+        h.read(cx, |o, _| {
+            o.merges
+                .views
+                .values()
+                .next()
+                .expect("a merge view")
+                .view
+                .clone()
+        })
+    }
+
+    fn conflicted_files(h: &Harness, cx: &mut TestAppContext) -> Vec<String> {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .status
+                .conflicted()
+                .map(|e| e.path.clone())
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn ui_three_way_apply_ignore_and_resolve(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        assert!(
+            h.bounds(cx, "merge-result").is_some(),
+            "the merge tool shows"
+        );
+        assert!(
+            h.bounds(cx, "apply-resolution").is_none(),
+            "inline controls are hidden"
+        );
+        let view = merge_view(&h, cx);
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).merge().pending_counts()),
+            (1, 1)
+        );
+        // The result starts as the base.
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nf\n"
+        );
+
+        h.click(cx, "merge-apply-all");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nF\n"
+        );
+        assert!(
+            h.bounds(cx, "merge-chunk-apply:left:0").is_some(),
+            "gutter buttons drawn"
+        );
+        h.click(cx, "merge-chunk-apply:left:0");
+        h.click(cx, "merge-chunk-ignore:right:0");
+        assert!(h.read(cx, |_, cx| view.read(cx).merge().is_resolved()));
+        assert!(
+            h.bounds(cx, "merge-chunk-apply:left:0").is_none(),
+            "decided chunks lose them"
+        );
+
+        h.click(cx, "merge-apply");
+        assert!(!h.has_settings(cx), "nothing undecided: no question");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nB-ours\nc\nd\ne\nF\n");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_append_the_second_side_and_revert(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        h.click(cx, "merge-chunk-apply:right:0");
+        h.act(cx, |_, _, cx| cx.notify());
+        h.click(cx, "merge-chunk-apply:left:0");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nB-theirs\nB-ours\nc\nd\ne\nf\n",
+            "the second side goes below the first"
+        );
+        h.click(cx, "merge-revert");
+        h.click(cx, "dialog-ok");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nf\n"
+        );
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).merge().pending_counts()),
+            (1, 1)
+        );
+    }
+
+    #[gpui::test]
+    fn ui_three_way_apply_with_undecided_changes_asks_first(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        h.click(cx, "merge-apply");
+        assert!(h.has_settings(cx), "asks before saving undecided changes");
+        h.click(cx, "dialog-cancel");
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        // ctrl-enter in the result is Apply too.
+        h.click(cx, "merge-result");
+        h.keys(cx, "ctrl-enter");
+        assert!(h.has_settings(cx), "ctrl-enter asks the same question");
+        h.click(cx, "dialog-ok");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nb\nc\nd\ne\nf\n", "saved as shown");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_accept_a_whole_side_and_typed_edits_count(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        // Typing into the result moves the chunks with it.
+        h.act(cx, |_, window, cx| {
+            let editor = view.read(cx).result_editor().clone();
+            editor.update(cx, |s, cx| {
+                s.set_selected_range(0..0, cx);
+                s.replace("top\n", window, cx);
+            });
+        });
+        h.read(cx, |_, cx| {
+            let v = view.read(cx);
+            assert_eq!(v.merge().chunks()[0].result, 2..3);
+            assert!(v.is_modified());
+        });
+        h.click(cx, "merge-accept-right");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nB-theirs\nc\nd\ne\nF\n");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_expand_and_walk_the_conflicted_files(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, true);
+        assert!(h.bounds(cx, "center-pane").is_some());
+        h.click(cx, "diff-expand");
+        assert!(h.bounds(cx, "center-pane").is_none(), "file list hidden");
+        assert!(h.bounds(cx, "merge-result").is_some());
+        h.click(cx, "merge-next-file");
+        h.act(cx, |_, _, cx| cx.notify());
+        let selected = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        assert_eq!(
+            selected,
+            Selection::File {
+                path: "d.txt".into(),
+                area: Area::Conflicted
+            }
+        );
+        assert!(
+            h.bounds(cx, "merge-result").is_some(),
+            "still the merge tool, still expanded"
+        );
+        assert!(h.bounds(cx, "center-pane").is_none());
+        // Resolving the last but one file moves on to the next; the progress made on another
+        // file is kept meanwhile.
+        h.click(cx, "merge-accept-left");
+        h.act(cx, |_, _, cx| cx.notify());
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        let selected = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        assert_eq!(
+            selected,
+            Selection::File {
+                path: "c.txt".into(),
+                area: Area::Conflicted
+            }
+        );
+        // Escape from the result editor goes back to the normal layout.
+        h.click(cx, "merge-result");
+        h.keys(cx, "escape");
+        assert!(
+            h.bounds(cx, "center-pane").is_some(),
+            "back to the normal layout"
+        );
+    }
+
+    #[gpui::test]
+    fn ui_conflicts_default_to_three_way_and_other_files_keep_their_layout(
+        cx: &mut TestAppContext,
+    ) {
+        use osier_config::settings::{ConflictView, DiffMode as Mode};
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "init");
+        repo.write("a.txt", "two\n");
+        let h = Harness::open(cx, &repo);
+        h.read(cx, |o, _| {
+            assert_eq!(o.settings.diff.conflicts, ConflictView::ThreeWay);
+            assert_eq!(o.settings.diff.mode, Mode::Unified);
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("a.txt".into(), Area::Unstaged, cx)
+        });
+        // 3-way is only for conflicts: disabled here, so a click changes nothing.
+        h.click(cx, "three-way");
+        h.click(cx, "split");
+        h.read(cx, |o, cx| {
+            assert_eq!(o.settings.diff.mode, Mode::Split);
+            assert_eq!(o.settings.diff.conflicts, ConflictView::ThreeWay);
+            assert_eq!(
+                o.diff.read(cx).mode(),
+                gpui_kit::component::diff::DiffMode::Split
+            );
+            assert!(o.three_way_target().is_none());
+        });
+        assert!(h.bounds(cx, "merge-result").is_none());
+    }
+
+    #[gpui::test]
+    fn ui_conflicts_inline_split_is_off_and_expand_survives_switching(cx: &mut TestAppContext) {
+        use osier_config::settings::{ConflictView, DiffMode as Mode};
+        let (_repo, h) = three_way_merge(cx, false);
+        h.click(cx, "diff-expand");
+        assert!(h.bounds(cx, "center-pane").is_none());
+        // Unified on a conflicted file switches to the inline blocks, still expanded.
+        h.click(cx, "unified");
+        h.read(cx, |o, _| {
+            assert_eq!(o.settings.diff.conflicts, ConflictView::Inline);
+            assert_eq!(
+                o.settings.diff.mode,
+                Mode::Unified,
+                "normal files untouched"
+            );
+        });
+        assert!(h.bounds(cx, "merge-result").is_none());
+        assert!(
+            h.bounds(cx, "apply-resolution").is_some(),
+            "inline controls"
+        );
+        assert!(h.bounds(cx, "center-pane").is_none(), "still expanded");
+        // Split has no conflict view: disabled.
+        h.click(cx, "split");
+        h.read(cx, |o, _| assert_eq!(o.settings.diff.mode, Mode::Unified));
+        h.click(cx, "three-way");
+        assert!(h.bounds(cx, "merge-result").is_some());
+        assert!(h.bounds(cx, "center-pane").is_none(), "still expanded");
+        h.click(cx, "diff-expand");
+        assert!(h.bounds(cx, "center-pane").is_some());
+    }
+
+    #[gpui::test]
+    fn ui_a_conflicted_file_without_markers_says_so(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        // Saved from the merge tool: the file has no markers but is still conflicted.
+        h.click(cx, "merge-save");
+        assert!(!repo.read("c.txt").contains("<<<<<<<"));
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        h.click(cx, "unified");
+        assert!(h.read(cx, |o, _| o.diff_no_markers));
+        assert!(h.bounds(cx, "no-markers-three-way").is_some());
+        h.click(cx, "no-markers-resolve");
+        assert!(conflicted_files(&h, cx).is_empty());
+    }
+
+    #[gpui::test]
+    fn ui_three_way_wraps_with_the_wrap_button(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        let wrap = h.read(cx, |o, _| o.settings.diff.soft_wrap);
+        assert_eq!(h.read(cx, |_, cx| view.read(cx).soft_wrap()), wrap);
+        h.click(cx, "wrap");
+        assert_eq!(h.read(cx, |_, cx| view.read(cx).soft_wrap()), !wrap);
+        // The gutter buttons are still drawn with wrapping changed.
+        h.act(cx, |_, _, cx| cx.notify());
+        assert!(h.bounds(cx, "merge-chunk-apply:left:0").is_some());
+    }
+
+    #[gpui::test]
+    fn ui_diff_toolbar_walks_files_and_hides_whitespace_in_commits(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "one\n");
+        repo.write("b.txt", "x  y\n");
+        repo.write("c.txt", "three\n");
+        repo.git(["add", "."]);
+        repo.commit("init");
+        repo.write("a.txt", "ONE\n");
+        repo.write("b.txt", "x y\n");
+        repo.write("c.txt", "THREE\n");
+        repo.git(["add", "."]);
+        repo.commit("change");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Log, cx));
+        h.act(cx, |o, _, cx| o.select_commit(0, cx));
+        assert!(
+            h.bounds(cx, "diff-next").is_some(),
+            "toolbar on a two-way diff"
+        );
+        assert!(
+            h.bounds(cx, "diff-prev-file").is_none(),
+            "file arrows only while expanded"
+        );
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 3);
+        h.click(cx, "diff-expand");
+        h.click(cx, "diff-next-file");
+        assert_eq!(h.read(cx, |o, _| o.diff_file_ix), 1);
+        h.click(cx, "diff-prev-file");
+        h.click(cx, "diff-prev-file");
+        assert_eq!(h.read(cx, |o, _| o.diff_file_ix), 2, "wraps");
+        // Hiding whitespace drops the file that only changed its spacing.
+        h.act(cx, |o, window, cx| {
+            let mut opts = o.diff_options();
+            opts.whitespace = osier_git::merge3::Whitespace::Ignore;
+            o.set_diff_options(opts, window, cx)
+        });
+        assert_eq!(h.read(cx, |o, _| o.diff_files), 2);
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.settings.diff.whitespace,
+                osier_config::settings::DiffWhitespace::All
+            )
+        });
+        h.click(cx, "diff-next");
+        assert!(h.bounds(cx, "center-pane").is_none(), "still expanded");
+    }
+
+    #[gpui::test]
+    fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a  b\n", "init");
+        repo.commit_file("z.txt", "z\n", "z");
+        repo.write("a.txt", "a b\n");
+        repo.write("z.txt", "Z\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            let mut opts = o.diff_options();
+            opts.whitespace = osier_git::merge3::Whitespace::Ignore;
+            o.set_diff_options(opts, window, cx)
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("a.txt".into(), Area::Unstaged, cx)
+        });
+        assert_eq!(
+            h.read(cx, |o, _| o.diff_files),
+            1,
+            "stageable diffs stay exact"
+        );
+        h.click(cx, "diff-expand");
+        h.click(cx, "diff-next-file");
+        let selected = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        assert_eq!(
+            selected,
+            Selection::File {
+                path: "z.txt".into(),
+                area: Area::Unstaged
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn ui_diff_settings_are_shared_with_the_merge_tool(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        h.act(cx, |o, window, cx| {
+            let mut opts = o.diff_options();
+            opts.highlight_words = false;
+            opts.sync_scroll = false;
+            o.set_diff_options(opts, window, cx)
+        });
+        h.read(cx, |o, cx| {
+            let v = view.read(cx).options();
+            assert!(!v.highlight_words && !v.sync_scroll);
+            assert!(!o.settings.diff.word_highlights);
+            assert_eq!(o.diff.read(cx).inline_unit(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn ui_three_way_scrolling_one_pane_is_not_pulled_back_by_a_focused_one(
+        cx: &mut TestAppContext,
+    ) {
+        use osier_git::ops::integrate::MergeMode;
+        // Both sides dropped a long header the base still has: the result is much longer
+        // above, so the side panes get a gap while the result scrolls.
+        let repo = TempRepo::new();
+        let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        let header: String = (1..=60).map(|i| format!("header {i}\n")).collect();
+        repo.commit_file("c.txt", &format!("{header}{body}"), "base");
+        repo.checkout_new("feature");
+        repo.commit_file("c.txt", &body.replace("line 20\n", "theirs\n"), "theirs");
+        repo.checkout("main");
+        repo.commit_file("c.txt", &body.replace("line 20\n", "ours\n"), "ours");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            o.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("c.txt".into(), Area::Conflicted, cx)
+        });
+        h.act(cx, |_, _, cx| cx.notify());
+        h.act(cx, |_, _, cx| cx.notify());
+        let view = merge_view(&h, cx);
+        // The caret sits in the right pane, as after clicking into it.
+        h.click(cx, "merge-right");
+        let focused = cx
+            .update_window(h.window, |_, window, cx| {
+                view.read(cx).editors_focus(window, cx)
+            })
+            .unwrap();
+        assert_eq!(focused, [false, false, true]);
+        let result = h.bounds(cx, "merge-result").expect("result pane");
+        let scroll = |h: &Harness, cx: &mut TestAppContext, dy: f32| {
+            let mut v = h.visual(cx);
+            v.simulate_event(gpui::ScrollEvent {
+                position: result.center(),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+            h.act(cx, |_, _, cx| cx.notify());
+            // Let the focused pane's caret blink: it redraws on its own.
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(1200));
+            cx.run_until_parked();
+            h.act(cx, |_, _, cx| cx.notify());
+        };
+        let result_y = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |_, cx| {
+                f32::from(view.read(cx).result_editor().read(cx).scroll_offset().y)
+            })
+        };
+        scroll(&h, cx, -400.);
+        let down = result_y(&h, cx);
+        assert!(down < -300., "scrolled down: {down}");
+        scroll(&h, cx, 150.);
+        let up = result_y(&h, cx);
+        assert!(
+            (up - (down + 150.)).abs() < 2.,
+            "scrolling up stays where the user put it: {down} then {up}"
+        );
     }
 }

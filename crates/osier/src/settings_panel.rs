@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::diff::DiffMode;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::setting::{
     NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
@@ -204,10 +203,7 @@ impl Osier {
         self.apply_appearance(cx);
         self.apply_recent_status_mode(cx);
         self.rescan_projects(cx);
-        let mode = match self.settings.diff.mode {
-            osier_config::settings::DiffMode::Split => DiffMode::Split,
-            osier_config::settings::DiffMode::Unified => DiffMode::Unified,
-        };
+        let mode = crate::app::kit_mode(self.settings.diff.mode);
         self.diff.update(cx, |state, cx| state.set_mode(mode, cx));
         cx.notify();
     }
@@ -732,6 +728,27 @@ fn diff_page(view: &Entity<Osier>) -> SettingPage {
                     }),
                 )
                 .default_value("unified".to_string()),
+            ),
+            SettingItem::new(
+                "Conflicted files",
+                SettingField::dropdown(
+                    vec![
+                        ("three-way".into(), "3-way merge tool".into()),
+                        ("inline".into(), "Inline conflict blocks".into()),
+                    ],
+                    get(view, |o| match o.settings.diff.conflicts {
+                        osier_config::settings::ConflictView::ThreeWay => "three-way".into(),
+                        osier_config::settings::ConflictView::Inline => "inline".into(),
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.diff.conflicts = if v.as_ref() == "inline" {
+                            osier_config::settings::ConflictView::Inline
+                        } else {
+                            osier_config::settings::ConflictView::ThreeWay
+                        }
+                    }),
+                )
+                .default_value("three-way".to_string()),
             ),
             SettingItem::new(
                 "Context lines",

@@ -166,6 +166,123 @@ pub fn conflict_versions(repo: &Repository, path: &str) -> Result<ConflictVersio
     Ok(v)
 }
 
+/// How the merge tool shows a conflict: which index stage goes on the left (always the
+/// user's own work) and on the right, with a label for each pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictSides {
+    /// 2 or 3. During a rebase the user's commit is stage 3, so the sides swap.
+    pub left_stage: u8,
+    pub right_stage: u8,
+    pub left_label: String,
+    pub right_label: String,
+}
+
+impl ConflictSides {
+    /// Pick the left and right texts out of the three versions.
+    pub fn pick(&self, v: &ConflictVersions) -> (Option<String>, Option<String>) {
+        let stage = |n: u8| {
+            if n == 3 {
+                v.theirs.clone()
+            } else {
+                v.ours.clone()
+            }
+        };
+        (stage(self.left_stage), stage(self.right_stage))
+    }
+}
+
+fn git_dir_line(repo: &Repository, name: &str) -> Option<String> {
+    std::fs::read_to_string(repo.git_dir().join(name))
+        .ok()
+        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+        .filter(|s| !s.is_empty())
+}
+
+/// A readable name for a commit: a branch or tag pointing at it, else its short hash.
+fn commit_name(repo: &Repository, oid: &str) -> String {
+    let refs = repo
+        .git([
+            "for-each-ref",
+            "--points-at",
+            oid,
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    refs.lines()
+        .find(|l| !l.is_empty() && !l.ends_with("/HEAD"))
+        .map(str::to_string)
+        .unwrap_or_else(|| oid[..oid.len().min(7)].to_string())
+}
+
+fn current_branch(repo: &Repository) -> Option<String> {
+    repo.git(["symbolic-ref", "--short", "-q", "HEAD"])
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Labels and stage order for the merge tool, from the operation in progress.
+pub fn conflict_sides(repo: &Repository) -> ConflictSides {
+    let short = |oid: &str| oid[..oid.len().min(7)].to_string();
+    let yours = |branch: Option<String>| match branch {
+        Some(b) => format!("Yours ({b})"),
+        None => "Yours".to_string(),
+    };
+    match repo.in_progress() {
+        Some(InProgress::Rebase) => {
+            let branch = ["rebase-merge/head-name", "rebase-apply/head-name"]
+                .iter()
+                .find_map(|f| git_dir_line(repo, f))
+                .map(|r| r.trim_start_matches("refs/heads/").to_string());
+            let commit = git_dir_line(repo, "REBASE_HEAD");
+            let onto = ["rebase-merge/onto", "rebase-apply/onto"]
+                .iter()
+                .find_map(|f| git_dir_line(repo, f));
+            let left_label = match (commit, branch) {
+                (Some(c), Some(b)) => format!("Yours ({} from {b})", short(&c)),
+                (Some(c), None) => format!("Yours ({})", short(&c)),
+                (None, b) => yours(b),
+            };
+            ConflictSides {
+                left_stage: 3,
+                right_stage: 2,
+                left_label,
+                right_label: match onto {
+                    Some(o) => format!("Upstream ({})", commit_name(repo, &o)),
+                    None => "Upstream".into(),
+                },
+            }
+        }
+        other => {
+            let right_label = match other {
+                Some(InProgress::Merge) => match git_dir_line(repo, "MERGE_HEAD") {
+                    Some(h) => format!("Theirs ({})", commit_name(repo, &h)),
+                    None => "Theirs".into(),
+                },
+                Some(InProgress::CherryPick) => match git_dir_line(repo, "CHERRY_PICK_HEAD") {
+                    Some(h) => format!("Picked commit ({})", short(&h)),
+                    None => "Picked commit".into(),
+                },
+                Some(InProgress::Revert) => match git_dir_line(repo, "REVERT_HEAD") {
+                    Some(h) => format!("Undoing {}", short(&h)),
+                    None => "Undoing a commit".into(),
+                },
+                _ => "Theirs".into(),
+            };
+            ConflictSides {
+                left_stage: 2,
+                right_stage: 3,
+                left_label: yours(current_branch(repo)),
+                right_label,
+            }
+        }
+    }
+}
+
 /// Write `content` to the working tree copy of `path` (the merge editor's result).
 pub fn write_resolution(repo: &Repository, path: &str, content: &str) -> Result<()> {
     let rel = Path::new(path);
@@ -312,6 +429,13 @@ mod tests {
         assert_eq!(v.ours.as_deref(), Some("ours\n"));
         assert_eq!(v.theirs.as_deref(), Some("theirs\n"));
         assert!(has_conflict_markers(&t.read("c.txt")));
+        let sides = conflict_sides(&repo);
+        assert_eq!(sides.left_label, "Yours (main)");
+        assert_eq!(sides.right_label, "Theirs (feature)");
+        assert_eq!(
+            sides.pick(&v),
+            (Some("ours\n".to_string()), Some("theirs\n".to_string()))
+        );
 
         resolve_with(&repo, &["c.txt".into()], ConflictSide::Ours).unwrap();
         assert_eq!(t.read("c.txt"), "ours\n");
@@ -363,6 +487,22 @@ mod tests {
             Err(GitError::Conflict(_))
         ));
         assert_eq!(repo.in_progress(), Some(InProgress::Rebase));
+        // The merge tool puts the replayed commit (stage 3) on the left as "yours".
+        let sides = conflict_sides(&repo);
+        assert_eq!((sides.left_stage, sides.right_stage), (3, 2));
+        assert!(
+            sides.left_label.starts_with("Yours ("),
+            "{}",
+            sides.left_label
+        );
+        assert!(
+            sides.left_label.ends_with(" from feature)"),
+            "{}",
+            sides.left_label
+        );
+        assert_eq!(sides.right_label, "Upstream (main)");
+        let v = conflict_versions(&repo, "c.txt").unwrap();
+        assert_eq!(sides.pick(&v).0.as_deref(), Some("theirs\n"));
         // During a rebase "theirs" is the commit being replayed (the feature change).
         resolve_with(&repo, &["c.txt".into()], ConflictSide::Theirs).unwrap();
         assert_eq!(t.read("c.txt"), "theirs\n");

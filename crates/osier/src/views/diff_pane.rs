@@ -122,10 +122,34 @@ impl Osier {
 
         let editing = self.editor.is_some();
         let viewing = matches!(&selection, Selection::WorkFile { .. });
+        let three_way = self.three_way_target().is_some();
+        let three_way_mode =
+            self.settings.diff.conflicts == osier_config::settings::ConflictView::ThreeWay;
+        let conflicted = matches!(&area, Some((_, Area::Conflicted)));
         let body: AnyElement = if let Some(view) = &blame {
             self.render_blame(view, cx)
         } else if let Some(editor) = &self.editor {
             Editor::new(&editor.state).size_full().into_any_element()
+        } else if three_way {
+            match self.merge_view(window, cx) {
+                Ok(Some(view)) => view.into_any_element(),
+                Ok(None) => v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .child(Spinner::new())
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child("Reading the versions…"),
+                    )
+                    .into_any_element(),
+                Err(error) => self
+                    .empty_state("Cannot show the merge tool", &error, cx)
+                    .into_any_element(),
+            }
         } else if viewing {
             self.render_viewer(window, cx)
         } else if self.diff_loading {
@@ -156,6 +180,50 @@ impl Osier {
                         .small()
                         .label("Load anyway")
                         .on_click(cx.listener(|this, _, _, cx| this.force_large_diff(cx))),
+                )
+                .into_any_element()
+        } else if self.diff_no_markers
+            && let Some((path, Area::Conflicted)) = &area
+        {
+            let path = path.clone();
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_6()
+                .child(div().font_medium().child("No conflict markers left"))
+                .child(div().text_sm().text_center().text_color(muted).child(
+                    "The file was edited or saved after the merge stopped, so there are no \
+                     conflict blocks to show. Mark it resolved if it is right, or merge it again \
+                     from the original versions with 3-way.",
+                ))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("no-markers-three-way")
+                                .test_id("no-markers-three-way")
+                                .outline()
+                                .small()
+                                .label("Open in 3-way")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_conflict_view(
+                                        osier_config::settings::ConflictView::ThreeWay,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .child(
+                            Button::new("no-markers-resolve")
+                                .test_id("no-markers-resolve")
+                                .primary()
+                                .small()
+                                .label("Mark resolved")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.mark_resolved(path.clone(), window, cx)
+                                })),
+                        ),
                 )
                 .into_any_element()
         } else if let Some(error) = &self.diff_error {
@@ -293,6 +361,18 @@ impl Osier {
             view.into_any_element()
         };
 
+        let showing_diff = blame.is_none()
+            && !editing
+            && !three_way
+            && !viewing
+            && !self.diff_loading
+            && self.diff_too_large.is_none()
+            && !self.diff_no_markers
+            && self.diff_error.is_none()
+            && selection != Selection::None
+            && self.diff_files > 0;
+        let toolbar = showing_diff.then(|| self.render_diff_toolbar(&selection, cx));
+
         v_flex()
             .size_full()
             .min_w_0()
@@ -317,7 +397,9 @@ impl Osier {
                             .child(title),
                     )
                     .when_some(tag, |this, t| this.child(t))
-                    .when(lfs, |this| this.child(Tag::warning().xsmall().child("LFS pointer")))
+                    .when(lfs, |this| {
+                        this.child(Tag::warning().xsmall().child("LFS pointer"))
+                    })
                     .when(self.diff_files > 1, |this| {
                         this.child(
                             div()
@@ -327,35 +409,41 @@ impl Osier {
                         )
                     })
                     .child(div().flex_1())
-                    .when(matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing, |this| {
-                        this.child(
-                            Button::new("md-rendered").test_id("md-rendered")
-                                .ghost()
-                                .xsmall()
-                                .label("Rendered")
-                                .selected(!self.markdown_as_code)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.markdown_as_code {
-                                        this.toggle_markdown_code(cx)
-                                    }
-                                })),
-                        )
-                        .child(
-                            Button::new("md-code").test_id("md-code")
-                                .ghost()
-                                .xsmall()
-                                .label("Code")
-                                .selected(self.markdown_as_code)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if !this.markdown_as_code {
-                                        this.toggle_markdown_code(cx)
-                                    }
-                                })),
-                        )
-                    })
+                    .when(
+                        matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing,
+                        |this| {
+                            this.child(
+                                Button::new("md-rendered")
+                                    .test_id("md-rendered")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Rendered")
+                                    .selected(!self.markdown_as_code)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.markdown_as_code {
+                                            this.toggle_markdown_code(cx)
+                                        }
+                                    })),
+                            )
+                            .child(
+                                Button::new("md-code")
+                                    .test_id("md-code")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Code")
+                                    .selected(self.markdown_as_code)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if !this.markdown_as_code {
+                                            this.toggle_markdown_code(cx)
+                                        }
+                                    })),
+                            )
+                        },
+                    )
                     .when(blame.is_some(), |this| {
                         this.child(
-                            Button::new("close-blame").test_id("close-blame")
+                            Button::new("close-blame")
+                                .test_id("close-blame")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::X)
@@ -375,36 +463,44 @@ impl Osier {
                     })
                     .when(viewing && !editing, |this| {
                         this.child(
-                            Button::new("view-edit").test_id("view-edit")
+                            Button::new("view-edit")
+                                .test_id("view-edit")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Pencil)
                                 .tooltip("Edit this file in place")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
+                                ),
                         )
                     })
                     .when(editing, |this| {
                         let (save_label, save_tip) = self.save_button_text(cx);
                         this.child(
-                            Button::new("editor-save").test_id("editor-save")
+                            Button::new("editor-save")
+                                .test_id("editor-save")
                                 .primary()
                                 .xsmall()
                                 .label(save_label)
                                 .tooltip(save_tip)
-                                .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.save_editor(window, cx)),
+                                ),
                         )
                         .child(
-                            Button::new("editor-cancel").test_id("editor-cancel")
+                            Button::new("editor-cancel")
+                                .test_id("editor-cancel")
                                 .ghost()
                                 .xsmall()
                                 .label("Cancel")
                                 .on_click(cx.listener(|this, _, _, cx| this.close_editor(cx))),
                         )
                     })
-                    .when(!editing && matches!(&area, Some((_, Area::Conflicted))), |this| {
+                    .when(!editing && !three_way && conflicted, |this| {
                         let ready = self.can_apply_resolution(cx);
                         this.child(
-                            Button::new("apply-resolution").test_id("apply-resolution")
+                            Button::new("apply-resolution")
+                                .test_id("apply-resolution")
                                 .primary()
                                 .xsmall()
                                 .label("Apply resolution")
@@ -414,27 +510,38 @@ impl Osier {
                                 } else {
                                     "Pick Accept Current / Incoming / Both on every conflict first"
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| this.apply_conflict_resolution(window, cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_conflict_resolution(window, cx)
+                                })),
                         )
                         .child(
-                            Button::new("edit-result").test_id("edit-result")
+                            Button::new("edit-result")
+                                .test_id("edit-result")
                                 .outline()
                                 .xsmall()
                                 .label("Edit result")
                                 .tooltip("Edit the merged file by hand")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
+                                ),
                         )
                     })
-                    .when(!editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted), |this| {
-                        this.child(
-                            Button::new("edit-file").test_id("edit-file")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Pencil)
-                                .tooltip("Edit this file in place")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
-                        )
-                    })
+                    .when(
+                        !editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted),
+                        |this| {
+                            this.child(
+                                Button::new("edit-file")
+                                    .test_id("edit-file")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Lucide::Pencil)
+                                    .tooltip("Edit this file in place")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_editor(window, cx)
+                                    })),
+                            )
+                        },
+                    )
                     .children(line_actions.iter().map(|action| {
                         let action = *action;
                         Button::new(SharedString::from(format!("lines-{}", action.label())))
@@ -446,49 +553,119 @@ impl Osier {
                             }))
                     }))
                     .when(!viewing && !editing, |this| {
-
-                        this
-                        .child(
-                            Button::new("unified").test_id("unified")
+                        this.child(
+                            Button::new("unified")
+                                .test_id("unified")
                                 .ghost()
                                 .xsmall()
                                 .label("Unified")
-                                .selected(mode == DiffMode::Unified)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.set_diff_mode(DiffMode::Unified, cx)
+                                .selected(if conflicted {
+                                    !three_way_mode
+                                } else {
+                                    mode == DiffMode::Unified
+                                })
+                                .tooltip(if conflicted {
+                                    "Conflict blocks inline, with Accept buttons"
+                                } else {
+                                    "Changes in one column"
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if conflicted {
+                                        this.set_conflict_view(
+                                            osier_config::settings::ConflictView::Inline,
+                                            cx,
+                                        )
+                                    } else {
+                                        this.set_diff_mode(DiffMode::Unified, cx)
+                                    }
                                 })),
                         )
                         .child(
-                            Button::new("split").test_id("split")
+                            Button::new("split")
+                                .test_id("split")
                                 .ghost()
                                 .xsmall()
                                 .label("Split")
-                                .selected(mode == DiffMode::Split)
+                                .selected(!conflicted && mode == DiffMode::Split)
+                                // Conflict blocks only come in one column.
+                                .disabled(conflicted)
+                                .tooltip(if conflicted {
+                                    "Not for conflicts: 3-way puts the two sides next to each other"
+                                } else {
+                                    "Before and after side by side"
+                                })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_diff_mode(DiffMode::Split, cx)
                                 })),
                         )
                         .child(
-                            Button::new("wrap").test_id("wrap")
+                            Button::new("three-way")
+                                .test_id("three-way")
+                                .ghost()
+                                .xsmall()
+                                .label("3-way")
+                                .selected(conflicted && three_way_mode)
+                                .disabled(!conflicted)
+                                .tooltip(if conflicted {
+                                    "Merge tool: yours, the result and theirs side by side"
+                                } else {
+                                    "Merge tool, for files with conflicts"
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_conflict_view(
+                                        osier_config::settings::ConflictView::ThreeWay,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .child(
+                            Button::new("wrap")
+                                .test_id("wrap")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::TextWrap)
                                 .selected(self.settings.diff.soft_wrap)
                                 .tooltip("Wrap long lines")
-                                .on_click(cx.listener(|this, _, _, cx| this.toggle_soft_wrap(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_soft_wrap(window, cx)
+                                })),
                         )
                         .child(Separator::vertical().h_4())
                         .child(
-                            Button::new("revert").test_id("revert")
+                            Button::new("revert")
+                                .test_id("revert")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Undo2)
                                 .disabled(true)
                                 .tooltip("Revert file"),
                         )
-
-                    }),
+                    })
+                    .child(
+                        Button::new("diff-expand")
+                            .test_id("diff-expand")
+                            .ghost()
+                            .xsmall()
+                            .icon(if self.diff_expanded {
+                                Lucide::Minimize2
+                            } else {
+                                Lucide::Maximize2
+                            })
+                            .label(if self.diff_expanded {
+                                "Collapse"
+                            } else {
+                                "Expand"
+                            })
+                            .selected(self.diff_expanded)
+                            .tooltip(if self.diff_expanded {
+                                "Back to the normal layout (Esc)"
+                            } else {
+                                "Hide the sidebar and file list"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_diff_expanded(cx))),
+                    ),
             )
+            .children(toolbar)
             .child(
                 div()
                     .flex_1()
@@ -497,6 +674,211 @@ impl Osier {
                     .overflow_hidden()
                     .child(body),
             )
+    }
+
+    /// Which file of the list the expanded diff pane is on, and how many there are: the
+    /// Changes list for a changed file, the diff's own files for a commit or comparison.
+    fn diff_file_position(&self, selection: &Selection) -> Option<(usize, usize)> {
+        match selection {
+            Selection::File { path, area } => {
+                let snapshot = self.active_project()?.snapshot.as_ref()?;
+                let items = crate::project::ordered_changes(&snapshot.status);
+                let ix = items.iter().position(|(p, a)| p == path && a == area)?;
+                Some((ix + 1, items.len()))
+            }
+            _ if self.diff_files > 1 => Some((self.diff_file_ix + 1, self.diff_files)),
+            _ => None,
+        }
+    }
+
+    /// The expanded diff pane's file arrows.
+    pub(crate) fn step_diff_file(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let selection = match self.active_project() {
+            Some(p) => p.selection.clone(),
+            None => return,
+        };
+        if let Selection::File { path, area } = &selection {
+            let Some(items) = self
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .map(|s| crate::project::ordered_changes(&s.status))
+            else {
+                return;
+            };
+            if items.is_empty() {
+                return;
+            }
+            let ix = items
+                .iter()
+                .position(|(p, a)| p == path && a == area)
+                .unwrap_or(0);
+            let next = (ix as isize + delta).rem_euclid(items.len() as isize) as usize;
+            let (path, area) = items[next].clone();
+            self.select_file(path, area, cx);
+            return;
+        }
+        let paths: Vec<String> = self
+            .diff
+            .read(cx)
+            .files()
+            .iter()
+            .map(|f| f.path().to_string())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let next = (self.diff_file_ix as isize + delta).rem_euclid(paths.len() as isize) as usize;
+        self.diff_file_ix = next;
+        let path = paths[next].clone();
+        self.diff.update(cx, |s, cx| s.scroll_to_file(&path, cx));
+        cx.notify();
+    }
+
+    /// The bar under the header for unified and split: change and file navigation, a count
+    /// and the shared view settings, laid out like the merge tool's.
+    fn render_diff_toolbar(&self, selection: &Selection, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let split = self.diff.read(cx).mode() == DiffMode::Split;
+        let options = self.diff_options();
+        let whitespace_ok = crate::app::whitespace_applies(selection);
+        let hunks: usize = self.diff_model.iter().map(|f| f.hunks.len()).sum();
+        let position = if self.diff_expanded {
+            self.diff_file_position(selection)
+        } else {
+            None
+        };
+        let weak = cx.entity().downgrade();
+        h_flex()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .items_center()
+            .flex_wrap()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                Button::new("diff-prev")
+                    .test_id("diff-prev")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::ArrowUp)
+                    .tooltip("Previous change (shift-F7)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.diff.update(cx, |s, cx| s.previous_change(cx))
+                    })),
+            )
+            .child(
+                Button::new("diff-next")
+                    .test_id("diff-next")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::ArrowDown)
+                    .tooltip("Next change (F7)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.diff.update(cx, |s, cx| s.next_change(cx))
+                    })),
+            )
+            .child(div().flex_1())
+            .when_some(position, |this, (n, total)| {
+                this.child(
+                    Button::new("diff-prev-file")
+                        .test_id("diff-prev-file")
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::ChevronLeft)
+                        .disabled(total < 2)
+                        .tooltip("Previous file")
+                        .on_click(cx.listener(|this, _, _, cx| this.step_diff_file(-1, cx))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("File {n} of {total}")),
+                )
+                .child(
+                    Button::new("diff-next-file")
+                        .test_id("diff-next-file")
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::ChevronRight)
+                        .disabled(total < 2)
+                        .tooltip("Next file")
+                        .on_click(cx.listener(|this, _, _, cx| this.step_diff_file(1, cx))),
+                )
+                .child(Separator::vertical().h_4())
+            })
+            .when(!self.diff_model.is_empty(), |this| {
+                this.child(
+                    div()
+                        .test_id("diff-counter")
+                        .text_xs()
+                        .child(crate::format::count(hunks, "change")),
+                )
+            })
+            .child(
+                Button::new("diff-settings")
+                    .test_id("diff-settings")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Settings)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        use osier_git::merge3::Whitespace;
+                        menu = menu.item(
+                            PopupMenuItem::new("Synchronize scrolling")
+                                .checked(split)
+                                .disabled(true),
+                        );
+                        menu = menu.separator().label("Ignore differences");
+                        for (label, value) in [
+                            ("None", Whitespace::Exact),
+                            ("Trim whitespace", Whitespace::Trim),
+                            ("Ignore whitespace", Whitespace::Ignore),
+                        ] {
+                            let w = weak.clone();
+                            let shown = if whitespace_ok {
+                                options.whitespace
+                            } else {
+                                Whitespace::Exact
+                            };
+                            menu = menu.item(
+                                PopupMenuItem::new(label)
+                                    .checked(shown == value)
+                                    .disabled(!whitespace_ok)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = w.update(cx, |this, cx| {
+                                            let mut o = this.diff_options();
+                                            o.whitespace = value;
+                                            this.set_diff_options(o, window, cx)
+                                        });
+                                    }),
+                            );
+                        }
+                        let w = weak.clone();
+                        menu = menu.separator().item(
+                            PopupMenuItem::new("Highlight changed words")
+                                .checked(options.highlight_words)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        let mut o = this.diff_options();
+                                        o.highlight_words = !o.highlight_words;
+                                        this.set_diff_options(o, window, cx)
+                                    });
+                                }),
+                        );
+                        let w = weak.clone();
+                        menu.item(
+                            PopupMenuItem::new("Wrap long lines")
+                                .checked(options.soft_wrap)
+                                .on_click(move |_, window, cx| {
+                                    let _ =
+                                        w.update(cx, |this, cx| this.toggle_soft_wrap(window, cx));
+                                }),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     fn render_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
