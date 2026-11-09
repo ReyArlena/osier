@@ -536,7 +536,7 @@ impl Osier {
             true,
             move |this, window, cx| {
                 this.start_remote(
-                    crate::remote_ops::RemoteOp::Push(remote::PushOptions {
+                    crate::app::remote_ops::RemoteOp::Push(remote::PushOptions {
                         remote: Some(remote_name.clone()),
                         delete: Some(format!("refs/tags/{name}")),
                         ..Default::default()

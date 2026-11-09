@@ -94,7 +94,7 @@ impl Osier {
             format!("Committed: {subject}"),
             move |repo| commit_ops::commit(repo, &options).map(|_| ()),
             |this, window, cx| {
-                this.start_remote(crate::remote_ops::RemoteOp::push_default(), window, cx)
+                this.start_remote(crate::app::remote_ops::RemoteOp::push_default(), window, cx)
             },
             window,
             cx,

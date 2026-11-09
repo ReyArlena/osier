@@ -20,8 +20,8 @@ use osier_git::ops::remote::{
 use osier_git::{CancelToken, GitError, Progress};
 
 use crate::app::Osier;
+use crate::app::ops::describe;
 use crate::dialog_hint::{hint, hinted_radio};
-use crate::ops::describe;
 
 #[derive(Debug, Clone)]
 pub enum RemoteOp {
@@ -325,7 +325,7 @@ impl Osier {
                     this.refresh_project(ix, cx);
                 }
                 if stash_clashed {
-                    window.push_notification(crate::ops::autostash_clash_notice(), cx);
+                    window.push_notification(crate::app::ops::autostash_clash_notice(), cx);
                 }
                 if let (RemoteOp::Pull(_) | RemoteOp::Update(_), Ok(_), Some(before), Some(after)) =
                     (&op, &result, &entry.head_before, &entry.head_after)
@@ -529,7 +529,7 @@ impl Osier {
                     "Choose a GitHub account from the Push menu, or add your ssh key to the agent (`ssh-add`)."
                 };
                 window.push_notification(
-                    crate::ops::with_command_log(
+                    crate::app::ops::with_command_log(
                         Notification::error(format!("{text}. {hint}"))
                             .title(format!("{label} failed: authentication")),
                         &error,
@@ -540,7 +540,7 @@ impl Osier {
             }
             (_, GitError::Network(_)) => {
                 window.push_notification(
-                    crate::ops::with_command_log(
+                    crate::app::ops::with_command_log(
                         Notification::error(describe(&error))
                             .title(format!("{label} failed: remote unreachable")),
                         &error,
@@ -557,7 +557,7 @@ impl Osier {
             }
             _ => {
                 window.push_notification(
-                    crate::ops::with_command_log(
+                    crate::app::ops::with_command_log(
                         Notification::error(describe(&error)).title(format!("{label} failed")),
                         &error,
                         cx,
@@ -868,7 +868,7 @@ impl Osier {
         };
         // Offered only when deleting loses nothing.
         let flag = plan.merged.then(|| {
-            crate::actions::PromptFlag::new("Also delete the branch here", true).hint(
+            crate::app::actions::PromptFlag::new("Also delete the branch here", true).hint(
                 "Nothing is lost: all of its commits are already on the remote's default branch.",
             )
         });

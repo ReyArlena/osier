@@ -9,9 +9,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::blame::BlameLine;
 
+use crate::app::ops::describe;
 use crate::app::{Osier, Tab};
 use crate::format::iso_date;
-use crate::ops::describe;
 use crate::project::Selection;
 
 #[derive(Debug, Clone)]

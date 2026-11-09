@@ -654,7 +654,7 @@ impl Osier {
         let ctx = self.clone_context(&plan);
         let (tx, rx) = mpsc::channel();
         let label = format!("Clone {}", plan.label);
-        self.remote_job = Some(crate::remote_ops::RemoteJob::new(
+        self.remote_job = Some(crate::app::remote_ops::RemoteJob::new(
             label.clone(),
             ctx.cancel.clone().unwrap_or_default(),
             rx,
@@ -737,7 +737,7 @@ impl Osier {
         let mut entry = HistoryEntry::now(target, label.to_string());
         if let Err(e) = &result {
             entry.ok = false;
-            entry.error = Some(crate::ops::describe(e));
+            entry.error = Some(crate::app::ops::describe(e));
         }
         if let Err(e) = history::append(&self.paths, &entry) {
             tracing::warn!(error = %e, "could not write history");
@@ -761,7 +761,8 @@ impl Osier {
                 window.push_notification(format!("{label}: cancelled"), cx);
             }
             Err(e) => window.push_notification(
-                Notification::warning(crate::ops::describe(&e)).title(format!("{label} failed")),
+                Notification::warning(crate::app::ops::describe(&e))
+                    .title(format!("{label} failed")),
                 cx,
             ),
         }
@@ -1292,7 +1293,7 @@ impl Osier {
             Some(account) => {
                 let label = format!("Create {}/{}", plan.new.owner, plan.new.name);
                 let (_tx, rx) = mpsc::channel();
-                self.remote_job = Some(crate::remote_ops::RemoteJob::new(
+                self.remote_job = Some(crate::app::remote_ops::RemoteJob::new(
                     label.clone(),
                     CancelToken::new(),
                     rx,

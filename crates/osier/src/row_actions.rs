@@ -9,8 +9,8 @@ use osier_git::ops::integrate::MergeMode;
 use osier_git::ops::patches::PatchSource;
 use osier_git::ops::reset::ResetMode;
 
+use crate::app::ignore_ops::{PatternKind, RowState};
 use crate::app::{Osier, Tab};
-use crate::ignore_ops::{PatternKind, RowState};
 use crate::keymap::{ActionSpec, Scope};
 use crate::project::{Area, Selection};
 

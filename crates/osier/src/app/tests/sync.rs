@@ -69,7 +69,7 @@ fn switching_over_conflicting_changes_offers_to_save_them(cx: &mut TestAppContex
 
 #[gpui::test]
 fn push_fetch_and_pull_through_the_app(cx: &mut TestAppContext) {
-    use crate::remote_ops::RemoteOp;
+    use crate::app::remote_ops::RemoteOp;
     use osier_git::ops::remote::PushOptions;
 
     let repo = TempRepo::new();
@@ -160,7 +160,7 @@ fn pushed_then_untracked_elsewhere() -> (TempRepo, TempRepo) {
 
 #[gpui::test]
 fn pull_offers_to_keep_newly_ignored_files(cx: &mut TestAppContext) {
-    use crate::remote_ops::RemoteOp;
+    use crate::app::remote_ops::RemoteOp;
 
     let (repo, _other) = pushed_then_untracked_elsewhere();
     let h = Harness::open(cx, &repo);
@@ -179,7 +179,7 @@ fn pull_offers_to_keep_newly_ignored_files(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ui_pull_in_a_rebase_configured_repo_offers_stash_and_pull(cx: &mut TestAppContext) {
-    use crate::remote_ops::RemoteOp;
+    use crate::app::remote_ops::RemoteOp;
 
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
@@ -345,7 +345,7 @@ fn ui_per_project_choices_show_as_pills_and_forget(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn pull_skips_the_keep_offer_when_turned_off(cx: &mut TestAppContext) {
-    use crate::remote_ops::RemoteOp;
+    use crate::app::remote_ops::RemoteOp;
 
     let (repo, _other) = pushed_then_untracked_elsewhere();
     let h = Harness::open(cx, &repo);
@@ -378,7 +378,7 @@ fn ui_pulling_a_branch_deleted_after_merge_offers_main(cx: &mut TestAppContext) 
     ]);
     let h = Harness::open(cx, &t);
     h.act(cx, |o, window, cx| {
-        o.start_remote(crate::remote_ops::RemoteOp::pull_default(), window, cx)
+        o.start_remote(crate::app::remote_ops::RemoteOp::pull_default(), window, cx)
     });
     assert!(h.has_settings(cx), "a dialog explains and offers main");
     h.click(cx, "dialog-ok");
@@ -415,7 +415,7 @@ fn ui_fetch_and_prune_offers_to_delete_merged_branches_once(cx: &mut TestAppCont
     }
     let h = Harness::open(cx, &t);
     let prune = || {
-        crate::remote_ops::RemoteOp::Fetch(osier_git::ops::remote::FetchOptions {
+        crate::app::remote_ops::RemoteOp::Fetch(osier_git::ops::remote::FetchOptions {
             remote: None,
             prune: true,
             tags: false,

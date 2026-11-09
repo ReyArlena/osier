@@ -17,7 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
-use crate::hunk_ops::HunkAction;
+use crate::app::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 

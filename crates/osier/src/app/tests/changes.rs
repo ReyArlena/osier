@@ -201,7 +201,7 @@ fn status_has(h: &Harness, cx: &mut TestAppContext, line: &str) -> bool {
 
 #[gpui::test]
 fn ignoring_an_untracked_file_takes_effect_at_once_and_twice_is_a_no_op(cx: &mut TestAppContext) {
-    use crate::ignore_ops::{PatternKind, RowState};
+    use crate::app::ignore_ops::{PatternKind, RowState};
     use osier_git::ops::ignore::IgnoreFile;
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
@@ -247,7 +247,7 @@ fn ignoring_an_untracked_file_takes_effect_at_once_and_twice_is_a_no_op(cx: &mut
 
 #[gpui::test]
 fn ignoring_places_the_pattern_with_related_lines(cx: &mut TestAppContext) {
-    use crate::ignore_ops::{PatternKind, RowState};
+    use crate::app::ignore_ops::{PatternKind, RowState};
     use osier_git::ops::ignore::IgnoreFile;
     let repo = TempRepo::new();
     repo.commit_file(
@@ -282,7 +282,7 @@ fn ignoring_places_the_pattern_with_related_lines(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ignoring_a_tracked_file_asks_and_untracks_by_default(cx: &mut TestAppContext) {
-    use crate::ignore_ops::{PatternKind, RowState};
+    use crate::app::ignore_ops::{PatternKind, RowState};
     use osier_git::ops::ignore::IgnoreFile;
     let repo = TempRepo::new();
     repo.commit_file("config/local.php", "secret\n", "tracked");
@@ -469,7 +469,7 @@ fn ui_confirm_dialogs_have_working_buttons(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ui_clicking_the_option_words_toggles_the_checkbox(cx: &mut TestAppContext) {
-    use crate::ignore_ops::RowState;
+    use crate::app::ignore_ops::RowState;
     let repo = TempRepo::new();
     repo.commit_file("notes.txt", "n\n", "tracked");
     let h = Harness::open(cx, &repo);
@@ -494,7 +494,7 @@ fn ui_clicking_the_option_words_toggles_the_checkbox(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn untrack_offers_to_ignore_too(cx: &mut TestAppContext) {
-    use crate::ignore_ops::RowState;
+    use crate::app::ignore_ops::RowState;
     let repo = TempRepo::new();
     repo.commit_file("build/out.bin", "b\n", "tracked build output");
     let h = Harness::open(cx, &repo);
@@ -641,7 +641,7 @@ fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
         osier.hunk_action(
             "f.txt".into(),
             1,
-            crate::hunk_ops::HunkAction::Stage,
+            crate::app::hunk_ops::HunkAction::Stage,
             window,
             cx,
         )

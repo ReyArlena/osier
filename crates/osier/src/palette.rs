@@ -172,7 +172,7 @@ fn sub(
 
 /// Every palette command, in display order.
 pub(crate) fn commands() -> Vec<PaletteCommand> {
-    use crate::remote_ops::RemoteOp;
+    use crate::app::remote_ops::RemoteOp;
     vec![
         sub(
             "General",

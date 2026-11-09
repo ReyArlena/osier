@@ -251,7 +251,7 @@ impl Osier {
         body: impl Into<SharedString>,
         ok_label: impl Into<SharedString>,
         danger: bool,
-        flags: Vec<crate::actions::PromptFlag>,
+        flags: Vec<crate::app::actions::PromptFlag>,
         on_ok: impl Fn(&mut Osier, &mut Window, &mut Context<Osier>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,

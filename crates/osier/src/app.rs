@@ -18,13 +18,27 @@ use crate::command_log::UiCommandSink;
 use crate::project::Project;
 use crate::test_ids::TestId as _;
 
+pub(crate) mod actions;
 mod appearance;
+mod changes_ops;
+mod external;
+pub(crate) mod github;
+pub(crate) mod hunk_ops;
+pub(crate) mod ignore_ops;
 mod keymap;
+pub(crate) mod merge_ops;
+pub(crate) mod ops;
 mod panes;
+mod patch_ops;
+mod prefix;
 mod projects;
+mod rebase_dialog;
 mod refresh;
+pub(crate) mod remote_ops;
 mod selection;
 mod sidebar;
+mod squash_ui;
+mod update_project;
 
 pub(crate) use selection::{first_change, kit_mode, whitespace_applies};
 
@@ -182,7 +196,7 @@ pub struct Osier {
     /// Editor shown in the diff pane for "edit result" / "edit file"; `None` when viewing.
     pub(crate) editor: Option<crate::edit_pane::FileEditor>,
     /// Three-way merge tool views for conflicted files (`merge_ops.rs`).
-    pub(crate) merges: crate::merge_ops::Merges,
+    pub(crate) merges: crate::app::merge_ops::Merges,
     /// The diff pane fills the window: sidebar and centre column hidden.
     pub(crate) diff_expanded: bool,
     /// The selected conflicted file has no conflict markers left (inline view).
@@ -218,7 +232,7 @@ pub struct Osier {
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
     pub(crate) state_dirty: bool,
     /// Running fetch/pull/push, if any.
-    pub(crate) remote_job: Option<crate::remote_ops::RemoteJob>,
+    pub(crate) remote_job: Option<crate::app::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
     pub(crate) gh_accounts: Vec<osier_auth::GhAccount>,
     /// `gh_accounts` has been asked for (whatever the answer); the clone and create
@@ -414,7 +428,7 @@ impl Osier {
             focus_handle: cx.focus_handle(),
             commit_message,
             editor: None,
-            merges: crate::merge_ops::Merges::default(),
+            merges: crate::app::merge_ops::Merges::default(),
             diff_expanded: false,
             diff_no_markers: false,
             diff_file_ix: 0,
@@ -855,13 +869,13 @@ impl Render for Osier {
                 cx.listener(|this, _: &UpdateProject, window, cx| this.update_project(window, cx)),
             )
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
-                this.start_remote(crate::remote_ops::RemoteOp::fetch_all(), window, cx)
+                this.start_remote(crate::app::remote_ops::RemoteOp::fetch_all(), window, cx)
             }))
             .on_action(cx.listener(|this, _: &Pull, window, cx| {
-                this.start_remote(crate::remote_ops::RemoteOp::pull_default(), window, cx)
+                this.start_remote(crate::app::remote_ops::RemoteOp::pull_default(), window, cx)
             }))
             .on_action(cx.listener(|this, _: &Push, window, cx| {
-                this.start_remote(crate::remote_ops::RemoteOp::push_default(), window, cx)
+                this.start_remote(crate::app::remote_ops::RemoteOp::push_default(), window, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleStageSelected, window, cx| {
                 this.toggle_stage_selected(window, cx)

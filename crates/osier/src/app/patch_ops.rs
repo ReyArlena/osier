@@ -11,8 +11,8 @@ use osier_config::patches::{self, StoredPatch};
 use osier_git::ops::discard;
 use osier_git::ops::patches::{self as git_patches, ApplyOptions, ApplyReport, PatchSource};
 
+use crate::app::ops::describe;
 use crate::app::{Osier, Tab};
-use crate::ops::describe;
 use crate::project::{Area, Selection};
 
 type After = Rc<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;

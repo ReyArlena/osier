@@ -20,8 +20,8 @@ use osier_config::state::UpdateChoice;
 use osier_git::ops::remote::{PullOptions, PullStrategy};
 
 use crate::app::Osier;
+use crate::app::remote_ops::RemoteOp;
 use crate::dialog_hint::{hint, hinted_radio};
-use crate::remote_ops::RemoteOp;
 use crate::test_ids::TestId as _;
 
 fn strategy_name(s: PullStrategy) -> &'static str {

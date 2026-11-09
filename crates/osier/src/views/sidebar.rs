@@ -430,7 +430,8 @@ impl Osier {
             let fade = RowFade::new(cx);
             let is_active = self.active == Some(ix);
             let on_github = project.snapshot.as_ref().is_some_and(|s| {
-                crate::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref()).is_some()
+                crate::app::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref())
+                    .is_some()
             });
             let item = SidebarMenuItem::new(project.name.clone())
                 .icon(

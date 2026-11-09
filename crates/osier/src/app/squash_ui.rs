@@ -44,7 +44,7 @@ impl Osier {
             let _ = this.update_in(cx, |this, window, cx| match plan {
                 Ok(plan) => this.open_squash_dialog(plan, window, cx),
                 Err(error) => window.push_notification(
-                    Notification::warning(crate::ops::describe(&error))
+                    Notification::warning(crate::app::ops::describe(&error))
                         .title("Cannot squash these commits"),
                     cx,
                 ),
@@ -104,7 +104,10 @@ impl Osier {
         });
         let weak = cx.entity().downgrade();
         // Commits get replayed over uncommitted changes: git needs them set aside.
-        let stash = std::rc::Rc::new(plan.needs_stash.then(crate::actions::PromptFlag::autostash));
+        let stash = std::rc::Rc::new(
+            plan.needs_stash
+                .then(crate::app::actions::PromptFlag::autostash),
+        );
         let plan = Arc::new(plan);
         let focus = message.clone();
         window.open_dialog(cx, move |dialog, window, cx| {

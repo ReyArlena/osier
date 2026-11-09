@@ -287,7 +287,7 @@ impl Osier {
                                 if area == Area::Conflicted {
                                     return menu;
                                 }
-                                let row = crate::ignore_ops::RowState {
+                                let row = crate::app::ignore_ops::RowState {
                                     // Untracked folders are listed whole, as `dir/`.
                                     is_dir: p9.ends_with('/'),
                                     tracked: area != Area::Untracked,

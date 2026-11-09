@@ -3,7 +3,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use osier_git::ops::remote::{FetchOptions, PullOptions, PullStrategy, PushOptions};
 
-use crate::remote_ops::RemoteOp;
+use crate::app::remote_ops::RemoteOp;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, TitleBar, h_flex,

@@ -696,7 +696,7 @@ impl Osier {
                         move |_ix, entry, menu, _window, _cx| {
                             let path = entry.item().id.to_string();
                             let is_folder = entry.is_folder();
-                            let row = crate::ignore_ops::RowState {
+                            let row = crate::app::ignore_ops::RowState {
                                 is_dir: is_folder,
                                 tracked: tracked.contains(&path),
                             };
