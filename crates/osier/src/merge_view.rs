@@ -319,6 +319,11 @@ impl MergeView {
         self.editors[1].read(cx).value().to_string()
     }
 
+    #[cfg(test)]
+    pub fn editors_focus(&self, window: &Window, cx: &App) -> [bool; 3] {
+        [0, 1, 2].map(|i| self.editors[i].read(cx).focus_handle(cx).is_focused(window))
+    }
+
     pub fn result_editor(&self) -> &Entity<EditorState> {
         &self.editors[1]
     }
@@ -615,10 +620,10 @@ impl MergeView {
     }
 
     /// An editor notified: it scrolled, or the user typed or moved the caret in it.
-    fn pane_changed(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editors[i].read(cx).focus_handle(cx).is_focused(window) {
-            self.driver.set(i);
-        }
+    fn pane_changed(&mut self, i: usize, _: &mut Window, cx: &mut Context<Self>) {
+        // Only input in a pane (wheel, click, keys) makes it the driver. Focus alone must not:
+        // a focused pane redraws on its own (the caret blinks), and following it back would
+        // pull the pane the user is scrolling to wherever this one maps.
         let offset = self.editors[i].read(cx).scroll_offset().y;
         if offset == self.last_scroll[i] {
             return;
@@ -832,18 +837,20 @@ fn paint_pane(window: &mut Window, g: &PaneGeometry, pane: usize, chunks: &[Chun
     }
 }
 
-/// The top or bottom edge of a band: straight for `fl` from `x0` at `ya`, a curve, then
-/// straight for `fr` into `x1` at `yb`.
+/// The top or bottom edge of a band from `x0` (at `ya`) to `x1` (at `yb`): straight for `f0`
+/// next to `x0`, a curve, then straight for `f1` next to `x1`. Works in either direction, so
+/// the return edge of a filled band keeps its straight parts inside the gutter.
 fn band_edge(
     p: &mut PathBuilder,
     x0: Pixels,
     x1: Pixels,
     ya: Pixels,
     yb: Pixels,
-    fl: Pixels,
-    fr: Pixels,
+    f0: Pixels,
+    f1: Pixels,
 ) {
-    let (c0, c1) = (x0 + fl, x1 - fr);
+    let dir = if x1 >= x0 { 1. } else { -1. };
+    let (c0, c1) = (x0 + f0 * dir, x1 - f1 * dir);
     let mid = c0 + (c1 - c0) / 2.;
     p.line_to(point(c0, ya));
     p.cubic_bezier_to(point(c1, yb), point(mid, ya), point(mid, yb));
@@ -1179,8 +1186,10 @@ impl Render for MergeView {
         let pane = |i: usize, readonly: bool, chunks: Rc<Vec<ChunkPaint>>| {
             let state = self.editors[i].clone();
             let geometry = geometry.clone();
+            let driver = self.driver.clone();
             div()
                 .test_id(["merge-left", "merge-result", "merge-right"][i])
+                .capture_key_down(move |_, _, _| driver.set(i))
                 .relative()
                 .flex_1()
                 .min_w_0()

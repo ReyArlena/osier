@@ -8085,4 +8085,69 @@ mod tests {
             assert_eq!(o.diff.read(cx).inline_unit(), None);
         });
     }
+
+    #[gpui::test]
+    fn ui_three_way_scrolling_one_pane_is_not_pulled_back_by_a_focused_one(
+        cx: &mut TestAppContext,
+    ) {
+        use osier_git::ops::integrate::MergeMode;
+        // Both sides dropped a long header the base still has: the result is much longer
+        // above, so the side panes get a gap while the result scrolls.
+        let repo = TempRepo::new();
+        let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        let header: String = (1..=60).map(|i| format!("header {i}\n")).collect();
+        repo.commit_file("c.txt", &format!("{header}{body}"), "base");
+        repo.checkout_new("feature");
+        repo.commit_file("c.txt", &body.replace("line 20\n", "theirs\n"), "theirs");
+        repo.checkout("main");
+        repo.commit_file("c.txt", &body.replace("line 20\n", "ours\n"), "ours");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            o.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("c.txt".into(), Area::Conflicted, cx)
+        });
+        h.act(cx, |_, _, cx| cx.notify());
+        h.act(cx, |_, _, cx| cx.notify());
+        let view = merge_view(&h, cx);
+        // The caret sits in the right pane, as after clicking into it.
+        h.click(cx, "merge-right");
+        let focused = cx
+            .update_window(h.window, |_, window, cx| {
+                view.read(cx).editors_focus(window, cx)
+            })
+            .unwrap();
+        assert_eq!(focused, [false, false, true]);
+        let result = h.bounds(cx, "merge-result").expect("result pane");
+        let scroll = |h: &Harness, cx: &mut TestAppContext, dy: f32| {
+            let mut v = h.visual(cx);
+            v.simulate_event(gpui::ScrollEvent {
+                position: result.center(),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+            h.act(cx, |_, _, cx| cx.notify());
+            // Let the focused pane's caret blink: it redraws on its own.
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(1200));
+            cx.run_until_parked();
+            h.act(cx, |_, _, cx| cx.notify());
+        };
+        let result_y = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |_, cx| {
+                f32::from(view.read(cx).result_editor().read(cx).scroll_offset().y)
+            })
+        };
+        scroll(&h, cx, -400.);
+        let down = result_y(&h, cx);
+        assert!(down < -300., "scrolled down: {down}");
+        scroll(&h, cx, 150.);
+        let up = result_y(&h, cx);
+        assert!(
+            (up - (down + 150.)).abs() < 2.,
+            "scrolling up stays where the user put it: {down} then {up}"
+        );
+    }
 }
