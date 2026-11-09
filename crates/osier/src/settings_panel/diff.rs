@@ -15,6 +15,7 @@ use super::{get, set};
 pub(super) fn diff_page(view: &Entity<Osier>) -> SettingPage {
     let d = Settings::default().diff;
     SettingPage::new("Diff")
+        .description("How changes are laid out in the diff pane.")
         .icon(Icon::new(Lucide::FileDiff))
         .resettable(true)
         .group(SettingGroup::new().title("Diff pane").items(vec![

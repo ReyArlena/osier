@@ -17,6 +17,7 @@ pub(super) fn editors_page(view: &Entity<Osier>) -> SettingPage {
     }
     options.push(("custom".into(), "Custom command (below)".into()));
     SettingPage::new("Editors")
+        .description("The editor that opens files and repositories from Osier.")
         .icon(Icon::new(Lucide::SquarePen))
         .resettable(true)
         .group(

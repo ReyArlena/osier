@@ -15,6 +15,7 @@ use super::{get, set};
 pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
     let defaults = Settings::default();
     SettingPage::new("Git")
+        .description("The log, pulling, the Git config tab, prompts and the file viewer.")
         .icon(Icon::new(Lucide::GitBranch))
         .resettable(true)
         .group(SettingGroup::new().title("Log").items(vec![

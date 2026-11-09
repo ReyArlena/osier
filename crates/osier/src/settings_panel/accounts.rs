@@ -59,6 +59,7 @@ pub(super) fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let v1 = view.clone();
     let v3 = view.clone();
     let mut page = SettingPage::new("Accounts")
+        .description("The GitHub accounts and ssh keys used to reach remotes.")
         .icon(Icon::new(Lucide::KeyRound))
         .group(
             SettingGroup::new()

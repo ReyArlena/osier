@@ -27,7 +27,7 @@ All notable changes to Osier are documented here. The format follows
 - Syntax colours that sit too close to the editor background are lifted until they read,
   whatever the theme: comments above all, which most themes draw in a border grey (1.2:1
   inside a changed word on Catppuccin Mocha). Hue stays, so the theme still looks like
-  itself. On by default; "Readable syntax colours" under Settings > Appearance > Theme turns
+  itself. On by default; "Readable syntax colours" under Settings > Appearance > Contrast turns
   it off (`syntax_contrast` in config.toml).
 - A Notifications panel: every toast the app showed this session, newest first, with its
   time and, for git failures, the same "View command log" button, so a message that slid
@@ -40,6 +40,10 @@ All notable changes to Osier are documented here. The format follows
 
 - Error toasts put their "View command log" button under the message instead of beside it,
   so the message gets the full width.
+- Settings has a cleaner layout: each group sits on its own card, every page has a short
+  description, the header is a separate bar and the sidebar runs to the dialog's edges.
+  Theme cards fill the width in an even grid, and Appearance is split into Theme, Dark
+  theme, Light theme, Contrast and Status bar.
 
 ### Removed
 
@@ -48,6 +52,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Controls on the right of settings rows all end at the same edge: the highlighted groups
+  (Updates, project status, per-project choices), the slider values and the Keymap + buttons
+  sat further in than the rest.
 - Git commands that take a long list of paths no longer hang when git answers faster than
   Osier can send the list. This left the Files tab without ignored files in repositories
   with many of them (eg `target/`), and could stop the check for files a pull removed after

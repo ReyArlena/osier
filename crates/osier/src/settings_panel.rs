@@ -5,11 +5,14 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::group_box::GroupBoxVariant;
 use gpui_kit::component::setting::{
     SelectIndex, SettingGroup, SettingItem, SettingPage, Settings as SettingsView,
 };
-use gpui_kit::component::{ActiveTheme as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::*;
 use osier_config::Settings;
 
@@ -73,6 +76,41 @@ fn kv(label: &str, value: impl Into<SharedString>, cx: &App) -> impl IntoElement
                 .text_sm()
                 .font_family(cx.theme().mono_font_family.clone())
                 .child(value.into()),
+        )
+}
+
+/// The settings title bar: the app's chrome colour (like the main title bar), the page
+/// area below stays the content colour, so the two read as separate surfaces.
+fn header(radius: Pixels, root_focus: FocusHandle, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    h_flex()
+        .flex_none()
+        .h(px(48.))
+        .pl_4()
+        .pr_2()
+        .gap_2()
+        .items_center()
+        .bg(theme.title_bar)
+        .border_b_1()
+        .border_color(theme.border)
+        .rounded_t(radius)
+        .child(
+            Icon::new(Lucide::Settings)
+                .small()
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().flex_1().font_semibold().child("Settings"))
+        .child(
+            Button::new("settings-close")
+                .test_id("settings-close")
+                .ghost()
+                .small()
+                .icon(Lucide::X)
+                .tooltip("Close")
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    root_focus.focus(window, cx);
+                }),
         )
 }
 
@@ -148,43 +186,62 @@ impl Osier {
             let viewport = window.viewport_size();
             let width = (viewport.width * 0.9).min(px(1100.));
             let height = (viewport.height * 0.8).min(px(820.));
-            let root_focus = root_focus.clone();
             let (view, focus) = (view.clone(), focus.clone());
+            let close_focus = root_focus.clone();
+            let root_focus = root_focus.clone();
             dialog
-                .title("Settings")
                 .w(width)
                 .centered()
+                // No padding and no stock title: the header bar and the settings sidebar run
+                // to the dialog's edges, like the title bar and sidebar of the main window.
+                .p_0()
+                .close_button(false)
                 .overlay_closable(true)
                 // Put focus back on the app so shortcuts keep working after closing.
                 .on_close(move |_, window, cx| root_focus.focus(window, cx))
                 .content(move |content, window, cx| {
                     let pages = pages(&view, window, cx);
+                    // Inside the dialog's 1px border, so one pixel less than its radius.
+                    let radius = (cx.theme().radius_lg - px(1.)).max(px(0.));
+                    let mut sidebar_style = StyleRefinement::default();
+                    sidebar_style = sidebar_style.rounded_bl(radius);
+                    let settings = SettingsView::new("osier-settings")
+                        .with_group_variant(GroupBoxVariant::Fill)
+                        .sidebar_style(&sidebar_style)
+                        .pages(pages);
+                    let settings = match target {
+                        Some(t) => settings.default_selected_index(SelectIndex {
+                            page_ix: t.page,
+                            group_ix: Some(t.group),
+                        }),
+                        None => settings,
+                    };
                     content.child(
-                        div()
+                        v_flex()
                             .w_full()
                             .h(height)
-                            .track_focus(&focus)
-                            .key_context("OsierSettings")
-                            .on_action({
-                                let focus = focus.clone();
-                                // `/`: the settings page's own search box. It lives inside
-                                // gpui-kit's component, out of reach, but it is the first tab
-                                // stop after this container.
-                                move |_: &crate::app::FocusSettingsSearch, window, cx| {
-                                    focus.focus(window, cx);
-                                    window.focus_next(cx);
-                                }
-                            })
                             .test_id("settings-dialog")
-                            .child(match target {
-                                Some(t) => SettingsView::new("osier-settings")
-                                    .pages(pages)
-                                    .default_selected_index(SelectIndex {
-                                        page_ix: t.page,
-                                        group_ix: Some(t.group),
-                                    }),
-                                None => SettingsView::new("osier-settings").pages(pages),
-                            }),
+                            .child(header(radius, close_focus.clone(), cx))
+                            .child(
+                                // The header's close button stays outside this container, so
+                                // the search box is still the first tab stop after it.
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .track_focus(&focus)
+                                    .key_context("OsierSettings")
+                                    .on_action({
+                                        let focus = focus.clone();
+                                        // `/`: the settings page's own search box. It lives
+                                        // inside gpui-kit's component, out of reach, but it
+                                        // is the first tab stop after this container.
+                                        move |_: &crate::app::FocusSettingsSearch, window, cx| {
+                                            focus.focus(window, cx);
+                                            window.focus_next(cx);
+                                        }
+                                    })
+                                    .child(settings),
+                            ),
                     )
                 })
         });
@@ -395,8 +452,8 @@ fn highlight_alpha(elapsed: Duration) -> f32 {
     (1. - fade).max(0.)
 }
 
-/// A group that can be flashed by `open_settings_at`. Padding with a matching negative
-/// margin gives the tint room around the text without moving anything.
+/// A group that can be flashed by `open_settings_at`. Side padding with a matching negative
+/// margin gives the tint room around the card without moving anything.
 pub(crate) fn highlightable(
     group: SettingGroup,
     target: SettingsTarget,
@@ -408,8 +465,16 @@ pub(crate) fn highlightable(
         .settings_highlight
         .filter(|(t, _)| *t == target)
         .map_or(0., |(_, since)| highlight_alpha(since.elapsed()));
+    // Sideways only: the page already gives every group its vertical padding, and
+    // overriding it would move this group closer to its neighbours. `w_auto` instead of
+    // the group's full width, so the negative margins widen it on both sides; with full
+    // width they only shift it left and its controls end short of the other groups'.
     let pad = px(10.);
-    let group = group.p(pad).m(-pad).rounded(cx.theme().radius);
+    let group = group
+        .px(pad)
+        .mx(-pad)
+        .w_auto()
+        .rounded(cx.theme().radius_lg);
     if alpha > 0. {
         group.bg(cx.theme().primary.opacity(0.14 * alpha))
     } else {
@@ -443,7 +508,10 @@ fn pages(view: &Entity<Osier>, window: &mut Window, cx: &mut App) -> Vec<Setting
 }
 
 fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<SettingPage> {
-    vec![
+    // A larger page title with its description close under it.
+    let mut header = StyleRefinement::default();
+    header = header.text_lg().gap_1().pt_5().pb_4();
+    let pages = vec![
         appearance::appearance_page(view, cx),
         diff::diff_page(view),
         git::git_page(view),
@@ -452,5 +520,9 @@ fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<Se
         projects::projects_page(view, cx),
         keymap::keymap_page(view),
         about::about_page(view, cx),
-    ]
+    ];
+    pages
+        .into_iter()
+        .map(|page| page.header_style(&header))
+        .collect()
 }

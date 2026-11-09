@@ -19,6 +19,7 @@ pub(super) fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let v1 = view.clone();
     let v2 = view.clone();
     SettingPage::new("Projects")
+        .description("Where repositories are found and what Osier remembers about each one.")
         .icon(Icon::new(Lucide::FolderGit2))
         .group(
             SettingGroup::new()
@@ -52,6 +53,8 @@ pub(super) fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                         .ghost()
                                         .with_size(options.size())
                                         .icon(Lucide::X)
+                                        // Icon flush with the controls below it.
+                                        .mr(px(-8.))
                                         .tooltip("Remove")
                                         .on_click(move |_, _, cx| {
                                             v.update(cx, |o, cx| o.remove_scan_dir(d.clone(), cx));
@@ -196,7 +199,7 @@ pub(super) fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                         .disabled(!checking || options.is_disabled()),
                                 ),
                             )
-                            .child(div().text_sm().w(px(64.)).flex_none().child(if minutes == 1 {
+                            .child(div().text_sm().w(px(80.)).flex_none().text_right().whitespace_nowrap().child(if minutes == 1 {
                                 "1 minute".to_string()
                             } else {
                                 format!("{minutes} minutes")

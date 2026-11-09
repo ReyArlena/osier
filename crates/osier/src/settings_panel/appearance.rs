@@ -4,7 +4,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
 };
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex};
 use gpui_kit::*;
 use osier_config::settings::ThemeMode;
 
@@ -13,24 +13,18 @@ use crate::themes::ThemeStore;
 
 use super::{get, opt_string, set};
 
-/// "Dark theme" / "Light theme" heading over its card picker.
-fn theme_section(title: &'static str, view: &Entity<Osier>, dark: bool, cx: &App) -> AnyElement {
-    v_flex()
-        .w_full()
-        .gap_2()
-        .child(div().text_sm().child(title))
-        .child(crate::theme_cards::theme_picker(view, dark, cx))
-        .into_any_element()
-}
-
 pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let store = ThemeStore::global(cx);
     let dux_available = store.dux_available();
     SettingPage::new("Appearance")
+        .description("Theme, colours, fonts and how lists and tooltips look.")
         .icon(Icon::new(Lucide::Palette))
         .default_open(true)
         .resettable(true)
-        .group(SettingGroup::new().title("Theme").items(vec![
+        .group(
+            SettingGroup::new()
+                .title("Theme")
+                .items(vec![
                 SettingItem::new(
                     "Follow Dux Shell colours",
                     SettingField::switch(
@@ -55,33 +49,6 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     "Not detected: no dms-colors.json in the cache directory."
                 })
                 .disabled(!dux_available),
-                SettingItem::new(
-                    "Higher contrast",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.high_contrast),
-                        set(view, |o, v: bool, _| o.settings.appearance.high_contrast = v),
-                    )
-                    .default_value(false),
-                )
-                .description(
-                    "Selections, hovers and the sidebar highlight in a stronger tint of the \
-                     theme's main colour, like the switches.",
-                ),
-                SettingItem::new(
-                    "Show background tasks",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.show_background_tasks),
-                        set(view, |o, v: bool, _| {
-                            o.settings.appearance.show_background_tasks = v
-                        }),
-                    )
-                    .default_value(false),
-                )
-                .description(
-                    "A spinner in the status bar while Osier works quietly: re-reading a project after \
-                     a change, checking project status, loading GitHub lists, diffs and branch \
-                     lookups. Fetch, pull, push, clone and create always show.",
-                ),
                 SettingItem::new(
                     "Mode",
                     SettingField::dropdown(
@@ -134,14 +101,46 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     "System mode uses this when the desktop states no light or dark preference, \
                      or has no settings portal.",
                 ),
-                SettingItem::render({
+                ]),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Dark theme")
+                .description("Used while the mode is dark.")
+                .item(SettingItem::render({
                     let v = view.clone();
-                    move |_, _, cx| theme_section("Dark theme", &v, true, cx)
-                }),
-                SettingItem::render({
+                    move |_, window, cx| {
+                        crate::theme_cards::theme_picker(&v, true, window, cx)
+                    }
+                })),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Light theme")
+                .description("Used while the mode is light.")
+                .item(SettingItem::render({
                     let v = view.clone();
-                    move |_, _, cx| theme_section("Light theme", &v, false, cx)
-                }),
+                    move |_, window, cx| {
+                        crate::theme_cards::theme_picker(&v, false, window, cx)
+                    }
+                })),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Contrast")
+                .items(vec![
+                SettingItem::new(
+                    "Higher contrast",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.high_contrast),
+                        set(view, |o, v: bool, _| o.settings.appearance.high_contrast = v),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "Selections, hovers and the sidebar highlight in a stronger tint of the \
+                     theme's main colour, like the switches.",
+                ),
                 SettingItem::new(
                     "Readable syntax colours",
                     SettingField::switch(
@@ -155,7 +154,29 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                      above all) until they read, whatever the theme. Hue stays, so the theme \
                      still looks like itself. Off: the theme's colours as they are.",
                 ),
-            ]))
+                ]),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Status bar")
+                .items(vec![
+                SettingItem::new(
+                    "Show background tasks",
+                    SettingField::switch(
+                        get(view, |o| o.settings.appearance.show_background_tasks),
+                        set(view, |o, v: bool, _| {
+                            o.settings.appearance.show_background_tasks = v
+                        }),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "A spinner in the status bar while Osier works quietly: re-reading a project after \
+                     a change, checking project status, loading GitHub lists, diffs and branch \
+                     lookups. Fetch, pull, push, clone and create always show.",
+                ),
+                ]),
+        )
         .group(
             SettingGroup::new().title("Sidebar").item(
                 SettingItem::new(
@@ -209,7 +230,7 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                         .disabled(options.is_disabled()),
                                 ),
                             )
-                            .child(div().text_sm().w(px(64.)).flex_none().child(if ms == 0 {
+                            .child(div().text_sm().w(px(80.)).flex_none().text_right().whitespace_nowrap().child(if ms == 0 {
                                 "at once".to_string()
                             } else {
                                 format!("{ms} ms")

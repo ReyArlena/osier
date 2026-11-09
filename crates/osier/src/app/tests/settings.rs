@@ -25,6 +25,25 @@ fn ui_settings_open_by_click_and_close_by_escape(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn ui_settings_close_button_closes_and_shortcuts_keep_working(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    h.keys(cx, "ctrl-,");
+    assert!(h.has_settings(cx));
+    h.click(cx, "settings-close");
+    assert!(
+        !h.has_settings(cx),
+        "the header's close button closes settings"
+    );
+    h.keys(cx, "ctrl-,");
+    assert!(
+        h.has_settings(cx),
+        "focus went back to the app, so its shortcuts still work"
+    );
+}
+
+#[gpui::test]
 fn higher_contrast_strengthens_selections_and_switches_back_cleanly(cx: &mut TestAppContext) {
     use gpui_kit::component::ActiveTheme as _;
     let repo = TempRepo::new();

@@ -187,6 +187,7 @@ pub(super) fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let v1 = view.clone();
     let v2 = view.clone();
     SettingPage::new("About")
+        .description("Version, updates and where Osier keeps its files.")
         .icon(Icon::new(Lucide::Info))
         .group(updates_group(view, cx))
         .group(

@@ -22,6 +22,7 @@ pub(super) fn keymap_page(view: &Entity<Osier>) -> SettingPage {
     }
     let v_top = view.clone();
     let mut page = SettingPage::new("Keymap")
+        .description("Keyboard shortcuts for every action.")
         .icon(Icon::new(Lucide::Keyboard))
         .group(
             SettingGroup::new()
@@ -112,11 +113,19 @@ pub(super) fn keymap_page(view: &Entity<Osier>) -> SettingPage {
                                 .disabled(options.is_disabled()),
                         ),
                     )
-                    .child(div().text_sm().w(px(110.)).flex_none().child(match secs {
-                        0 => "never (Esc or a key)".to_string(),
-                        1 => "1 second".to_string(),
-                        n => format!("{n} seconds"),
-                    }))
+                    .child(
+                        div()
+                            .text_sm()
+                            .w(px(140.))
+                            .flex_none()
+                            .text_right()
+                            .whitespace_nowrap()
+                            .child(match secs {
+                                0 => "never (Esc or a key)".to_string(),
+                                1 => "1 second".to_string(),
+                                n => format!("{n} seconds"),
+                            }),
+                    )
             }));
         }
         page = page.group(group);
@@ -238,6 +247,9 @@ fn key_row(
                 .ghost()
                 .with_size(options.size())
                 .icon(Lucide::Plus)
+                // A ghost button's icon sits inside its padding; pull it out so the icon
+                // ends where the other rows' controls end.
+                .when(!overridden, |b| b.mr(px(-8.)))
                 .tooltip("Add a key binding")
                 .on_click(move |_, _, cx| {
                     v.update(cx, |o, cx| o.start_key_recording(id, cx));
@@ -255,6 +267,7 @@ fn key_row(
                     .ghost()
                     .with_size(options.size())
                     .label("Reset")
+                    .mr(px(-10.))
                     .on_click(move |_, window, cx| {
                         let defaults: Vec<String> = crate::keymap::actions()
                             .iter()

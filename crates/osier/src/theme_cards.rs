@@ -13,7 +13,12 @@ use crate::themes::ThemeStore;
 
 /// Cards for every dark (or light) theme. Clicking one makes it the dark (light) theme.
 /// Disabled while Dux Shell colours are followed.
-pub(crate) fn theme_picker(view: &Entity<Osier>, dark: bool, cx: &App) -> AnyElement {
+pub(crate) fn theme_picker(
+    view: &Entity<Osier>,
+    dark: bool,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
     let o = view.read(cx);
     let store = ThemeStore::global(cx);
     let current = if dark {
@@ -22,7 +27,7 @@ pub(crate) fn theme_picker(view: &Entity<Osier>, dark: bool, cx: &App) -> AnyEle
         o.settings.appearance.light_theme.clone()
     };
     let disabled = o.dux_sync_on(cx);
-    let mut cards = h_flex().flex_wrap().gap_3();
+    let mut cards = div().grid().grid_cols(columns(window)).gap_3().w_full();
     for name in store.names(dark) {
         let Some(config) = store.get(&name) else {
             continue;
@@ -34,7 +39,7 @@ pub(crate) fn theme_picker(view: &Entity<Osier>, dark: bool, cx: &App) -> AnyEle
             v_flex()
                 .id(SharedString::from(format!("theme-card-{name}")))
                 .test_id(|| format!("theme-card:{name}"))
-                .w(px(178.))
+                .min_w_0()
                 .p_1p5()
                 .gap_1p5()
                 .rounded(cx.theme().radius_lg)
@@ -79,6 +84,17 @@ pub(crate) fn theme_picker(view: &Entity<Osier>, dark: bool, cx: &App) -> AnyEle
         );
     }
     cards.into_any_element()
+}
+
+/// Cards per row, so they fill the settings card edge to edge. The page width is not known
+/// while building, so it is worked out from the window the way the settings dialog sizes
+/// itself (90% of the window, at most 1100px), less its sidebar and paddings.
+fn columns(window: &Window) -> u16 {
+    const MIN_CARD: f32 = 160.;
+    const GAP: f32 = 12.;
+    let dialog = (f32::from(window.viewport_size().width) * 0.9).min(1100.);
+    let available = dialog - 250. - 2. * 16. - 2. * 16.;
+    ((available + GAP) / (MIN_CARD + GAP)).floor().clamp(2., 5.) as u16
 }
 
 /// A tiny window in the theme's colours.
