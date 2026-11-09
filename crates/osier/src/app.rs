@@ -83,6 +83,9 @@ gpui_kit::actions!(
 
 pub fn init(cx: &mut App) {
     crate::keymap::init(cx);
+    // Dialogs and sheets (the palette, settings, prompts) are drawn outside the root view, so
+    // actions from inside them never reach its handlers. Quit must work from anywhere.
+    cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
 /// The status bar message for projects that could not be reopened at startup.

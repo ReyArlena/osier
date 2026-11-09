@@ -588,3 +588,24 @@ fn ui_shortcuts_survive_hiding_the_focused_filter(cx: &mut TestAppContext) {
         assert_eq!(o.tab, Tab::Log, "shortcuts work after leaving Files")
     });
 }
+
+#[gpui::test]
+fn ui_quit_reaches_the_app_while_a_dialog_is_open(cx: &mut TestAppContext) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static QUIT: AtomicBool = AtomicBool::new(false);
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    // A second global listener, after the one `init` registers: the test platform's `quit`
+    // does nothing, so observe the action reaching the app level instead.
+    cx.update(|cx| {
+        cx.on_action(|_: &crate::app::Quit, _| QUIT.store(true, Ordering::SeqCst));
+    });
+    h.keys(cx, "ctrl-p");
+    assert!(h.has_settings(cx), "the palette is open");
+    h.keys(cx, "ctrl-q");
+    assert!(
+        QUIT.load(Ordering::SeqCst),
+        "ctrl-q is handled at the app level, not only by the root view"
+    );
+}
