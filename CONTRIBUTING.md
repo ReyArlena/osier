@@ -51,10 +51,10 @@ The workspace is split into `osier-git` (git layer, no UI), `osier-config`, `osi
 
 ## UI changes
 
-Headless UI tests live in `crates/osier/src/app.rs` (`mod tests`) and run with plain
-`cargo test`. Add one for every new flow that can be driven without a pointer. For visual
-checks, `scripts/dev-screenshot.sh [seconds] [repo]` builds, launches, captures with `grim`
-(Wayland) and prints the log. Screenshots for the README show only this repository or a
+Headless UI tests live in `crates/osier/src/app/tests/` (the harness in `mod.rs`, one file
+per area) and run with plain `cargo test`. Add one for every new flow that can be driven
+without a pointer. For visual checks, `scripts/dev-screenshot.sh [seconds] [repo]` builds,
+launches, captures with `grim` (Wayland) and prints the log. Screenshots for the README show only this repository or a
 throwaway one.
 
 ## Pull requests
