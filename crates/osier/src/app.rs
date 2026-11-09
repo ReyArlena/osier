@@ -195,6 +195,9 @@ pub struct Osier {
     pub(crate) show_ignored: bool,
     /// Hash of the path set the tree was built from, so expansion survives refreshes.
     pub(crate) files_tree_key: u64,
+    /// Repository the tree was last built for, so its cursor is only carried over within
+    /// one project.
+    pub(crate) files_tree_root: Option<PathBuf>,
     pub(crate) amend: bool,
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
@@ -407,6 +410,7 @@ impl Osier {
             files_tree: cx.new(|cx| gpui_kit::component::tree::TreeState::new(cx)),
             show_ignored: false,
             files_tree_key: 0,
+            files_tree_root: None,
             amend: false,
             signoff: false,
             sidebar_visible: state.layout.sidebar_visible,
@@ -5218,6 +5222,79 @@ mod tests {
                 "after ignoring {pick}"
             );
         }
+    }
+
+    /// The Files tree's cursor (its highlighted row) and the file the viewer shows.
+    fn files_cursor(h: &Harness, cx: &mut TestAppContext) -> (Option<String>, Option<String>) {
+        h.read(cx, |o, cx| {
+            let cursor = o
+                .files_tree
+                .read(cx)
+                .selected_item()
+                .map(|i| i.id.to_string());
+            let viewed = match &o.active_project().unwrap().selection {
+                Selection::WorkFile { path, rev: None } => Some(path.clone()),
+                _ => None,
+            };
+            (cursor, viewed)
+        })
+    }
+
+    #[gpui::test]
+    fn ui_files_tab_keeps_its_row_when_the_tree_changes(cx: &mut TestAppContext) {
+        use crate::row_actions::RowKind;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        for f in ["one.tmp", "two.tmp", "three.tmp"] {
+            repo.write(f, "x\n");
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        let at = |f: &str| (Some(f.to_string()), Some(f.to_string()));
+        h.click(cx, "files-row:three.tmp");
+        assert_eq!(files_cursor(&h, cx), at("three.tmp"));
+
+        // A file appearing elsewhere leaves the row alone.
+        repo.write("new.txt", "n\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert_eq!(files_cursor(&h, cx), at("three.tmp"));
+
+        // Ignoring the selected file moves to the next row (files are listed by name: one,
+        // three, two), and from the last row back to the one before it.
+        h.act(cx, |o, w, cx| {
+            o.run_row_action(RowKind::AddToGitignore, w, cx)
+        });
+        assert_eq!(files_cursor(&h, cx), at("two.tmp"));
+        h.act(cx, |o, w, cx| {
+            o.run_row_action(RowKind::AddToGitignore, w, cx)
+        });
+        assert_eq!(files_cursor(&h, cx), at("one.tmp"));
+        h.keys(cx, "down");
+        assert_eq!(
+            files_cursor(&h, cx).0.as_deref(),
+            Some(".gitignore"),
+            "wraps to the top"
+        );
+        h.keys(cx, "up");
+        assert_eq!(files_cursor(&h, cx).0.as_deref(), Some("one.tmp"));
+    }
+
+    #[gpui::test]
+    fn ui_files_tab_with_ignored_shown_stays_on_an_ignored_file(cx: &mut TestAppContext) {
+        use crate::row_actions::RowKind;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        repo.write("notes.tmp", "x\n");
+        repo.write("z.tmp", "x\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        h.click(cx, "show-ignored");
+        h.click(cx, "files-row:notes.tmp");
+        h.act(cx, |o, w, cx| {
+            o.run_row_action(RowKind::AddToGitignore, w, cx)
+        });
+        let still = Some("notes.tmp".to_string());
+        assert_eq!(files_cursor(&h, cx), (still.clone(), still));
     }
 
     #[gpui::test]

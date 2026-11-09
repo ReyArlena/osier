@@ -62,6 +62,21 @@ pub(crate) fn build_items(paths: &[String], expand_all: bool) -> Vec<TreeItem> {
 }
 
 /// Case-insensitive substring match on the whole path, the same rule as the sidebar filter.
+/// Every id `build_items` gives `paths`: each file and each folder above one.
+fn tree_ids(paths: &[String]) -> std::collections::HashSet<&str> {
+    let mut ids = std::collections::HashSet::new();
+    for p in paths {
+        ids.insert(p.as_str());
+        let mut end = 0;
+        while let Some(slash) = p[end..].find('/') {
+            end += slash;
+            ids.insert(&p[..end]);
+            end += 1;
+        }
+    }
+    ids
+}
+
 pub(crate) fn filter_paths(paths: &mut Vec<String>, filter: &str) {
     let filter = filter.trim().to_lowercase();
     if !filter.is_empty() {
@@ -175,8 +190,46 @@ impl Osier {
         if key != self.files_tree_key {
             self.files_tree_key = key;
             let items = build_items(&paths, filtering);
-            self.files_tree
-                .update(cx, |state, cx| state.set_items(items, cx));
+            let root = repo.workdir().to_path_buf();
+            let same_project = self.files_tree_root.as_ref() == Some(&root);
+            self.files_tree_root = Some(root);
+            // Rebuilding the tree clears its cursor. Put it back on the same entry, or on
+            // the closest one when that entry has gone (eg a file that was just ignored).
+            let (was, cursor) = {
+                let tree = self.files_tree.read(cx);
+                let was: Vec<SharedString> = (0..)
+                    .map_while(|ix| tree.entry(ix).map(|e| e.item().id.clone()))
+                    .collect();
+                (was, tree.selected_item().map(|i| i.id.clone()))
+            };
+            let ids = tree_ids(&paths);
+            let next = cursor.filter(|_| same_project).and_then(|c| {
+                if ids.contains(c.as_ref()) {
+                    Some(c)
+                } else {
+                    crate::project::neighbour(&was, &c, |id| ids.contains(id.as_ref())).cloned()
+                }
+            });
+            self.files_tree.update(cx, |state, cx| {
+                state.set_items(items, cx);
+                if let Some(id) = &next {
+                    state.set_selected_item(Some(&TreeItem::new(id.clone(), id.clone())), cx);
+                }
+            });
+            // The viewer follows when the file it showed left the tree, like the Changes
+            // list does.
+            if let crate::project::Selection::WorkFile { path, rev: None } = &selection
+                && same_project
+                && !ids.contains(path.as_str())
+                && let Some(next) = next.filter(|n| paths.iter().any(|p| p == n.as_ref()))
+            {
+                let weak = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.select_work_file(next.to_string(), None, cx)
+                    });
+                });
+            }
         }
 
         let muted = cx.theme().muted_foreground;
@@ -276,6 +329,7 @@ impl Osier {
                             let click_id = id.clone();
                             let is_selected = selected_path.as_deref() == Some(id.as_str());
                             ListItem::new(ix)
+                                .test_id(format!("files-row:{id}"))
                                 .w_full()
                                 .px_2()
                                 .pl(px(14.) * entry.depth() + px(8.))

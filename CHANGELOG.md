@@ -13,6 +13,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The Files tab keeps its highlighted row when the file list changes, instead of losing it
+  so the arrow keys start again from the top. When the highlighted file leaves the list (eg
+  after adding it to .gitignore), the row and the viewer move to the next file.
 - Removing a scan directory (in Settings or config.toml) also takes its repositories out of
   recents, instead of leaving behind the ones you had opened. Open projects stay.
 - Opening a file or folder inside a repository that is already open (for example
