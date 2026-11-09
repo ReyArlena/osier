@@ -41,6 +41,8 @@ const GUTTER: f32 = 72.;
 const FLAT: f32 = 44.;
 /// Opacity of chunk fills, bands and the line marking an empty range.
 const BAND_ALPHA: f32 = 0.16;
+/// Thickness of the line marking an empty range (and of a band's end there).
+const EMPTY_LINE: f32 = 2.;
 
 /// What to merge.
 #[derive(Debug, Clone)]
@@ -827,7 +829,7 @@ fn paint_pane(window: &mut Window, g: &PaneGeometry, pane: usize, chunks: &[Chun
             if r.is_empty() {
                 // The same tone as the band that leads to it.
                 window.paint_quad(fill(
-                    Bounds::new(point(left, top - px(1.)), size(right - left, px(2.))),
+                    Bounds::new(point(left, top), size(right - left, px(EMPTY_LINE))),
                     c.color.opacity(BAND_ALPHA),
                 ));
             } else {
@@ -874,15 +876,18 @@ fn paint_band(
     color: Hsla,
 ) {
     if a.0 == a.1 && b.0 == b.1 {
-        let mut p = PathBuilder::stroke(px(2.));
-        p.move_to(point(x0, a.0));
-        band_edge(&mut p, x0, x1, a.0, b.0, fl, fr);
+        // Centred on the panes' lines, which run from y down.
+        let half = px(EMPTY_LINE / 2.);
+        let mut p = PathBuilder::stroke(px(EMPTY_LINE));
+        p.move_to(point(x0, a.0 + half));
+        band_edge(&mut p, x0, x1, a.0 + half, b.0 + half, fl, fr);
         if let Ok(path) = p.build() {
             window.paint_path(path, color.opacity(BAND_ALPHA));
         }
         return;
     }
-    let (a1, b1) = (a.1.max(a.0 + px(1.)), b.1.max(b.0 + px(1.)));
+    // An empty end is as thick as the line marking it in its pane, and starts at the same y.
+    let (a1, b1) = (a.1.max(a.0 + px(EMPTY_LINE)), b.1.max(b.0 + px(EMPTY_LINE)));
     let mut p = PathBuilder::fill();
     p.move_to(point(x0, a.0));
     band_edge(&mut p, x0, x1, a.0, b.0, fl, fr);
