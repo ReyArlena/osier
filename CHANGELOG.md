@@ -38,6 +38,11 @@ All notable changes to Osier are documented here. The format follows
   recents, instead of leaving behind the ones you had opened. Open projects stay.
 - Opening a file or folder inside a repository that is already open (for example
   `osier src/main.rs`) switches to that project instead of adding it to the sidebar again.
+- Keyboard shortcuts no longer go dead after hiding the panel that holds the focused filter
+  box (`ctrl-b` while typing in the project filter, or switching tabs while typing in the
+  Files filter). Focus moves back to the app instead of staying on a box that is not shown.
+- `ctrl-q` quits while the command palette, settings or a prompt is open, instead of only
+  from the main window.
 
 ## [0.2.0] - 2026-11-09
 
