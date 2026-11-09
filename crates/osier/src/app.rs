@@ -2548,7 +2548,6 @@ impl Osier {
     }
 }
 
-/// Conflicts first, then staged, unstaged, untracked.
 /// gpui-kit's layout for a diff mode setting.
 pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
     match mode {
@@ -2557,6 +2556,7 @@ pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
     }
 }
 
+/// Conflicts first, then staged, unstaged, untracked.
 pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
     status
         .conflicted()
@@ -2584,7 +2584,6 @@ impl From<osier_git::GitError> for LoadError {
     }
 }
 
-/// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
 /// Whether a selection's diff can hide whitespace changes: read-only ones only, since hunks
 /// of a diff that hides them cannot be staged or discarded.
 pub(crate) fn whitespace_applies(selection: &Selection) -> bool {
@@ -2594,6 +2593,7 @@ pub(crate) fn whitespace_applies(selection: &Selection) -> bool {
     )
 }
 
+/// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
 fn load_patch(
     repo: &Repository,
     selection: &Selection,
