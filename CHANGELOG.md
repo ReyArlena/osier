@@ -16,6 +16,12 @@ All notable changes to Osier are documented here. The format follows
   ignored are dimmed too, with a badge per rule file.
 - The right-click menu in Changes has "Discard changes…" (or "Move to trash…" for untracked
   files), the same as the row's hover button.
+- Pull request links from what git already knows, no GitHub login needed. A Log commit that
+  merges or squashes a pull request ("Merge pull request #93 ...", "... (#93)") gets "View
+  pull request #93 on GitHub" in its right-click menu, and a commit at the tip of a remote
+  branch gets "Pull requests for origin/... on GitHub", which opens GitHub's pull request list
+  filtered to that branch. Branch rows (remote ones, and local ones with an upstream) have
+  the same entry. Bindable as "Pull requests on GitHub" under Context menus in the keymap.
 
 ### Fixed
 

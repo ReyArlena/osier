@@ -437,3 +437,53 @@ fn ui_fetch_and_prune_offers_to_delete_merged_branches_once(cx: &mut TestAppCont
     branches.sort();
     assert_eq!(branches, ["main", "wip"], "unmerged work is kept");
 }
+
+#[gpui::test]
+fn pull_request_links_come_from_git_alone(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let squash = repo.commit_file("b.txt", "b\n", "feat: thing (#12)");
+    let merge = repo.commit_file("c.txt", "c\n", "Merge pull request #93 from octo/feature");
+    repo.git(["remote", "add", "origin", "git@github.com:octo/repo.git"]);
+    // A remote branch at the squash commit and a local branch tracking it.
+    repo.git(["update-ref", "refs/remotes/origin/feature/x", &squash]);
+    repo.git(["branch", "--track", "local-x", "origin/feature/x"]);
+    let h = Harness::open(cx, &repo);
+
+    // The subject names the pull request.
+    h.act(cx, |o, window, cx| {
+        o.open_commit_pull_request(merge.clone(), window, cx)
+    });
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://github.com/octo/repo/pull/93")
+    );
+    h.act(cx, |o, window, cx| {
+        o.open_commit_pull_request(squash.clone(), window, cx)
+    });
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://github.com/octo/repo/pull/12")
+    );
+
+    // A remote branch, and a local branch through its upstream, open the filtered list.
+    let pulls = "https://github.com/octo/repo/pulls?q=is%3Apr+head%3Afeature%2Fx";
+    h.act(cx, |o, window, cx| {
+        o.open_branch_pulls_on_github("origin/feature/x".into(), true, window, cx)
+    });
+    assert_eq!(cx.opened_url().as_deref(), Some(pulls));
+    h.act(cx, |o, window, cx| {
+        o.open_branch_pulls_on_github("local-x".into(), false, window, cx)
+    });
+    assert_eq!(cx.opened_url().as_deref(), Some(pulls));
+
+    // The context-menu key on a Log row takes the same path.
+    h.keys(cx, "ctrl-2");
+    super::keys::bind(cx, &[("row_pull_requests", &["g"])]);
+    h.click(cx, "log-row:0");
+    h.keys(cx, "g");
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://github.com/octo/repo/pull/93")
+    );
+}

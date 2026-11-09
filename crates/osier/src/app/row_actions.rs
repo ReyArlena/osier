@@ -45,6 +45,7 @@ pub enum RowKind {
     UndoLastCommit,
     CopyHash,
     OpenOnGithub,
+    PullRequests,
     Apply,
     Unshelve,
     Pop,
@@ -226,6 +227,12 @@ const ROWS: &[(&str, &str, &str, RowKind)] = &[
         RowKind::OpenOnGithub,
     ),
     (
+        "row_pull_requests",
+        "Pull requests on GitHub",
+        "Log commits and branches",
+        RowKind::PullRequests,
+    ),
+    (
         "row_apply",
         "Apply",
         "Patches and stashes rows",
@@ -341,6 +348,7 @@ fn row_maker(kind: RowKind) -> fn() -> Box<dyn Action> {
         UndoLastCommit,
         CopyHash,
         OpenOnGithub,
+        PullRequests,
         Apply,
         Unshelve,
         Pop,
@@ -678,6 +686,7 @@ impl Osier {
                 K::UndoLastCommit if is_head => self.confirm_undo_commit(window, cx),
                 K::CopyHash => self.copy_to_clipboard(hash, window, cx),
                 K::OpenOnGithub => self.open_commit_on_github(hash, window, cx),
+                K::PullRequests => self.open_commit_pull_request(hash, window, cx),
                 _ => {}
             },
             Row::Branch {
@@ -686,6 +695,7 @@ impl Osier {
                 is_head,
             } => match kind {
                 K::Checkout if !is_head => self.checkout_branch(name, remote, window, cx),
+                K::PullRequests => self.open_branch_pulls_on_github(name, remote, window, cx),
                 K::NewBranchHere if !remote => self.prompt_new_branch(Some(name), window, cx),
                 K::Rename if !remote => self.prompt_rename_branch(name, window, cx),
                 K::Delete if !remote && !is_head => {

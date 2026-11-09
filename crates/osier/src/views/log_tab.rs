@@ -79,6 +79,7 @@ impl Osier {
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
         let owner = cx.entity().downgrade();
         let on_github = self.active_github_url().is_some();
+        let remotes = snapshot.remotes.clone();
         let mono = cx.theme().mono_font_family.clone();
         let muted = cx.theme().muted_foreground;
         let count = commits.len();
@@ -195,6 +196,16 @@ impl Osier {
                                         commit.subject.clone()
                                     };
                                     let refs: Vec<String> = commit.refs.clone();
+                                    // Pull requests git already knows about: the one a merge or
+                                    // squash commit names, and the remote branches on this row.
+                                    let pr_number = on_github
+                                        .then(|| crate::app::github::pull_request_number(&commit.subject))
+                                        .flatten();
+                                    let pr_branches = if on_github {
+                                        crate::app::github::remote_branch_refs(&commit.refs, &remotes)
+                                    } else {
+                                        Vec::new()
+                                    };
                                     let hash = commit.hash.clone();
                                     let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                     let menu_owner = owner.clone();
@@ -376,6 +387,30 @@ impl Osier {
                                                             t.open_commit_on_github(h, w, cx)
                                                         }),
                                                     ))
+                                                })
+                                                .when_some(pr_number, |menu, n| {
+                                                    menu.item(item(
+                                                        &format!("View pull request #{n} on GitHub"),
+                                                        std::rc::Rc::new(|t, h, w, cx| {
+                                                            t.open_commit_pull_request(h, w, cx)
+                                                        }),
+                                                    ))
+                                                })
+                                                .map(|menu| {
+                                                    pr_branches.iter().fold(menu, |menu, branch| {
+                                                        let b = branch.clone();
+                                                        menu.item(item(
+                                                            &format!("Pull requests for {branch} on GitHub"),
+                                                            std::rc::Rc::new(move |t, _, w, cx| {
+                                                                t.open_branch_pulls_on_github(
+                                                                    b.clone(),
+                                                                    true,
+                                                                    w,
+                                                                    cx,
+                                                                )
+                                                            }),
+                                                        ))
+                                                    })
                                                 })
                                         });
                                     ListItem::new(("commit", ix))
@@ -810,6 +845,9 @@ fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
         "Undo last commit…" => K::UndoLastCommit,
         "Copy hash" => K::CopyHash,
         "Open on GitHub" => K::OpenOnGithub,
+        l if l.starts_with("View pull request #") || l.starts_with("Pull requests for ") => {
+            K::PullRequests
+        }
         _ => return None,
     })
 }

@@ -350,7 +350,7 @@ fn ui_open_repository_moved_to_ctrl_shift_o(cx: &mut TestAppContext) {
     });
 }
 
-fn bind(cx: &mut TestAppContext, pairs: &[(&str, &[&str])]) {
+pub(super) fn bind(cx: &mut TestAppContext, pairs: &[(&str, &[&str])]) {
     let mut file = osier_config::keymap::KeymapFile::default();
     for (id, keys) in pairs {
         file.bindings

@@ -32,6 +32,7 @@ impl Osier {
                 .empty_state(&project.name, "Reading branches…", cx)
                 .into_any_element();
         };
+        let on_github = self.active_github_url().is_some();
         let local: Vec<&Branch> = snapshot.branches.iter().filter(|b| !b.is_remote).collect();
         let remote: Vec<&Branch> = snapshot.branches.iter().filter(|b| b.is_remote).collect();
         let muted = cx.theme().muted_foreground;
@@ -68,12 +69,38 @@ impl Osier {
                 let menu_name = name.clone();
                 let weak = weak.clone();
                 let checkout = (!is_head).then(|| (weak.clone(), checkout_name.clone()));
+                // Pull requests exist for remote branches and for locals with an upstream.
+                let pulls = (on_github && (is_remote || b.upstream.is_some()))
+                    .then(|| (weak.clone(), menu_name.clone()));
+                let pulls_item = move |menu: gpui_kit::component::menu::PopupMenu| match &pulls {
+                    Some((w, n)) => {
+                        let (w, n) = (w.clone(), n.clone());
+                        menu.item(
+                            row_actions::menu_item(
+                                "Pull requests on GitHub",
+                                row_actions::RowKind::PullRequests,
+                            )
+                            .on_click(move |_, window, cx| {
+                                let _ = w.update(cx, |this, cx| {
+                                    this.open_branch_pulls_on_github(
+                                        n.clone(),
+                                        is_remote,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                        )
+                    }
+                    None => menu,
+                };
                 let inner = if is_remote {
                     let (wm, wc) = (weak.clone(), weak.clone());
                     let (m1, c1) = (menu_name.clone(), menu_name.clone());
                     crate::row_menu::RowMenu::new(move |menu, _, _| {
                         let (wm, wc) = (wm.clone(), wc.clone());
                         let (m1, c1) = (m1.clone(), c1.clone());
+                        let pulls_item = pulls_item.clone();
                         menu.item(
                             row_actions::menu_item(
                                 "Merge into current branch",
@@ -101,9 +128,11 @@ impl Osier {
                                 });
                             }),
                         )
+                        .map(pulls_item)
                     })
                 } else {
                     crate::row_menu::RowMenu::new(move |menu, _, _| {
+                        let pulls_item = pulls_item.clone();
                         let n1 = menu_name.clone();
                         let n2 = menu_name.clone();
                         let n3 = menu_name.clone();
@@ -199,6 +228,7 @@ impl Osier {
                                     });
                                 }),
                             )
+                            .map(pulls_item)
                             .separator();
                         menu.item(
                             row_actions::menu_item(
