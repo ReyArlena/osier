@@ -43,6 +43,8 @@ All notable changes to Osier are documented here. The format follows
   Files filter). Focus moves back to the app instead of staying on a box that is not shown.
 - `ctrl-q` quits while the command palette, settings or a prompt is open, instead of only
   from the main window.
+- A dropdown or context menu opened from the keyboard closes when a shortcut moves on (a tab
+  switch, the command palette, a filter box), instead of staying on screen until clicked away.
 
 ## [0.2.0] - 2026-11-09
 

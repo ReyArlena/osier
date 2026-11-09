@@ -609,3 +609,33 @@ fn ui_quit_reaches_the_app_while_a_dialog_is_open(cx: &mut TestAppContext) {
         "ctrl-q is handled at the app level, not only by the root view"
     );
 }
+
+#[gpui::test]
+fn ui_shortcuts_close_an_open_dropdown_menu(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "branch");
+    assert!(h.menu_open(cx), "the branch button opens its menu");
+    // gpui-kit's menu closes itself only on Escape or a click outside. A shortcut that moves
+    // on (a tab switch here) must not leave it hanging over the new tab.
+    h.keys(cx, "ctrl-2");
+    h.read(cx, |o, _| assert_eq!(o.tab, Tab::Log));
+    assert!(!h.menu_open(cx), "the shortcut closed the menu");
+    // The same when the shortcut moves focus itself (the sidebar filter).
+    h.click(cx, "branch");
+    assert!(h.menu_open(cx));
+    h.keys(cx, "/");
+    assert!(!h.menu_open(cx), "focusing the filter closed the menu");
+    assert!(
+        focused_is(&h, cx, |o, cx| {
+            gpui_kit::Focusable::focus_handle(o.sidebar_filter.read(cx), cx)
+        }),
+        "and the filter has focus"
+    );
+    // Escape still works as before.
+    h.click(cx, "branch");
+    assert!(h.menu_open(cx));
+    h.keys(cx, "escape");
+    assert!(!h.menu_open(cx), "escape closes the menu");
+}

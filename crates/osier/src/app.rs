@@ -795,10 +795,18 @@ impl Render for Osier {
         }
         let has_project = self.active.is_some();
         let merge_fills = self.diff_expanded;
-        v_flex()
+        let mut root = v_flex()
             .track_focus(&self.focus_handle)
-            .key_context("Osier")
-            .on_action(|_: &Quit, _, cx| cx.quit())
+            .key_context("Osier");
+        // Every shortcut first closes the popup menu that has the keyboard, if any (see
+        // `dismiss_popup_menus`). Registered before the handlers below so it runs first.
+        for spec in crate::keymap::actions() {
+            root = root.on_boxed_action(&*(spec.make)(), |_, window, cx| {
+                Osier::dismiss_popup_menus(window, cx);
+                cx.propagate();
+            });
+        }
+        root.on_action(|_: &Quit, _, cx| cx.quit())
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh_active(cx)))
             .on_action(cx.listener(|this, _: &OpenRepository, window, cx| {
                 this.prompt_open_repository(window, cx)

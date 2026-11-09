@@ -6,6 +6,21 @@ use gpui_kit::*;
 use super::Osier;
 
 impl Osier {
+    /// Close the popup menu that has the keyboard, if any, before a shortcut acts. gpui-kit's
+    /// `PopupMenu` (dropdowns, context menus) closes itself only on Escape or a click outside,
+    /// so a tab switch or a dialog opened by shortcut would leave it hanging on screen.
+    pub(crate) fn dismiss_popup_menus(window: &mut Window, cx: &mut App) {
+        if window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("PopupMenu"))
+        {
+            // Dispatched on the element focused now (the menu), even when the shortcut's own
+            // handler moves focus elsewhere before this runs.
+            window.dispatch_action(Box::new(gpui_kit::base::actions::Cancel), cx);
+        }
+    }
+
     /// Apply `keymap.toml` (startup, or after it changed). Problems are logged and returned.
     pub(crate) fn load_keymap(&mut self, cx: &mut App) -> Vec<String> {
         let file = match osier_config::keymap::KeymapFile::load(&self.paths) {

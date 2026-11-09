@@ -153,6 +153,17 @@ impl Harness {
         cx.run_until_parked();
     }
 
+    /// Whether a popup menu (a dropdown or a context menu) has the keyboard.
+    fn menu_open(&self, cx: &mut TestAppContext) -> bool {
+        cx.update_window(self.window, |_, window, _| {
+            window
+                .context_stack()
+                .iter()
+                .any(|context| context.contains("PopupMenu"))
+        })
+        .expect("window")
+    }
+
     fn has_settings(&self, cx: &mut TestAppContext) -> bool {
         use gpui_kit::component::WindowExt as _;
         cx.update_window(self.window, |_, window, cx| window.has_active_dialog(cx))
