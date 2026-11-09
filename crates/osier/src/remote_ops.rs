@@ -551,19 +551,23 @@ impl Osier {
                     let mut options = options.clone();
                     options.strategy = strategy;
                     options.autostash = autostash.get();
-                    let repo_path = repo_path.clone();
-                    let _ = weak.update(cx, |this, cx| {
-                        this.state.pull_strategies.insert(
-                            repo_path,
-                            if strategy == PullStrategy::Rebase {
-                                "rebase"
-                            } else {
-                                "merge"
-                            }
-                            .into(),
-                        );
-                        this.save_state();
-                        this.start_remote(RemoteOp::Pull(options), window, cx);
+                    let (repo_path, weak) = (repo_path.clone(), weak.clone());
+                    // After this dialog has closed: closing removes the topmost dialog, which
+                    // would otherwise be the account picker `start_remote` may open.
+                    window.defer(cx, move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.state.pull_strategies.insert(
+                                repo_path,
+                                if strategy == PullStrategy::Rebase {
+                                    "rebase"
+                                } else {
+                                    "merge"
+                                }
+                                .into(),
+                            );
+                            this.save_state();
+                            this.start_remote(RemoteOp::Pull(options), window, cx);
+                        });
                     });
                     true
                 })

@@ -73,6 +73,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Pulling a diverged branch now closes its dialog and asks which GitHub account to use when
+  the project has none chosen, instead of leaving the dialog open and doing nothing.
 - Keyboard shortcuts work again straight after a dialog closes, instead of doing nothing
   until you click somewhere in the window.
 - The sidebar filter's link to the project status setting selects "Status of projects that

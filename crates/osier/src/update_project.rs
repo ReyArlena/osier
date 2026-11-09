@@ -178,17 +178,21 @@ impl Osier {
                     } else {
                         PullStrategy::Merge
                     };
-                    let (key, remember) = (key.clone(), remember.get());
-                    let _ = weak.update(cx, |this, cx| {
-                        this.state.update_strategies.insert(
-                            key,
-                            UpdateChoice {
-                                strategy: strategy_name(strategy).into(),
-                                remember,
-                            },
-                        );
-                        this.save_state();
-                        this.start_remote(update_op(strategy), window, cx);
+                    let (key, remember, weak) = (key.clone(), remember.get(), weak.clone());
+                    // After this dialog has closed: closing removes the topmost dialog, which
+                    // would otherwise be the account picker `start_remote` may open.
+                    window.defer(cx, move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.state.update_strategies.insert(
+                                key,
+                                UpdateChoice {
+                                    strategy: strategy_name(strategy).into(),
+                                    remember,
+                                },
+                            );
+                            this.save_state();
+                            this.start_remote(update_op(strategy), window, cx);
+                        });
                     });
                     true
                 })
