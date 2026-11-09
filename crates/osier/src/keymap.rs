@@ -196,12 +196,12 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ToggleCommitDetails
         ),
         spec!(
-            "toggle_merge_expanded",
-            "Expand the merge tool",
+            "toggle_diff_expanded",
+            "Expand the diff pane",
             "View",
             ["ctrl-shift-m"],
             App,
-            ToggleMergeExpanded
+            ToggleDiffExpanded
         ),
         spec!(
             "toggle_theme",

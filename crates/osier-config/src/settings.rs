@@ -213,8 +213,11 @@ pub struct Diff {
     pub context_lines: u32,
     pub line_numbers: bool,
     pub soft_wrap: bool,
-    /// `unified`, `split` or `three-way` (conflicted files only; others show `split`).
+    /// `unified` or `split`, for files without conflicts.
     pub mode: DiffMode,
+    /// How conflicted files show: `three-way` (the merge tool) or `inline` (conflict blocks
+    /// with accept buttons).
+    pub conflicts: ConflictView,
     /// Files larger than this (bytes) ask before rendering.
     pub large_file_bytes: u64,
 }
@@ -226,6 +229,7 @@ impl Default for Diff {
             line_numbers: true,
             soft_wrap: true,
             mode: DiffMode::Unified,
+            conflicts: ConflictView::ThreeWay,
             large_file_bytes: 2 * 1024 * 1024,
         }
     }
@@ -236,20 +240,19 @@ impl Default for Diff {
 pub enum DiffMode {
     #[default]
     Unified,
+    // Development builds wrote "three-way" here before it moved to `conflicts`.
+    #[serde(alias = "three-way")]
     Split,
-    /// The three-pane merge tool for conflicted files; other files show split.
-    #[serde(rename = "three-way")]
-    ThreeWay,
 }
 
-impl DiffMode {
-    /// The two-pane layout this mode uses for files without conflicts.
-    pub fn two_way(self) -> DiffMode {
-        match self {
-            DiffMode::ThreeWay => DiffMode::Split,
-            m => m,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConflictView {
+    /// Yours, the result and theirs side by side.
+    #[default]
+    ThreeWay,
+    /// The working file's conflict blocks with Accept Current / Incoming / Both.
+    Inline,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

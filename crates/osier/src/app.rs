@@ -33,7 +33,7 @@ gpui_kit::actions!(
         ToggleSidebar,
         ToggleCommandLog,
         ToggleCommitDetails,
-        ToggleMergeExpanded,
+        ToggleDiffExpanded,
         ToggleTheme,
         OpenSettings,
         OpenCommandPalette,
@@ -176,6 +176,10 @@ pub struct Osier {
     pub(crate) editor: Option<crate::edit_pane::FileEditor>,
     /// Three-way merge tool views for conflicted files (`merge_ops.rs`).
     pub(crate) merges: crate::merge_ops::Merges,
+    /// The diff pane fills the window: sidebar and centre column hidden.
+    pub(crate) diff_expanded: bool,
+    /// The selected conflicted file has no conflict markers left (inline view).
+    pub(crate) diff_no_markers: bool,
     /// File viewer for the Files tab (code, markdown, image, binary).
     pub(crate) viewer: Option<crate::viewer::Viewer>,
     /// Markdown files show rendered by default; this toggles to source.
@@ -382,6 +386,8 @@ impl Osier {
             commit_message,
             editor: None,
             merges: crate::merge_ops::Merges::default(),
+            diff_expanded: false,
+            diff_no_markers: false,
             viewer: None,
             markdown_as_code: false,
             files_filter,
@@ -1844,6 +1850,7 @@ impl Osier {
         self.diff_loading = true;
         self.diff_error = None;
         self.diff_too_large = None;
+        self.diff_no_markers = false;
         let limit = if self.diff_force_large {
             u64::MAX
         } else {
@@ -1862,6 +1869,11 @@ impl Osier {
                     Ok((files, model)) => {
                         this.diff_model = std::rc::Rc::new(model);
                         this.set_diff_files(files, cx);
+                    }
+                    Err(LoadError::NoMarkers) => {
+                        this.diff_no_markers = true;
+                        this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.set_diff_files(Vec::new(), cx);
                     }
                     Err(LoadError::TooLarge(size)) => {
                         this.diff_too_large = Some(size);
@@ -1942,29 +1954,42 @@ impl Osier {
         }
     }
 
-    pub(crate) fn toggle_soft_wrap(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_soft_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings.diff.soft_wrap = !self.settings.diff.soft_wrap;
+        let wrap = self.settings.diff.soft_wrap;
+        for slot in self.merges.views.values() {
+            slot.view
+                .update(cx, |v, cx| v.set_soft_wrap(wrap, window, cx));
+        }
         self.save_settings();
         cx.notify();
     }
 
+    /// Unified or split, for files without conflicts.
     pub(crate) fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         self.diff.update(cx, |state, cx| state.set_mode(mode, cx));
         self.settings.diff.mode = match mode {
             DiffMode::Split => osier_config::settings::DiffMode::Split,
             _ => osier_config::settings::DiffMode::Unified,
         };
-        self.merges.expanded = false;
         self.save_settings();
         cx.notify();
     }
 
-    /// The three-pane merge tool for conflicted files (split for the others).
-    pub(crate) fn set_three_way(&mut self, cx: &mut Context<Self>) {
-        self.diff
-            .update(cx, |state, cx| state.set_mode(DiffMode::Split, cx));
-        self.settings.diff.mode = osier_config::settings::DiffMode::ThreeWay;
+    /// How conflicted files show: the 3-way merge tool or inline conflict blocks.
+    pub(crate) fn set_conflict_view(
+        &mut self,
+        view: osier_config::settings::ConflictView,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.diff.conflicts = view;
         self.save_settings();
+        cx.notify();
+    }
+
+    /// Expand the diff pane over the sidebar and the centre column, or back.
+    pub(crate) fn toggle_diff_expanded(&mut self, cx: &mut Context<Self>) {
+        self.diff_expanded = !self.diff_expanded;
         cx.notify();
     }
 
@@ -2465,12 +2490,11 @@ impl Osier {
 }
 
 /// Conflicts first, then staged, unstaged, untracked.
-/// gpui-kit's layout for a diff mode setting (three-way shows split for files without
-/// conflicts).
+/// gpui-kit's layout for a diff mode setting.
 pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
-    match mode.two_way() {
+    match mode {
         osier_config::settings::DiffMode::Split => DiffMode::Split,
-        _ => DiffMode::Unified,
+        osier_config::settings::DiffMode::Unified => DiffMode::Unified,
     }
 }
 
@@ -2491,6 +2515,8 @@ pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(St
 pub(crate) enum LoadError {
     TooLarge(u64),
     Git(String),
+    /// A conflicted file whose working copy has no conflict markers left.
+    NoMarkers,
 }
 
 impl From<osier_git::GitError> for LoadError {
@@ -2521,6 +2547,9 @@ fn load_patch(
         // Current / Incoming / Both controls.
         let text = std::fs::read_to_string(repo.workdir().join(path))
             .map_err(|e| LoadError::Git(format!("{path}: {e}")))?;
+        if !osier_git::ops::integrate::has_conflict_markers(&text) {
+            return Err(LoadError::NoMarkers);
+        }
         let file = DiffFile::parse_conflicts(path.clone(), &text)
             .map_err(|e| LoadError::Git(e.to_string()))?;
         return Ok((vec![file], Vec::new()));
@@ -2601,7 +2630,7 @@ impl Render for Osier {
             });
         }
         let has_project = self.active.is_some();
-        let merge_fills = self.merge_fills_window();
+        let merge_fills = self.diff_expanded;
         v_flex()
             .track_focus(&self.focus_handle)
             .key_context("Osier")
@@ -2626,9 +2655,29 @@ impl Render for Osier {
             .on_action(
                 cx.listener(|this, _: &ToggleCommitDetails, _, cx| this.toggle_commit_details(cx)),
             )
-            .on_action(cx.listener(|this, _: &ToggleMergeExpanded, _, cx| {
-                if this.three_way_target().is_some() {
-                    this.toggle_merge_expanded(cx)
+            .on_action(
+                cx.listener(|this, _: &ToggleDiffExpanded, _, cx| this.toggle_diff_expanded(cx)),
+            )
+            // Escape leaves the expanded diff pane (from an input that has nothing to do
+            // with it, or from anywhere else).
+            .on_action(
+                cx.listener(|this, _: &gpui_kit::component::input::Escape, _, cx| {
+                    if this.diff_expanded {
+                        this.toggle_diff_expanded(cx);
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                if e.keystroke.key == "escape"
+                    && this.diff_expanded
+                    && !window.has_active_dialog(cx)
+                    && !window.has_active_sheet(cx)
+                {
+                    this.toggle_diff_expanded(cx);
+                    cx.stop_propagation();
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
@@ -7770,7 +7819,7 @@ mod tests {
     fn ui_three_way_expand_and_walk_the_conflicted_files(cx: &mut TestAppContext) {
         let (_repo, h) = three_way_merge(cx, true);
         assert!(h.bounds(cx, "center-pane").is_some());
-        h.click(cx, "merge-expand");
+        h.click(cx, "diff-expand");
         assert!(h.bounds(cx, "center-pane").is_none(), "file list hidden");
         assert!(h.bounds(cx, "merge-result").is_some());
         h.click(cx, "merge-next-file");
@@ -7811,20 +7860,27 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ui_three_way_falls_back_to_split_for_other_files(cx: &mut TestAppContext) {
+    fn ui_conflicts_default_to_three_way_and_other_files_keep_their_layout(
+        cx: &mut TestAppContext,
+    ) {
+        use osier_config::settings::{ConflictView, DiffMode as Mode};
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "one\n", "init");
         repo.write("a.txt", "two\n");
         let h = Harness::open(cx, &repo);
+        h.read(cx, |o, _| {
+            assert_eq!(o.settings.diff.conflicts, ConflictView::ThreeWay);
+            assert_eq!(o.settings.diff.mode, Mode::Unified);
+        });
         h.act(cx, |o, _, cx| {
             o.select_file("a.txt".into(), Area::Unstaged, cx)
         });
+        // 3-way is only for conflicts: disabled here, so a click changes nothing.
         h.click(cx, "three-way");
+        h.click(cx, "split");
         h.read(cx, |o, cx| {
-            assert_eq!(
-                o.settings.diff.mode,
-                osier_config::settings::DiffMode::ThreeWay
-            );
+            assert_eq!(o.settings.diff.mode, Mode::Split);
+            assert_eq!(o.settings.diff.conflicts, ConflictView::ThreeWay);
             assert_eq!(
                 o.diff.read(cx).mode(),
                 gpui_kit::component::diff::DiffMode::Split
@@ -7832,12 +7888,64 @@ mod tests {
             assert!(o.three_way_target().is_none());
         });
         assert!(h.bounds(cx, "merge-result").is_none());
+    }
+
+    #[gpui::test]
+    fn ui_conflicts_inline_split_is_off_and_expand_survives_switching(cx: &mut TestAppContext) {
+        use osier_config::settings::{ConflictView, DiffMode as Mode};
+        let (_repo, h) = three_way_merge(cx, false);
+        h.click(cx, "diff-expand");
+        assert!(h.bounds(cx, "center-pane").is_none());
+        // Unified on a conflicted file switches to the inline blocks, still expanded.
         h.click(cx, "unified");
         h.read(cx, |o, _| {
+            assert_eq!(o.settings.diff.conflicts, ConflictView::Inline);
             assert_eq!(
                 o.settings.diff.mode,
-                osier_config::settings::DiffMode::Unified
-            )
+                Mode::Unified,
+                "normal files untouched"
+            );
         });
+        assert!(h.bounds(cx, "merge-result").is_none());
+        assert!(
+            h.bounds(cx, "apply-resolution").is_some(),
+            "inline controls"
+        );
+        assert!(h.bounds(cx, "center-pane").is_none(), "still expanded");
+        // Split has no conflict view: disabled.
+        h.click(cx, "split");
+        h.read(cx, |o, _| assert_eq!(o.settings.diff.mode, Mode::Unified));
+        h.click(cx, "three-way");
+        assert!(h.bounds(cx, "merge-result").is_some());
+        assert!(h.bounds(cx, "center-pane").is_none(), "still expanded");
+        h.click(cx, "diff-expand");
+        assert!(h.bounds(cx, "center-pane").is_some());
+    }
+
+    #[gpui::test]
+    fn ui_a_conflicted_file_without_markers_says_so(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        // Saved from the merge tool: the file has no markers but is still conflicted.
+        h.click(cx, "merge-save");
+        assert!(!repo.read("c.txt").contains("<<<<<<<"));
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        h.click(cx, "unified");
+        assert!(h.read(cx, |o, _| o.diff_no_markers));
+        assert!(h.bounds(cx, "no-markers-three-way").is_some());
+        h.click(cx, "no-markers-resolve");
+        assert!(conflicted_files(&h, cx).is_empty());
+    }
+
+    #[gpui::test]
+    fn ui_three_way_wraps_with_the_wrap_button(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        let wrap = h.read(cx, |o, _| o.settings.diff.soft_wrap);
+        assert_eq!(h.read(cx, |_, cx| view.read(cx).soft_wrap()), wrap);
+        h.click(cx, "wrap");
+        assert_eq!(h.read(cx, |_, cx| view.read(cx).soft_wrap()), !wrap);
+        // The gutter buttons are still drawn with wrapping changed.
+        h.act(cx, |_, _, cx| cx.notify());
+        assert!(h.bounds(cx, "merge-chunk-apply:left:0").is_some());
     }
 }

@@ -14,8 +14,13 @@ All notable changes to Osier are documented here. The format follows
   one side or both, type in the result, accept a whole side, and Save or Apply (marks the
   file resolved). Changes are highlighted word by word, joined across the panes, and the
   panes scroll together. During a rebase your commit stays on the left.
-- The merge tool expands to the whole window (button or `ctrl-shift-m`, `Esc` to go back),
-  with previous / next conflicted file; Apply moves on to the next file.
+- Conflicted files open in the merge tool by default; Unified shows the inline conflict
+  blocks instead, and the choice is remembered (`diff.conflicts`), separately from the
+  unified / split choice for other files. A conflicted file without markers left says so and
+  offers 3-way or Mark resolved instead of an empty diff.
+- **Expand** in the diff pane header (or `ctrl-shift-m`, `Esc` to go back) hides the sidebar
+  and file list in every layout and stays on while switching. In the merge tool it adds
+  previous / next conflicted file, and Apply moves on to the next file.
 - `osier merge <left> [<base>] <right> <output>` and `osier diff <left> <right>` open the
   merge tool or the diff view in a window of their own, for any files and as git's
   `mergetool` / `difftool` (setup in the README). Without a base every difference is a

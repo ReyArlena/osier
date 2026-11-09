@@ -714,22 +714,41 @@ fn diff_page(view: &Entity<Osier>) -> SettingPage {
                     vec![
                         ("unified".into(), "Unified".into()),
                         ("split".into(), "Split".into()),
-                        ("three-way".into(), "3-way merge for conflicts, split otherwise".into()),
                     ],
                     get(view, |o| match o.settings.diff.mode {
                         osier_config::settings::DiffMode::Split => "split".into(),
                         osier_config::settings::DiffMode::Unified => "unified".into(),
-                        osier_config::settings::DiffMode::ThreeWay => "three-way".into(),
                     }),
                     set(view, |o, v: SharedString, _| {
-                        o.settings.diff.mode = match v.as_ref() {
-                            "split" => osier_config::settings::DiffMode::Split,
-                            "three-way" => osier_config::settings::DiffMode::ThreeWay,
-                            _ => osier_config::settings::DiffMode::Unified,
+                        o.settings.diff.mode = if v.as_ref() == "split" {
+                            osier_config::settings::DiffMode::Split
+                        } else {
+                            osier_config::settings::DiffMode::Unified
                         }
                     }),
                 )
                 .default_value("unified".to_string()),
+            ),
+            SettingItem::new(
+                "Conflicted files",
+                SettingField::dropdown(
+                    vec![
+                        ("three-way".into(), "3-way merge tool".into()),
+                        ("inline".into(), "Inline conflict blocks".into()),
+                    ],
+                    get(view, |o| match o.settings.diff.conflicts {
+                        osier_config::settings::ConflictView::ThreeWay => "three-way".into(),
+                        osier_config::settings::ConflictView::Inline => "inline".into(),
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.diff.conflicts = if v.as_ref() == "inline" {
+                            osier_config::settings::ConflictView::Inline
+                        } else {
+                            osier_config::settings::ConflictView::ThreeWay
+                        }
+                    }),
+                )
+                .default_value("three-way".to_string()),
             ),
             SettingItem::new(
                 "Context lines",

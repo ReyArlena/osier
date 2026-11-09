@@ -485,11 +485,27 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "Diff",
-            "3-way merge layout for conflicts",
+            "Conflicts in the 3-way merge tool",
             Lucide::Columns3,
             None,
             false,
-            |o, _, cx| o.set_three_way(cx),
+            |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::ThreeWay, cx),
+        ),
+        cmd(
+            "Diff",
+            "Conflicts inline",
+            Lucide::FileDiff,
+            None,
+            false,
+            |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::Inline, cx),
+        ),
+        cmd(
+            "Diff",
+            "Expand the diff pane",
+            Lucide::Maximize2,
+            None,
+            false,
+            |o, _, cx| o.toggle_diff_expanded(cx),
         ),
         cmd(
             "Diff",
@@ -497,7 +513,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             Lucide::FileDiff,
             None,
             false,
-            |o, _, cx| o.toggle_soft_wrap(cx),
+            |o, window, cx| o.toggle_soft_wrap(window, cx),
         ),
         cmd(
             "Open",

@@ -59,8 +59,6 @@ pub(crate) struct Merges {
     pub(crate) views: HashMap<MergeKey, MergeSlot>,
     pub(crate) load: Option<MergeLoad>,
     pub(crate) task: Option<Task<()>>,
-    /// The merge tool fills the window: sidebar and centre column hidden.
-    pub(crate) expanded: bool,
 }
 
 impl std::fmt::Debug for Merges {
@@ -68,7 +66,6 @@ impl std::fmt::Debug for Merges {
         f.debug_struct("Merges")
             .field("views", &self.views.len())
             .field("load", &self.load)
-            .field("expanded", &self.expanded)
             .finish()
     }
 }
@@ -76,7 +73,7 @@ impl std::fmt::Debug for Merges {
 impl Osier {
     /// The conflicted file the diff pane shows with the merge tool, if it does.
     pub(crate) fn three_way_target(&self) -> Option<MergeKey> {
-        if self.settings.diff.mode != osier_config::settings::DiffMode::ThreeWay
+        if self.settings.diff.conflicts != osier_config::settings::ConflictView::ThreeWay
             || self.blame.is_some()
             || self.editor.is_some()
         {
@@ -90,11 +87,6 @@ impl Osier {
             } => Some((project.path.clone(), path.clone())),
             _ => None,
         }
-    }
-
-    /// The merge tool fills the window right now.
-    pub(crate) fn merge_fills_window(&self) -> bool {
-        self.merges.expanded && self.three_way_target().is_some()
     }
 
     /// Conflicted files of the active project, in list order.
@@ -134,7 +126,12 @@ impl Osier {
         if !self.merges.views.contains_key(&key) {
             match self.merges.load.take() {
                 Some(MergeLoad::Ready(k, input)) if k == key => {
-                    let view = cx.new(|cx| MergeView::new(input, MergeHost::App, window, cx));
+                    let wrap = self.settings.diff.soft_wrap;
+                    let view = cx.new(|cx| {
+                        let mut v = MergeView::new(input, MergeHost::App, window, cx);
+                        v.set_soft_wrap(wrap, window, cx);
+                        v
+                    });
                     let event_key = key.clone();
                     let events = cx.subscribe_in(&view, window, move |this, _, ev, window, cx| {
                         this.on_merge_event(event_key.clone(), ev, window, cx)
@@ -166,7 +163,7 @@ impl Osier {
             .iter()
             .position(|p| *p == key.1)
             .map(|i| (i + 1, conflicted.len()));
-        let expanded = self.merges.expanded;
+        let expanded = self.diff_expanded;
         let view = self.merges.views.get(&key).map(|s| s.view.clone());
         if let Some(view) = &view {
             view.update(cx, |v, cx| {
@@ -208,11 +205,6 @@ impl Osier {
         }));
     }
 
-    pub(crate) fn toggle_merge_expanded(&mut self, cx: &mut Context<Self>) {
-        self.merges.expanded = !self.merges.expanded;
-        cx.notify();
-    }
-
     /// Move to the conflicted file `delta` places away (wrapping).
     pub(crate) fn step_conflicted_file(&mut self, delta: isize, cx: &mut Context<Self>) {
         let files = self.conflicted_paths();
@@ -252,11 +244,11 @@ impl Osier {
                 );
                 self.merges.views.remove(&key);
                 // Expanded, go straight on to the next conflicted file.
-                if self.merges.expanded {
+                if self.diff_expanded {
                     let next = self.conflicted_paths().into_iter().find(|p| *p != path);
                     match next {
                         Some(next) => self.select_file(next, Area::Conflicted, cx),
-                        None => self.merges.expanded = false,
+                        None => self.diff_expanded = false,
                     }
                 }
                 cx.notify();
@@ -270,7 +262,6 @@ impl Osier {
                     cx,
                 );
             }
-            MergeEvent::ToggleExpand => self.toggle_merge_expanded(cx),
             MergeEvent::PreviousFile => self.step_conflicted_file(-1, cx),
             MergeEvent::NextFile => self.step_conflicted_file(1, cx),
             MergeEvent::Cancel => {}

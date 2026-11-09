@@ -123,7 +123,8 @@ impl Osier {
         let editing = self.editor.is_some();
         let viewing = matches!(&selection, Selection::WorkFile { .. });
         let three_way = self.three_way_target().is_some();
-        let three_way_mode = self.settings.diff.mode == osier_config::settings::DiffMode::ThreeWay;
+        let three_way_mode =
+            self.settings.diff.conflicts == osier_config::settings::ConflictView::ThreeWay;
         let conflicted = matches!(&area, Some((_, Area::Conflicted)));
         let body: AnyElement = if let Some(view) = &blame {
             self.render_blame(view, cx)
@@ -179,6 +180,50 @@ impl Osier {
                         .small()
                         .label("Load anyway")
                         .on_click(cx.listener(|this, _, _, cx| this.force_large_diff(cx))),
+                )
+                .into_any_element()
+        } else if self.diff_no_markers
+            && let Some((path, Area::Conflicted)) = &area
+        {
+            let path = path.clone();
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_6()
+                .child(div().font_medium().child("No conflict markers left"))
+                .child(div().text_sm().text_center().text_color(muted).child(
+                    "The file was edited or saved after the merge stopped, so there are no \
+                     conflict blocks to show. Mark it resolved if it is right, or merge it again \
+                     from the original versions with 3-way.",
+                ))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("no-markers-three-way")
+                                .test_id("no-markers-three-way")
+                                .outline()
+                                .small()
+                                .label("Open in 3-way")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_conflict_view(
+                                        osier_config::settings::ConflictView::ThreeWay,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .child(
+                            Button::new("no-markers-resolve")
+                                .test_id("no-markers-resolve")
+                                .primary()
+                                .small()
+                                .label("Mark resolved")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.mark_resolved(path.clone(), window, cx)
+                                })),
+                        ),
                 )
                 .into_any_element()
         } else if let Some(error) = &self.diff_error {
@@ -502,9 +547,25 @@ impl Osier {
                                 .ghost()
                                 .xsmall()
                                 .label("Unified")
-                                .selected(!three_way_mode && mode == DiffMode::Unified)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.set_diff_mode(DiffMode::Unified, cx)
+                                .selected(if conflicted {
+                                    !three_way_mode
+                                } else {
+                                    mode == DiffMode::Unified
+                                })
+                                .tooltip(if conflicted {
+                                    "Conflict blocks inline, with Accept buttons"
+                                } else {
+                                    "Changes in one column"
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if conflicted {
+                                        this.set_conflict_view(
+                                            osier_config::settings::ConflictView::Inline,
+                                            cx,
+                                        )
+                                    } else {
+                                        this.set_diff_mode(DiffMode::Unified, cx)
+                                    }
                                 })),
                         )
                         .child(
@@ -513,7 +574,14 @@ impl Osier {
                                 .ghost()
                                 .xsmall()
                                 .label("Split")
-                                .selected(!three_way_mode && mode == DiffMode::Split)
+                                .selected(!conflicted && mode == DiffMode::Split)
+                                // Conflict blocks only come in one column.
+                                .disabled(conflicted)
+                                .tooltip(if conflicted {
+                                    "Not for conflicts: 3-way puts the two sides next to each other"
+                                } else {
+                                    "Before and after side by side"
+                                })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_diff_mode(DiffMode::Split, cx)
                                 })),
@@ -524,13 +592,19 @@ impl Osier {
                                 .ghost()
                                 .xsmall()
                                 .label("3-way")
-                                .selected(three_way_mode)
+                                .selected(conflicted && three_way_mode)
+                                .disabled(!conflicted)
                                 .tooltip(if conflicted {
                                     "Merge tool: yours, the result and theirs side by side"
                                 } else {
-                                    "Merge tool for files with conflicts; other files show split"
+                                    "Merge tool, for files with conflicts"
                                 })
-                                .on_click(cx.listener(|this, _, _, cx| this.set_three_way(cx))),
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_conflict_view(
+                                        osier_config::settings::ConflictView::ThreeWay,
+                                        cx,
+                                    )
+                                })),
                         )
                         .child(
                             Button::new("wrap")
@@ -540,7 +614,9 @@ impl Osier {
                                 .icon(Lucide::TextWrap)
                                 .selected(self.settings.diff.soft_wrap)
                                 .tooltip("Wrap long lines")
-                                .on_click(cx.listener(|this, _, _, cx| this.toggle_soft_wrap(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_soft_wrap(window, cx)
+                                })),
                         )
                         .child(Separator::vertical().h_4())
                         .child(
@@ -552,7 +628,30 @@ impl Osier {
                                 .disabled(true)
                                 .tooltip("Revert file"),
                         )
-                    }),
+                    })
+                    .child(
+                        Button::new("diff-expand")
+                            .test_id("diff-expand")
+                            .ghost()
+                            .xsmall()
+                            .icon(if self.diff_expanded {
+                                Lucide::Minimize2
+                            } else {
+                                Lucide::Maximize2
+                            })
+                            .label(if self.diff_expanded {
+                                "Collapse"
+                            } else {
+                                "Expand"
+                            })
+                            .selected(self.diff_expanded)
+                            .tooltip(if self.diff_expanded {
+                                "Back to the normal layout (Esc)"
+                            } else {
+                                "Hide the sidebar and file list"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_diff_expanded(cx))),
+                    ),
             )
             .child(
                 div()

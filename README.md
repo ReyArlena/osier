@@ -154,9 +154,10 @@ overlay list them.
 
 ### Merge tool
 
-Pick **3-way** at the top of the diff pane (or `diff.mode = "three-way"` in the config) and
-conflicted files open in the merge tool: your version on the left, the result in the middle
-and theirs on the right. During a rebase the left side is still your commit and the right
+Conflicted files open in the merge tool: your version on the left, the result in the middle
+and theirs on the right. **Unified** at the top of the diff pane shows the conflict blocks
+inline instead (with Accept Current / Incoming / Both), **3-way** goes back; the choice is
+remembered (`diff.conflicts` in the config). During a rebase the left side is still your commit and the right
 side is the branch you are rebasing onto.
 
 - `>>` / `<<` beside a change copies it into the result; `X` ignores it. Applying the second
@@ -169,10 +170,11 @@ side is the branch you are rebasing onto.
 - **Accept Left** / **Accept Right** use one side for the whole file. **Save** writes the
   result and leaves the file conflicted; **Apply** (`ctrl-enter` in the result) writes it and
   marks it resolved (it asks first if changes are still undecided).
-- The expand button (or `ctrl-shift-m`) hides the sidebar and file list; `Esc` brings them
-  back. While expanded, arrows step through the conflicted files and Apply moves on to the
-  next one.
-- Other files show the split diff while 3-way is selected.
+- Long lines wrap with the diff pane's wrap button; the panes stay lined up.
+- **Expand** at the top right of the diff pane (or `ctrl-shift-m`) hides the sidebar and file
+  list for any layout, and stays on while you switch layouts; `Esc` or **Collapse** brings
+  them back. While expanded, the merge tool's arrows step through the conflicted files and
+  Apply moves on to the next one.
 
 ### git mergetool and difftool
 
@@ -246,7 +248,8 @@ empty_changes_tab = "log"     # tab shown instead of an empty Changes tab after 
 context_lines = 3
 line_numbers = true
 soft_wrap = true
-mode = "unified"              # unified | split | three-way (merge tool for conflicts)
+mode = "unified"              # unified | split
+conflicts = "three-way"       # three-way (merge tool) | inline (conflict blocks)
 large_file_bytes = 2097152
 
 [git]
