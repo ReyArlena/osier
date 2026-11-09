@@ -131,11 +131,7 @@ impl Osier {
                 list = list.child(
                     h_flex()
                         .id((title, ix))
-                        .test_id(format!(
-                            "change-row:{}:{}",
-                            title.to_lowercase(),
-                            entry.path
-                        ))
+                        .test_id(|| format!("change-row:{}:{}", title.to_lowercase(), entry.path))
                         .group("row")
                         .px_3()
                         .py_1()
@@ -315,11 +311,9 @@ impl Osier {
                         })
                         .child(
                             Checkbox::new(SharedString::from(format!("stage-{title}-{ix}")))
-                                .test_id(format!(
-                                    "change-stage:{}:{}",
-                                    title.to_lowercase(),
-                                    entry.path
-                                ))
+                                .test_id(|| {
+                                    format!("change-stage:{}:{}", title.to_lowercase(), entry.path)
+                                })
                                 .small()
                                 .checked(area == Area::Staged)
                                 .disabled(area == Area::Conflicted)
@@ -375,7 +369,7 @@ impl Osier {
                                     )
                                     .child(
                                         Button::new(SharedString::from(format!("resolved-{ix}")))
-                                            .test_id(format!("mark-resolved:{}", entry.path))
+                                            .test_id(|| format!("mark-resolved:{}", entry.path))
                                             .outline()
                                             .xsmall()
                                             .label("Mark resolved")

@@ -938,7 +938,7 @@ impl Palette {
             .icon(c.icon)
             .child(move |_, _| {
                 h_flex()
-                    .test_id(id.clone())
+                    .test_id(|| id.clone())
                     .w_full()
                     .gap_3()
                     .items_center()
@@ -982,7 +982,7 @@ impl Palette {
             .icon(icon)
             .child(move |_, _| {
                 h_flex()
-                    .test_id(format!("palette-command:{label}"))
+                    .test_id(|| format!("palette-command:{label}"))
                     .w_full()
                     .gap_3()
                     .items_center()

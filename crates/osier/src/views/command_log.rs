@@ -49,7 +49,7 @@ impl Osier {
             list = list.child(
                 v_flex()
                     .id(("cmd", id as usize))
-                    .test_id(format!("command-row:{id}"))
+                    .test_id(|| format!("command-row:{id}"))
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().list_hover))
                     .when(is_open, |this| this.bg(cx.theme().list_active))

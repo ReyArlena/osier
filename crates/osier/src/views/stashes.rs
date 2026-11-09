@@ -126,7 +126,7 @@ impl Osier {
                         let oid = s.oid.clone();
                         move |this, _, _, cx| this.select_stash(oid.clone(), cx)
                     }))
-                    .test_id(format!("stash-row:{}", s.index))
+                    .test_id(|| format!("stash-row:{}", s.index))
                     .group("row")
                     .px_3()
                     .py_1p5()

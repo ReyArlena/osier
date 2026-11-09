@@ -195,7 +195,7 @@ impl Osier {
             list = list.child(
                 h_flex()
                     .id(("patch", ix))
-                    .test_id(format!("patch-row:{}", p.id))
+                    .test_id(|| format!("patch-row:{}", p.id))
                     .group("row")
                     .px_3()
                     .py_1p5()

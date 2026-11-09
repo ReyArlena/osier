@@ -118,7 +118,7 @@ impl Osier {
                     .children(tabs.iter().map(|t| {
                         KitTab::new()
                             .label(t.label())
-                            .test_id(format!("tab-{}", t.label().to_lowercase()))
+                            .test_id(|| format!("tab-{}", t.label().to_lowercase()))
                             .when(*t == Tab::Changes && changes > 0, |tab| {
                                 tab.suffix(
                                     div()

@@ -379,7 +379,7 @@ impl Osier {
                                                 })
                                         });
                                     ListItem::new(("commit", ix))
-                                        .test_id(format!("log-row:{ix}"))
+                                        .test_id(|| format!("log-row:{ix}"))
                                         .group("log-row")
                                         .selected(is_selected)
                                         .h(px(crate::graph::ROW_HEIGHT))
@@ -434,7 +434,7 @@ impl Osier {
                                                         commit.committed_at,
                                                         cx,
                                                     )
-                                                    .test_id(format!("commit-time:{ix}"))
+                                                    .test_id(|| format!("commit-time:{ix}"))
                                                     .text_xs()
                                                     .text_color(muted)
                                                     .flex_none()
@@ -692,7 +692,7 @@ fn subject_with_refs(
     let (base, hover) = fade;
     if refs.is_empty() {
         return div()
-            .test_id(format!("log-subject:{ix}"))
+            .test_id(|| format!("log-subject:{ix}"))
             .flex_1()
             .min_w_0()
             .text_sm()
@@ -709,7 +709,7 @@ fn subject_with_refs(
             .to_string();
         div()
             .flex_none()
-            .test_id(format!("log-ref:{ix}:{label}"))
+            .test_id(|| format!("log-ref:{ix}:{label}"))
             .child(ref_tag(label, is_head, is_tag, cx))
     });
     if !right {
@@ -723,7 +723,7 @@ fn subject_with_refs(
             .children(badges)
             .child(
                 div()
-                    .test_id(format!("log-subject:{ix}"))
+                    .test_id(|| format!("log-subject:{ix}"))
                     .text_sm()
                     .truncate()
                     .min_w_0()
@@ -743,7 +743,7 @@ fn subject_with_refs(
         .child(
             // Runs under the gap so the fade, not the clip, ends the text.
             div()
-                .test_id(format!("log-subject:{ix}"))
+                .test_id(|| format!("log-subject:{ix}"))
                 .flex_1()
                 .min_w_0()
                 .mr(px(-REF_GAP))

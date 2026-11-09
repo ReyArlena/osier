@@ -279,7 +279,7 @@ impl Osier {
                                 };
                                 move |this, _, _, cx| this.select_ref(row.clone(), cx)
                             }))
-                            .test_id(format!("branch-row:{}", b.name))
+                            .test_id(|| format!("branch-row:{}", b.name))
                             .group("row")
                             .px_3()
                             .py_1p5()
@@ -355,7 +355,7 @@ impl Osier {
                                     })
                                     .child(
                                         div()
-                                            .test_id(format!("branch-menu:{}", b.name))
+                                            .test_id(|| format!("branch-menu:{}", b.name))
                                             .when(!menu_buttons, |d| d.hidden())
                                             .child(
                                                 Button::new(SharedString::from(format!(
@@ -462,7 +462,7 @@ impl Osier {
                             let row = RefRow::Tag(t.name.clone());
                             move |this, _, _, cx| this.select_ref(row.clone(), cx)
                         }))
-                        .test_id(format!("tag-row:{}", t.name))
+                        .test_id(|| format!("tag-row:{}", t.name))
                         .group("row")
                         .px_3()
                         .py_1p5()

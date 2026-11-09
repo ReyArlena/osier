@@ -563,7 +563,7 @@ impl Osier {
                             let click_id = id.clone();
                             let is_selected = selected_path.as_deref() == Some(id.as_str());
                             ListItem::new(ix)
-                                .test_id(format!("files-row:{id}"))
+                                .test_id(|| format!("files-row:{id}"))
                                 .w_full()
                                 .px_2()
                                 .pl(px(14.) * entry.depth() + px(8.))
@@ -584,7 +584,7 @@ impl Osier {
                                                 "files-change-tooltip",
                                                 cx,
                                             )
-                                            .test_id(format!("files-dirty:{id}"))
+                                            .test_id(|| format!("files-dirty:{id}"))
                                             .child(
                                                 Icon::new(icon).xsmall().text_color(changes_color),
                                             )
@@ -613,7 +613,7 @@ impl Osier {
                                                     "files-ignored-tooltip",
                                                     cx,
                                                 )
-                                                .test_id(format!("files-ignored:{id}"))
+                                                .test_id(|| format!("files-ignored:{id}"))
                                                 .flex_none()
                                                 .flex()
                                                 .gap_1()
@@ -638,7 +638,7 @@ impl Osier {
                                                         "files-change-tooltip",
                                                         cx,
                                                     )
-                                                    .test_id(format!("files-dirty:{id}"))
+                                                    .test_id(|| format!("files-dirty:{id}"))
                                                     .flex_none()
                                                     .mx_1()
                                                     .size(px(6.))

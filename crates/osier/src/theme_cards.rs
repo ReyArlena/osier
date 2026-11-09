@@ -33,7 +33,7 @@ pub(crate) fn theme_picker(view: &Entity<Osier>, dark: bool, cx: &App) -> AnyEle
         cards = cards.child(
             v_flex()
                 .id(SharedString::from(format!("theme-card-{name}")))
-                .test_id(format!("theme-card:{name}"))
+                .test_id(|| format!("theme-card:{name}"))
                 .w(px(178.))
                 .p_1p5()
                 .gap_1p5()

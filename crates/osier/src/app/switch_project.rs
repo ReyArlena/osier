@@ -69,7 +69,7 @@ impl ProjectEntry {
         let muted = cx.theme().muted_foreground;
         let by_icon = self.dirty && !self.dot;
         h_flex()
-            .test_id(format!("palette-project:{}", self.name))
+            .test_id(|| format!("palette-project:{}", self.name))
             .w_full()
             .gap_3()
             .items_center()

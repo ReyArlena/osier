@@ -755,7 +755,7 @@ fn repo_config_body(
                 let weak = weak.clone();
                 line.child(
                     Button::new(("repo-config-open", ix))
-                        .test_id(format!("repo-config-open:{ix}"))
+                        .test_id(|| format!("repo-config-open:{ix}"))
                         .xsmall()
                         .ghost()
                         .label("Open")

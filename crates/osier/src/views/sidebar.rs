@@ -313,7 +313,7 @@ impl Osier {
             list = list.child(
                 v_flex()
                     .id(SharedString::from(format!("filter-suggestion:{term}")))
-                    .test_id(format!("filter-suggestion:{term}"))
+                    .test_id(|| format!("filter-suggestion:{term}"))
                     .px_2()
                     .py_1()
                     .rounded(cx.theme().radius)

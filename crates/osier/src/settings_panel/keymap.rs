@@ -154,7 +154,7 @@ fn mode_buttons(
         let (name, icon, tip) = info(mode);
         group = group.child(
             Button::new(SharedString::from(format!("keymode-{id}-{stored}-{name}")))
-                .test_id(format!("keymode:{id}:{stored}:{name}"))
+                .test_id(|| format!("keymode:{id}:{stored}:{name}"))
                 .icon(icon)
                 .tooltip(tip)
                 // The chosen mode is filled so it reads at a glance; the others are outlined.
@@ -217,7 +217,7 @@ fn key_row(
                 .when_some(modes, |this, m| this.child(m))
                 .child(
                     Button::new(SharedString::from(format!("keymap-remove-{id}-{k}")))
-                        .test_id(format!("keymap-remove:{id}:{k}"))
+                        .test_id(|| format!("keymap-remove:{id}:{k}"))
                         .ghost()
                         .xsmall()
                         .icon(Lucide::X)
@@ -234,7 +234,7 @@ fn key_row(
     } else {
         row.child(
             Button::new(SharedString::from(format!("keymap-add-{id}")))
-                .test_id(format!("keymap-add:{id}"))
+                .test_id(|| format!("keymap-add:{id}"))
                 .ghost()
                 .with_size(options.size())
                 .icon(Lucide::Plus)
@@ -251,7 +251,7 @@ fn key_row(
         .child(row.when(overridden, |row| {
             row.child(
                 Button::new(SharedString::from(format!("keymap-reset-{id}")))
-                    .test_id(format!("keymap-reset:{id}"))
+                    .test_id(|| format!("keymap-reset:{id}"))
                     .ghost()
                     .with_size(options.size())
                     .label("Reset")

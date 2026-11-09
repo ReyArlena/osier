@@ -1349,7 +1349,7 @@ impl Render for MergeView {
                     };
                     let apply =
                         Button::new(SharedString::from(format!("merge-chunk-apply-{key}-{ix}")))
-                            .test_id(format!("merge-chunk-apply:{key}:{ix}"))
+                            .test_id(|| format!("merge-chunk-apply:{key}:{ix}"))
                             .ghost()
                             .xsmall()
                             .icon(match side {
@@ -1373,7 +1373,7 @@ impl Render for MergeView {
                             }));
                     let ignore =
                         Button::new(SharedString::from(format!("merge-chunk-ignore-{key}-{ix}")))
-                            .test_id(format!("merge-chunk-ignore:{key}:{ix}"))
+                            .test_id(|| format!("merge-chunk-ignore:{key}:{ix}"))
                             .ghost()
                             .xsmall()
                             .icon(Lucide::X)

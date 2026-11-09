@@ -114,7 +114,7 @@ fn pill(repo_ix: usize, repo: &str, p: &Pill, view: &Entity<Osier>, cx: &App) ->
     let (v, repo, kind) = (view.clone(), repo.to_string(), p.kind);
     let id = format!("choice:{}:{repo_ix}", p.kind.id());
     h_flex()
-        .test_id(id.clone())
+        .test_id(|| id.clone())
         .flex_none()
         .items_center()
         .gap_1p5()
@@ -138,7 +138,7 @@ fn pill(repo_ix: usize, repo: &str, p: &Pill, view: &Entity<Osier>, cx: &App) ->
         })
         .child(
             Button::new(SharedString::from(format!("forget-{id}")))
-                .test_id(format!("choice-forget:{}:{repo_ix}", p.kind.id()))
+                .test_id(|| format!("choice-forget:{}:{repo_ix}", p.kind.id()))
                 .ghost()
                 .xsmall()
                 .rounded_full()
@@ -184,7 +184,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
                 .unwrap_or_else(|| repo.clone());
             col = col.child(
                 v_flex()
-                    .test_id(format!("project-choice-row:{ix}"))
+                    .test_id(|| format!("project-choice-row:{ix}"))
                     .gap_2()
                     .p_3()
                     .rounded(theme.radius)

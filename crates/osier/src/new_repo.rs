@@ -376,14 +376,14 @@ fn directory_row(dir: &Entity<InputState>, prefix: &'static str) -> impl IntoEle
         .gap_2()
         .child(
             div()
-                .test_id(format!("{prefix}-dir"))
+                .test_id(|| format!("{prefix}-dir"))
                 .flex_1()
                 .min_w_0()
                 .child(Input::new(dir)),
         )
         .child(
             Button::new(SharedString::from(format!("{prefix}-choose-dir")))
-                .test_id(format!("{prefix}-choose-dir"))
+                .test_id(|| format!("{prefix}-choose-dir"))
                 .outline()
                 .icon(Lucide::FolderOpen)
                 .label("Choose directory…")
