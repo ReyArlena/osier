@@ -414,12 +414,15 @@ impl Osier {
             let root = repo.workdir().to_path_buf();
             let same_project = self.files_tree_root.as_ref() == Some(&root);
             self.files_tree_root = Some(root);
-            // Folders keep the open or closed state they had. A filtered tree opens every
-            // folder, so the state from before the filter is kept for when it is cleared.
+            // Folders keep the open or closed state they had, also when they leave the tree
+            // for a while (a build folder being rebuilt, ignored files hidden). A filtered
+            // tree opens every folder, so the state from before the filter is kept for when
+            // it is cleared.
             if !same_project {
                 self.files_tree_folders.clear();
             } else if !self.files_tree_filtering {
-                self.files_tree_folders = folder_states(self.files_tree.read(cx));
+                let states = folder_states(self.files_tree.read(cx));
+                self.files_tree_folders.extend(states);
             }
             self.files_tree_filtering = filtering;
             let mut items = build_items(&paths, filtering);

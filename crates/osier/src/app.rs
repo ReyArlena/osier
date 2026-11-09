@@ -5431,6 +5431,19 @@ mod tests {
         set_filter(&h, cx, "");
         assert!(shown(&h, cx, "src/lib.rs"));
         assert!(!shown(&h, cx, "docs/d.md"));
+
+        // A folder that leaves the tree for a while (eg a build folder being rebuilt, or
+        // ignored files hidden) comes back the way it was.
+        repo.write("gen/out.txt", "g\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        h.click(cx, "files-row:gen");
+        assert!(shown(&h, cx, "gen/out.txt"));
+        std::fs::remove_dir_all(repo.path().join("gen")).unwrap();
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert!(!shown(&h, cx, "gen"));
+        repo.write("gen/out.txt", "g\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert!(shown(&h, cx, "gen/out.txt"), "gen came back closed");
     }
 
     #[gpui::test]
