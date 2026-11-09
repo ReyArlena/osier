@@ -216,7 +216,10 @@ impl Osier {
     ) -> bool {
         match Settings::load(&self.paths) {
             Ok(fresh) if fresh != self.settings => {
-                self.settings = fresh;
+                let old_scan_dirs = std::mem::replace(&mut self.settings, fresh)
+                    .projects
+                    .scan_dirs;
+                self.forget_recents_of_removed_scan_dirs(&old_scan_dirs);
                 self.apply_recent_status_mode(cx);
                 let minutes = self.settings.projects.recent_status_minutes.clamp(1, 60) as f32;
                 self.recent_interval
@@ -277,8 +280,32 @@ impl Osier {
     }
 
     pub(crate) fn remove_scan_dir(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
+        let old = self.settings.projects.scan_dirs.clone();
         self.settings.projects.scan_dirs.retain(|d| d != &dir);
+        self.forget_recents_of_removed_scan_dirs(&old);
         self.settings_changed(cx);
+    }
+
+    /// Drop the recents inside scan directories that `old` had and the settings no longer
+    /// do, so removing a scan directory takes all of its repositories out of the sidebar.
+    /// Open projects and repositories another scan directory still provides are kept.
+    fn forget_recents_of_removed_scan_dirs(&mut self, old: &[PathBuf]) {
+        use osier_config::scan::provider;
+        let dirs = &self.settings.projects.scan_dirs;
+        let removed: Vec<PathBuf> = old.iter().filter(|d| !dirs.contains(d)).cloned().collect();
+        if removed.is_empty() {
+            return;
+        }
+        let before = self.state.recent.len();
+        let projects = &self.projects;
+        self.state.recent.retain(|r| {
+            projects.iter().any(|p| &p.path == r)
+                || provider(&removed, r).is_none()
+                || provider(dirs, r).is_some()
+        });
+        if self.state.recent.len() != before {
+            self.save_state();
+        }
     }
 
     pub(crate) fn confirm_clear_recents(&mut self, window: &mut Window, cx: &mut Context<Self>) {

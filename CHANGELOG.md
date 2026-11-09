@@ -13,6 +13,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Removing a scan directory (in Settings or config.toml) also takes its repositories out of
+  recents, instead of leaving behind the ones you had opened. Open projects stay.
 - Opening a file or folder inside a repository that is already open (for example
   `osier src/main.rs`) switches to that project instead of adding it to the sidebar again.
 

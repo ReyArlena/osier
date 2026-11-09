@@ -7012,6 +7012,67 @@ mod tests {
     }
 
     #[gpui::test]
+    fn removing_a_scan_dir_forgets_its_recents(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        let scan_root = tempfile::tempdir().unwrap();
+        for name in ["alpha", "beta"] {
+            let r = scan_root.path().join(name);
+            std::fs::create_dir_all(&r).unwrap();
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&r)
+                .status()
+                .unwrap();
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| {
+            o.settings.projects.scan_dirs = vec![scan_root.path().to_path_buf()];
+            o.rescan_projects(cx);
+        });
+        // Open both scanned repositories (which makes them recents), then close beta.
+        for name in ["alpha", "beta"] {
+            let p = scan_root.path().join(name);
+            h.act(cx, |o, w, cx| o.open_project_notify(&p, w, cx));
+        }
+        h.act(cx, |o, w, cx| o.close_project(2, w, cx));
+        let names = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, cx| {
+                let recent: Vec<String> = o
+                    .state
+                    .recent
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect();
+                let sidebar: Vec<String> = o
+                    .recent_entries(cx)
+                    .iter()
+                    .map(|(p, _)| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect();
+                (recent, sidebar)
+            })
+        };
+        let (recent, sidebar) = names(&h, cx);
+        assert!(recent.contains(&"beta".to_string()), "{recent:?}");
+        assert_eq!(sidebar, ["beta"]);
+
+        let dir = scan_root.path().to_path_buf();
+        h.act(cx, |o, _, cx| o.remove_scan_dir(dir, cx));
+        let (recent, sidebar) = names(&h, cx);
+        let first = repo.path().file_name().unwrap().to_string_lossy();
+        assert!(!recent.contains(&"beta".to_string()), "{recent:?}");
+        assert!(
+            recent.contains(&"alpha".to_string()),
+            "open projects stay: {recent:?}"
+        );
+        assert!(
+            recent.iter().any(|r| *r == first),
+            "others stay: {recent:?}"
+        );
+        assert!(sidebar.is_empty(), "{sidebar:?}");
+    }
+
+    #[gpui::test]
     fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");
