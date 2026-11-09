@@ -556,3 +556,35 @@ fn menu_entries_show_their_key(cx: &mut TestAppContext) {
         Some("Prefix U")
     );
 }
+
+#[gpui::test]
+fn ui_shortcuts_survive_hiding_the_focused_filter(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    // Focus the sidebar filter, then hide the sidebar under it.
+    h.keys(cx, "/");
+    h.type_text(cx, "a");
+    h.keys(cx, "ctrl-b");
+    h.read(cx, |o, _| {
+        assert!(!o.sidebar_visible, "ctrl-b hid the sidebar")
+    });
+    h.keys(cx, "ctrl-2");
+    h.read(cx, |o, _| {
+        assert_eq!(o.tab, Tab::Log, "shortcuts still work with the filter gone")
+    });
+    h.keys(cx, "ctrl-b");
+    h.read(cx, |o, _| {
+        assert!(o.sidebar_visible, "and ctrl-b brings it back")
+    });
+
+    // The same with the Files tab's filter and a tab switch.
+    h.keys(cx, "?");
+    h.type_text(cx, "a");
+    h.keys(cx, "ctrl-1");
+    h.read(cx, |o, _| assert_eq!(o.tab, Tab::Changes));
+    h.keys(cx, "ctrl-2");
+    h.read(cx, |o, _| {
+        assert_eq!(o.tab, Tab::Log, "shortcuts work after leaving Files")
+    });
+}

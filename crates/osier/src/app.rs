@@ -561,6 +561,14 @@ impl Osier {
                     this.recent_status_on_focus();
                 }
             }));
+        // The focused element can leave the tree: a filter box whose panel was hidden
+        // (ctrl-b over the sidebar filter, a tab switch away from the Files filter) or a
+        // handle a closed dialog gave focus back to. Shortcuts dispatch from the focused
+        // element, so without this every key is dead until the user clicks.
+        this._subscriptions
+            .push(cx.on_focus_lost(window, |this, window, cx| {
+                this.focus_handle.focus(window, cx);
+            }));
         let slider = this.prefix_timeout.clone();
         this._subscriptions.push(cx.subscribe(
             &slider,
