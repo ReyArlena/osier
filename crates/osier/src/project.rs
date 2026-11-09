@@ -164,19 +164,6 @@ pub struct Prepared {
 }
 
 impl Project {
-    /// `watch_runner` drives the file watcher's own git calls; it should log only failures.
-    pub fn open(
-        runner: GitRunner,
-        watch_runner: GitRunner,
-        path: &Path,
-        log_page_size: usize,
-    ) -> Result<Self, String> {
-        Ok(Self::from_prepared(
-            Self::prepare(runner, watch_runner, path)?,
-            log_page_size,
-        ))
-    }
-
     /// Find the repository at `path` and start watching it. Runs git; call it off the UI
     /// thread when opening many projects.
     pub fn prepare(
@@ -184,9 +171,22 @@ impl Project {
         watch_runner: GitRunner,
         path: &Path,
     ) -> Result<Prepared, String> {
-        let repo = Repository::discover(runner, path).map_err(|e| e.to_string())?;
+        Ok(Self::prepare_repo(
+            Self::discover(runner, path)?,
+            watch_runner,
+        ))
+    }
+
+    /// The repository containing `path` (a file or folder anywhere inside it). Runs git.
+    pub fn discover(runner: GitRunner, path: &Path) -> Result<Repository, String> {
+        Repository::discover(runner, path).map_err(|e| e.to_string())
+    }
+
+    /// Start watching a repository found by [`Project::discover`]. `watch_runner` drives the
+    /// file watcher's own git calls; it should log only failures.
+    pub fn prepare_repo(repo: Repository, watch_runner: GitRunner) -> Prepared {
         let watch = crate::repo_watch::RepoWatch::start(repo.with_runner(watch_runner));
-        Ok(Prepared { repo, watch })
+        Prepared { repo, watch }
     }
 
     pub fn from_prepared(prepared: Prepared, log_page_size: usize) -> Self {

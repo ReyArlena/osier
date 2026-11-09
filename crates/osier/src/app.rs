@@ -1042,26 +1042,23 @@ impl Osier {
         cx: &mut Context<Self>,
     ) -> Result<usize, String> {
         if let Some(ix) = self.projects.iter().position(|p| p.path == path) {
-            if make_active {
-                let switched = self.active != Some(ix);
-                if switched {
-                    self.park_pane();
-                }
-                self.active = Some(ix);
-                if switched {
-                    self.switch_tab_for_project();
-                }
-                self.state.open(&self.projects[ix].path);
-                self.save_state();
-            }
-            return Ok(ix);
+            return Ok(self.reopen_project(ix, make_active));
         }
-        match Project::open(
-            self.runner.clone(),
-            self.watch_runner(),
-            path,
-            self.settings.git.log_page_size,
-        ) {
+        // `path` may be a file or folder inside a repository: compare its root too, so an
+        // open repository is not added a second time.
+        let opened = match Project::discover(self.runner.clone(), path) {
+            Ok(repo) => {
+                if let Some(ix) = self.projects.iter().position(|p| p.path == repo.workdir()) {
+                    return Ok(self.reopen_project(ix, make_active));
+                }
+                Ok(Project::from_prepared(
+                    Project::prepare_repo(repo, self.watch_runner()),
+                    self.settings.git.log_page_size,
+                ))
+            }
+            Err(error) => Err(error),
+        };
+        match opened {
             Ok(project) => {
                 let workdir = project.path.clone();
                 self.projects.push(project);
@@ -1086,6 +1083,23 @@ impl Osier {
                 Err(format!("{}: {error}", crate::format::tilde(path)))
             }
         }
+    }
+
+    /// Open-project path for a repository that is already open at `ix`.
+    fn reopen_project(&mut self, ix: usize, make_active: bool) -> usize {
+        if make_active {
+            let switched = self.active != Some(ix);
+            if switched {
+                self.park_pane();
+            }
+            self.active = Some(ix);
+            if switched {
+                self.switch_tab_for_project();
+            }
+            self.state.open(&self.projects[ix].path);
+            self.save_state();
+        }
+        ix
     }
 
     /// The runner for file watchers' own git calls: only failures reach the command log.
@@ -1218,10 +1232,10 @@ impl Osier {
     ) {
         use gpui_kit::component::WindowExt as _;
         use gpui_kit::component::notification::Notification;
-        let already_open = self.projects.iter().any(|p| p.path == path);
+        let before = self.projects.len();
         match self.open_project(path, true, cx) {
             Ok(ix) => {
-                if !already_open {
+                if self.projects.len() > before {
                     self.fresh_open = Some(self.projects[ix].path.clone());
                     if self.projects[ix].snapshot.is_some() {
                         self.switch_tab_for_project();
@@ -3978,6 +3992,26 @@ mod tests {
             (o.projects[0].name.clone(), o.projects[1].name.clone())
         });
         (h, a, b, names.0, names.1)
+    }
+
+    #[gpui::test]
+    fn opening_a_file_or_folder_inside_an_open_repo_focuses_it(cx: &mut TestAppContext) {
+        let (h, a, _b, _, _) = two_projects(cx);
+        a.commit_file("sub/c.txt", "c\n", "second");
+        for inside in [a.path().join("sub"), a.path().join("sub/c.txt")] {
+            h.act(cx, |o, w, cx| o.activate(1, w, cx));
+            assert_eq!(h.read(cx, |o, _| o.active), Some(1));
+            h.act(cx, |o, w, cx| o.open_project_notify(&inside, w, cx));
+            h.read(cx, |o, _| {
+                assert_eq!(o.projects.len(), 2, "{} added a copy", inside.display());
+                assert_eq!(
+                    o.active,
+                    Some(0),
+                    "{} focuses its repository",
+                    inside.display()
+                );
+            });
+        }
     }
 
     fn in_palette(h: &Harness, cx: &mut TestAppContext) -> bool {

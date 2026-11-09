@@ -11,6 +11,11 @@ All notable changes to Osier are documented here. The format follows
 - The right-click menu in Changes has "Discard changes…" (or "Move to trash…" for untracked
   files), the same as the row's hover button.
 
+### Fixed
+
+- Opening a file or folder inside a repository that is already open (for example
+  `osier src/main.rs`) switches to that project instead of adding it to the sidebar again.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
