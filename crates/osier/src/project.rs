@@ -30,10 +30,11 @@ pub struct Snapshot {
     pub remotes: Vec<Remote>,
     pub reflog: Vec<ReflogEntry>,
     /// Working tree listing for the Files tab: tracked plus untracked (not ignored).
-    pub files: Vec<String>,
+    /// Shared so the Files tab can tell a new listing from the one it last built from.
+    pub files: std::sync::Arc<Vec<String>>,
     /// Ignored files and why, loaded only while the Files tab shows them ("Ignored" on);
     /// `None` otherwise.
-    pub ignored: Option<IgnoredFiles>,
+    pub ignored: Option<std::sync::Arc<IgnoredFiles>>,
     pub worktrees: Vec<osier_git::ops::worktree::Worktree>,
     pub submodules: Vec<osier_git::submodule::Submodule>,
     /// Last five commit messages on HEAD, for the commit box history menu.
@@ -526,7 +527,7 @@ pub fn load_snapshot(
             })
             .into_iter()
             .collect();
-        IgnoredFiles { files, rules }
+        std::sync::Arc::new(IgnoredFiles { files, rules })
     });
     let worktrees = osier_git::ops::worktree::list(repo).map_err(|e| format!("worktree: {e}"))?;
     let identity = osier_git::config::identity(repo).map_err(|e| format!("config: {e}"))?;
@@ -554,7 +555,7 @@ pub fn load_snapshot(
         stashes,
         remotes,
         reflog,
-        files,
+        files: std::sync::Arc::new(files),
         ignored,
         worktrees,
         submodules,

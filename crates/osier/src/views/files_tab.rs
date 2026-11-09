@@ -62,6 +62,76 @@ pub(crate) fn build_items(paths: &[String], expand_all: bool) -> Vec<TreeItem> {
 }
 
 /// Case-insensitive substring match on the whole path, the same rule as the sidebar filter.
+/// The Files tab's rows for one listing, ignored list and filter. Building them sorts and
+/// walks every path, which with thousands of ignored files (eg a build folder) takes longer
+/// than a frame, so it is done once per change rather than on every draw.
+#[derive(Clone)]
+pub(crate) struct FilesListing {
+    files: std::sync::Arc<Vec<String>>,
+    ignored: Option<std::sync::Arc<crate::project::IgnoredFiles>>,
+    filter: String,
+    /// Tracked, untracked and (when shown) ignored paths that pass the filter.
+    paths: std::rc::Rc<Vec<String>>,
+    ignored_rows: std::rc::Rc<BTreeMap<String, IgnoredRow>>,
+    /// Paths before filtering.
+    total: usize,
+    filtering: bool,
+    /// Hash of what the tree is built from: a new key rebuilds the tree.
+    key: u64,
+}
+
+impl FilesListing {
+    fn new(
+        files: std::sync::Arc<Vec<String>>,
+        ignored: Option<std::sync::Arc<crate::project::IgnoredFiles>>,
+        filter: String,
+    ) -> Self {
+        let mut paths: Vec<String> = files.as_ref().clone();
+        let rows = match &ignored {
+            Some(ignored) => {
+                paths.extend(ignored.files.iter().cloned());
+                paths.sort();
+                paths.dedup();
+                ignored_rows(&paths, ignored)
+            }
+            None => BTreeMap::new(),
+        };
+        let total = paths.len();
+        filter_paths(&mut paths, &filter);
+        let filtering = !filter.trim().is_empty();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        paths.hash(&mut hasher);
+        ignored.is_some().hash(&mut hasher);
+        filtering.hash(&mut hasher);
+        Self {
+            key: hasher.finish(),
+            files,
+            ignored,
+            filter,
+            paths: std::rc::Rc::new(paths),
+            ignored_rows: std::rc::Rc::new(rows),
+            total,
+            filtering,
+        }
+    }
+
+    /// Whether this was built from exactly these lists (the same snapshot) and filter.
+    fn is_for(
+        &self,
+        files: &std::sync::Arc<Vec<String>>,
+        ignored: Option<&std::sync::Arc<crate::project::IgnoredFiles>>,
+        filter: &str,
+    ) -> bool {
+        std::sync::Arc::ptr_eq(&self.files, files)
+            && match (&self.ignored, ignored) {
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.filter == filter
+    }
+}
+
 /// How an ignored row is shown: badges naming the files the rules come from, and a tooltip
 /// with the rules themselves.
 #[derive(Debug, Clone, PartialEq)]
@@ -306,7 +376,7 @@ impl Osier {
             .map(|e| e.path.as_str())
             .collect();
         let mut tracked: std::collections::HashSet<String> = Default::default();
-        for f in &files {
+        for f in files.iter() {
             if untracked_files.contains(f.as_str())
                 || untracked_dirs.iter().any(|d| f.starts_with(d))
             {
@@ -322,25 +392,23 @@ impl Osier {
             }
         }
         let tracked = std::rc::Rc::new(tracked);
-        let mut paths = files;
-        let ignored_rows = std::rc::Rc::new(match ignored {
-            Some(ignored) => {
-                paths.extend(ignored.files.iter().cloned());
-                paths.sort();
-                paths.dedup();
-                ignored_rows(&paths, &ignored)
-            }
-            None => BTreeMap::new(),
-        });
-        let total = paths.len();
         let filter = self.files_filter.read(cx).value().to_string();
-        filter_paths(&mut paths, &filter);
-        let filtering = !filter.trim().is_empty();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        paths.hash(&mut hasher);
-        self.show_ignored.hash(&mut hasher);
-        filtering.hash(&mut hasher);
-        let key = hasher.finish();
+        let listing = match &self.files_listing {
+            Some(l) if l.is_for(&files, ignored.as_ref(), &filter) => l.clone(),
+            _ => {
+                let l = FilesListing::new(files, ignored, filter);
+                self.files_listing = Some(l.clone());
+                l
+            }
+        };
+        let FilesListing {
+            paths,
+            ignored_rows,
+            total,
+            filtering,
+            key,
+            ..
+        } = listing;
         if key != self.files_tree_key {
             self.files_tree_key = key;
             let root = repo.workdir().to_path_buf();

@@ -195,6 +195,9 @@ pub struct Osier {
     pub(crate) show_ignored: bool,
     /// Hash of the path set the tree was built from, so expansion survives refreshes.
     pub(crate) files_tree_key: u64,
+    /// The Files tab's rows, rebuilt only when the listing, the ignored list or the filter
+    /// changes (with thousands of ignored files, rebuilding on every frame is slow).
+    pub(crate) files_listing: Option<crate::views::files_tab::FilesListing>,
     /// Repository the tree was last built for, so its cursor is only carried over within
     /// one project.
     pub(crate) files_tree_root: Option<PathBuf>,
@@ -415,6 +418,7 @@ impl Osier {
             files_tree: cx.new(|cx| gpui_kit::component::tree::TreeState::new(cx)),
             show_ignored: false,
             files_tree_key: 0,
+            files_listing: None,
             files_tree_root: None,
             files_tree_folders: std::collections::HashMap::new(),
             files_tree_filtering: false,
@@ -7404,7 +7408,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .files;
-            assert_eq!(files, &["README.md", "blob.bin", "src/main.rs"]);
+            assert_eq!(files.as_slice(), &["README.md", "blob.bin", "src/main.rs"]);
         });
         h.act(cx, |osier, _, cx| {
             osier.select_work_file("README.md".into(), None, cx)
