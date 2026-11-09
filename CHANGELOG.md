@@ -22,6 +22,8 @@ All notable changes to Osier are documented here. The format follows
   branch gets "Pull requests for origin/... on GitHub", which opens GitHub's pull request list
   filtered to that branch. Branch rows (remote ones, and local ones with an upstream) have
   the same entry. Bindable as "Pull requests on GitHub" under Context menus in the keymap.
+- The command log shows when each command started (time of day on the row, the full date
+  when expanded, and in "Copy details").
 
 ### Fixed
 

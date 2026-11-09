@@ -46,6 +46,7 @@ impl Osier {
                 .replace(" --no-pager -c color.ui=never -c core.quotePath=false", "")
                 .replace("--no-pager -c color.ui=never -c core.quotePath=false ", "");
             let ms = rec.duration.as_millis();
+            let started = crate::format::unix_secs(rec.started);
             list = list.child(
                 v_flex()
                     .id(("cmd", id as usize))
@@ -89,6 +90,12 @@ impl Osier {
                             .py_0p5()
                             .gap_2()
                             .items_center()
+                            .child(
+                                div()
+                                    .text_color(muted)
+                                    .flex_none()
+                                    .child(crate::format::clock_time(started)),
+                            )
                             .child(if ok {
                                 Tag::success()
                                     .xsmall()
@@ -115,6 +122,10 @@ impl Osier {
                                 .pb_2()
                                 .gap_1()
                                 .child(div().text_color(muted).child(shell.clone()))
+                                .child(div().text_color(muted).child(format!(
+                                    "started: {}",
+                                    crate::format::full_time(started)
+                                )))
                                 .when_some(rec.cwd.as_ref(), |this, cwd| {
                                     this.child(
                                         div()
@@ -244,6 +255,10 @@ pub(crate) fn command_details(rec: &CommandRecord) -> String {
         None => "killed".into(),
     };
     let mut out = format!("$ {}\n", rec.as_shell());
+    out.push_str(&format!(
+        "started: {}\n",
+        crate::format::full_time(crate::format::unix_secs(rec.started))
+    ));
     if let Some(cwd) = &rec.cwd {
         out.push_str(&format!("cwd: {}\n", cwd.display()));
     }

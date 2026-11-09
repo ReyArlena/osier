@@ -32,6 +32,22 @@ fn relative_to(now: i64, unix: i64) -> String {
     }
 }
 
+/// Seconds since the epoch, 0 for times before it.
+pub fn unix_secs(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The local wall-clock time of day with seconds: "14:03:27".
+pub fn clock_time(unix: i64) -> String {
+    use chrono::TimeZone as _;
+    match chrono::Local.timestamp_opt(unix, 0).single() {
+        Some(t) => t.format("%H:%M:%S").to_string(),
+        None => "--:--:--".into(),
+    }
+}
+
 /// The full local date and time, for tooltips: "Monday 1 January 2024, 12:00".
 pub fn full_time(unix: i64) -> String {
     use chrono::TimeZone as _;
