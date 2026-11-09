@@ -95,6 +95,11 @@ osier -n [path]       start a separate window instead (--new-instance)
 osier --update        install the latest release (installs from the install script;
                       --check only reports, --force reinstalls)
 osier --version --verbose
+osier merge <left> [<base>] <right> <output>
+                      merge two versions of a file in a window of its own and write the
+                      result to <output> (exit 0 after Apply, 1 on Cancel)
+osier diff <left> <right>
+                      compare two files in a window of its own
 ```
 
 Installed with a package manager, Flatpak or cargo? Update it that way; `osier --update`
@@ -142,6 +147,38 @@ If you use Dux Shell (DankMaterialShell), Osier writes its shortcuts to
 overlay list them.
 
 ![Settings sheet](docs/screenshots/settings.png)
+
+### git mergetool and difftool
+
+`osier merge` and `osier diff` open a window of their own, without a repository, and git
+waits for it to close. Register them once:
+
+```sh
+git config --global merge.tool osier
+git config --global mergetool.osier.cmd 'osier merge "$LOCAL" "$BASE" "$REMOTE" "$MERGED"'
+git config --global mergetool.osier.trustExitCode true
+git config --global mergetool.keepBackup false
+
+git config --global diff.tool osier
+git config --global difftool.osier.cmd 'osier diff "$LOCAL" "$REMOTE"'
+git config --global difftool.prompt false
+```
+
+Then `git mergetool` opens each conflicted file in turn: Apply writes the result and git marks
+the file resolved, Cancel (or closing the window) leaves it conflicted. `git difftool` shows
+each changed file. With `trustExitCode` git believes Osier's exit code instead of asking
+whether the merge worked.
+
+Any two files work too, from anywhere, with or without a common ancestor:
+
+```sh
+osier merge mine.conf original.conf theirs.conf merged.conf
+osier merge a.txt b.txt result.txt     # no base: every difference is a conflict
+osier diff old.json new.json
+```
+
+A file literally named `merge` or `diff` in the current directory opens as a path with
+`osier ./merge`.
 
 ## Configuration
 

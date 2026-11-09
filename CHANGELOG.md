@@ -8,6 +8,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- `osier merge <left> [<base>] <right> <output>` and `osier diff <left> <right>` open the
+  merge tool or the diff view in a window of their own, for any files and as git's
+  `mergetool` / `difftool` (setup in the README). Without a base every difference is a
+  conflict.
 - "Update project" button, left of Fetch: fetches, then merges or rebases with your
   uncommitted changes set aside and put back, like PhpStorm's Update Project. It asks which
   method to use each time, preselecting your last choice (or the repository's `pull.rebase`
