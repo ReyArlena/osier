@@ -5188,6 +5188,39 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ignoring_the_selected_file_selects_its_neighbour(cx: &mut TestAppContext) {
+        use crate::row_actions::RowKind;
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "a\n", "first");
+        for f in ["one.tmp", "two.tmp", "three.tmp"] {
+            repo.write(f, "x\n");
+        }
+        let h = Harness::open(cx, &repo);
+        let selected = |h: &Harness, cx: &mut TestAppContext| {
+            h.read(cx, |o, _| match &o.active_project().unwrap().selection {
+                Selection::File { path, area } => Some((path.clone(), *area)),
+                _ => None,
+            })
+        };
+        // Untracked files are listed by name: one, three, two. Ignoring the middle one moves to
+        // the next, and ignoring the last moves back to the one before it.
+        for (pick, next) in [("three.tmp", "two.tmp"), ("two.tmp", "one.tmp")] {
+            h.act(cx, |o, _, cx| {
+                o.select_file(pick.into(), Area::Untracked, cx)
+            });
+            h.act(cx, |o, w, cx| {
+                o.run_row_action(RowKind::AddToGitignore, w, cx)
+            });
+            assert!(!status_has(&h, cx, pick), "{pick} ignored");
+            assert_eq!(
+                selected(&h, cx),
+                Some((next.to_string(), Area::Untracked)),
+                "after ignoring {pick}"
+            );
+        }
+    }
+
+    #[gpui::test]
     fn ui_discard_from_the_changes_menu(cx: &mut TestAppContext) {
         let repo = TempRepo::new();
         repo.commit_file("a.txt", "a\n", "first");
