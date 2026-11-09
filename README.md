@@ -28,6 +28,10 @@ none of the IDE.
   conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
 - **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
+- **Three-way merge tool**, like PhpStorm's: yours, the result and theirs side by side, with
+  apply / ignore on each change, "apply non-conflicting changes", word highlights and the
+  panes scrolling together. Expand it to the whole window, or use it from the terminal as
+  git's `mergetool` (and Osier's diff view as `difftool`).
 - **Patches**: copy files or commits as a patch, apply from clipboard or file with a dry run
   and a three-way fallback, and a patch clipboard that shelves changes and carries them
   between projects.
@@ -148,6 +152,28 @@ overlay list them.
 
 ![Settings sheet](docs/screenshots/settings.png)
 
+### Merge tool
+
+Pick **3-way** at the top of the diff pane (or `diff.mode = "three-way"` in the config) and
+conflicted files open in the merge tool: your version on the left, the result in the middle
+and theirs on the right. During a rebase the left side is still your commit and the right
+side is the branch you are rebasing onto.
+
+- `>>` / `<<` beside a change copies it into the result; `X` ignores it. Applying the second
+  side of a conflict adds it below the first.
+- **Apply non-conflicting changes**: Left, All or Right takes every change that does not
+  clash in one go.
+- The result is an ordinary editor: type in it freely, the changes move with your edits.
+- `F7` / `shift-F7` jump to the next / previous change; the gear menu has synchronised
+  scrolling, whitespace handling and word highlighting.
+- **Accept Left** / **Accept Right** use one side for the whole file. **Save** writes the
+  result and leaves the file conflicted; **Apply** (`ctrl-enter` in the result) writes it and
+  marks it resolved (it asks first if changes are still undecided).
+- The expand button (or `ctrl-shift-m`) hides the sidebar and file list; `Esc` brings them
+  back. While expanded, arrows step through the conflicted files and Apply moves on to the
+  next one.
+- Other files show the split diff while 3-way is selected.
+
 ### git mergetool and difftool
 
 `osier merge` and `osier diff` open a window of their own, without a repository, and git
@@ -220,7 +246,7 @@ empty_changes_tab = "log"     # tab shown instead of an empty Changes tab after 
 context_lines = 3
 line_numbers = true
 soft_wrap = true
-mode = "unified"              # unified | split
+mode = "unified"              # unified | split | three-way (merge tool for conflicts)
 large_file_bytes = 2097152
 
 [git]

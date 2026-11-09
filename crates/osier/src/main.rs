@@ -26,6 +26,7 @@ mod inline_code;
 mod install_route;
 mod instance;
 mod keymap;
+mod merge_ops;
 mod merge_view;
 mod merge_window;
 mod new_repo;

@@ -122,10 +122,33 @@ impl Osier {
 
         let editing = self.editor.is_some();
         let viewing = matches!(&selection, Selection::WorkFile { .. });
+        let three_way = self.three_way_target().is_some();
+        let three_way_mode = self.settings.diff.mode == osier_config::settings::DiffMode::ThreeWay;
+        let conflicted = matches!(&area, Some((_, Area::Conflicted)));
         let body: AnyElement = if let Some(view) = &blame {
             self.render_blame(view, cx)
         } else if let Some(editor) = &self.editor {
             Editor::new(&editor.state).size_full().into_any_element()
+        } else if three_way {
+            match self.merge_view(window, cx) {
+                Ok(Some(view)) => view.into_any_element(),
+                Ok(None) => v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .child(Spinner::new())
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child("Reading the versions…"),
+                    )
+                    .into_any_element(),
+                Err(error) => self
+                    .empty_state("Cannot show the merge tool", &error, cx)
+                    .into_any_element(),
+            }
         } else if viewing {
             self.render_viewer(window, cx)
         } else if self.diff_loading {
@@ -317,7 +340,9 @@ impl Osier {
                             .child(title),
                     )
                     .when_some(tag, |this, t| this.child(t))
-                    .when(lfs, |this| this.child(Tag::warning().xsmall().child("LFS pointer")))
+                    .when(lfs, |this| {
+                        this.child(Tag::warning().xsmall().child("LFS pointer"))
+                    })
                     .when(self.diff_files > 1, |this| {
                         this.child(
                             div()
@@ -327,35 +352,41 @@ impl Osier {
                         )
                     })
                     .child(div().flex_1())
-                    .when(matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing, |this| {
-                        this.child(
-                            Button::new("md-rendered").test_id("md-rendered")
-                                .ghost()
-                                .xsmall()
-                                .label("Rendered")
-                                .selected(!self.markdown_as_code)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.markdown_as_code {
-                                        this.toggle_markdown_code(cx)
-                                    }
-                                })),
-                        )
-                        .child(
-                            Button::new("md-code").test_id("md-code")
-                                .ghost()
-                                .xsmall()
-                                .label("Code")
-                                .selected(self.markdown_as_code)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if !this.markdown_as_code {
-                                        this.toggle_markdown_code(cx)
-                                    }
-                                })),
-                        )
-                    })
+                    .when(
+                        matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing,
+                        |this| {
+                            this.child(
+                                Button::new("md-rendered")
+                                    .test_id("md-rendered")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Rendered")
+                                    .selected(!self.markdown_as_code)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.markdown_as_code {
+                                            this.toggle_markdown_code(cx)
+                                        }
+                                    })),
+                            )
+                            .child(
+                                Button::new("md-code")
+                                    .test_id("md-code")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Code")
+                                    .selected(self.markdown_as_code)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if !this.markdown_as_code {
+                                            this.toggle_markdown_code(cx)
+                                        }
+                                    })),
+                            )
+                        },
+                    )
                     .when(blame.is_some(), |this| {
                         this.child(
-                            Button::new("close-blame").test_id("close-blame")
+                            Button::new("close-blame")
+                                .test_id("close-blame")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::X)
@@ -375,36 +406,44 @@ impl Osier {
                     })
                     .when(viewing && !editing, |this| {
                         this.child(
-                            Button::new("view-edit").test_id("view-edit")
+                            Button::new("view-edit")
+                                .test_id("view-edit")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Pencil)
                                 .tooltip("Edit this file in place")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
+                                ),
                         )
                     })
                     .when(editing, |this| {
                         let (save_label, save_tip) = self.save_button_text(cx);
                         this.child(
-                            Button::new("editor-save").test_id("editor-save")
+                            Button::new("editor-save")
+                                .test_id("editor-save")
                                 .primary()
                                 .xsmall()
                                 .label(save_label)
                                 .tooltip(save_tip)
-                                .on_click(cx.listener(|this, _, window, cx| this.save_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.save_editor(window, cx)),
+                                ),
                         )
                         .child(
-                            Button::new("editor-cancel").test_id("editor-cancel")
+                            Button::new("editor-cancel")
+                                .test_id("editor-cancel")
                                 .ghost()
                                 .xsmall()
                                 .label("Cancel")
                                 .on_click(cx.listener(|this, _, _, cx| this.close_editor(cx))),
                         )
                     })
-                    .when(!editing && matches!(&area, Some((_, Area::Conflicted))), |this| {
+                    .when(!editing && !three_way && conflicted, |this| {
                         let ready = self.can_apply_resolution(cx);
                         this.child(
-                            Button::new("apply-resolution").test_id("apply-resolution")
+                            Button::new("apply-resolution")
+                                .test_id("apply-resolution")
                                 .primary()
                                 .xsmall()
                                 .label("Apply resolution")
@@ -414,27 +453,38 @@ impl Osier {
                                 } else {
                                     "Pick Accept Current / Incoming / Both on every conflict first"
                                 })
-                                .on_click(cx.listener(|this, _, window, cx| this.apply_conflict_resolution(window, cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_conflict_resolution(window, cx)
+                                })),
                         )
                         .child(
-                            Button::new("edit-result").test_id("edit-result")
+                            Button::new("edit-result")
+                                .test_id("edit-result")
                                 .outline()
                                 .xsmall()
                                 .label("Edit result")
                                 .tooltip("Edit the merged file by hand")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
+                                ),
                         )
                     })
-                    .when(!editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted), |this| {
-                        this.child(
-                            Button::new("edit-file").test_id("edit-file")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Pencil)
-                                .tooltip("Edit this file in place")
-                                .on_click(cx.listener(|this, _, window, cx| this.open_editor(window, cx))),
-                        )
-                    })
+                    .when(
+                        !editing && matches!(&area, Some((_, a)) if *a != Area::Conflicted),
+                        |this| {
+                            this.child(
+                                Button::new("edit-file")
+                                    .test_id("edit-file")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Lucide::Pencil)
+                                    .tooltip("Edit this file in place")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_editor(window, cx)
+                                    })),
+                            )
+                        },
+                    )
                     .children(line_actions.iter().map(|action| {
                         let action = *action;
                         Button::new(SharedString::from(format!("lines-{}", action.label())))
@@ -446,30 +496,45 @@ impl Osier {
                             }))
                     }))
                     .when(!viewing && !editing, |this| {
-
-                        this
-                        .child(
-                            Button::new("unified").test_id("unified")
+                        this.child(
+                            Button::new("unified")
+                                .test_id("unified")
                                 .ghost()
                                 .xsmall()
                                 .label("Unified")
-                                .selected(mode == DiffMode::Unified)
+                                .selected(!three_way_mode && mode == DiffMode::Unified)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_diff_mode(DiffMode::Unified, cx)
                                 })),
                         )
                         .child(
-                            Button::new("split").test_id("split")
+                            Button::new("split")
+                                .test_id("split")
                                 .ghost()
                                 .xsmall()
                                 .label("Split")
-                                .selected(mode == DiffMode::Split)
+                                .selected(!three_way_mode && mode == DiffMode::Split)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_diff_mode(DiffMode::Split, cx)
                                 })),
                         )
                         .child(
-                            Button::new("wrap").test_id("wrap")
+                            Button::new("three-way")
+                                .test_id("three-way")
+                                .ghost()
+                                .xsmall()
+                                .label("3-way")
+                                .selected(three_way_mode)
+                                .tooltip(if conflicted {
+                                    "Merge tool: yours, the result and theirs side by side"
+                                } else {
+                                    "Merge tool for files with conflicts; other files show split"
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| this.set_three_way(cx))),
+                        )
+                        .child(
+                            Button::new("wrap")
+                                .test_id("wrap")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::TextWrap)
@@ -479,14 +544,14 @@ impl Osier {
                         )
                         .child(Separator::vertical().h_4())
                         .child(
-                            Button::new("revert").test_id("revert")
+                            Button::new("revert")
+                                .test_id("revert")
                                 .ghost()
                                 .xsmall()
                                 .icon(Lucide::Undo2)
                                 .disabled(true)
                                 .tooltip("Revert file"),
                         )
-
                     }),
             )
             .child(

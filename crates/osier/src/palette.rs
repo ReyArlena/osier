@@ -485,6 +485,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "Diff",
+            "3-way merge layout for conflicts",
+            Lucide::Columns3,
+            None,
+            false,
+            |o, _, cx| o.set_three_way(cx),
+        ),
+        cmd(
+            "Diff",
             "Toggle soft wrap",
             Lucide::FileDiff,
             None,

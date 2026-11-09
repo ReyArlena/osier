@@ -33,6 +33,7 @@ gpui_kit::actions!(
         ToggleSidebar,
         ToggleCommandLog,
         ToggleCommitDetails,
+        ToggleMergeExpanded,
         ToggleTheme,
         OpenSettings,
         OpenCommandPalette,
@@ -173,6 +174,8 @@ pub struct Osier {
     pub(crate) commit_message: Entity<TextareaState>,
     /// Editor shown in the diff pane for "edit result" / "edit file"; `None` when viewing.
     pub(crate) editor: Option<crate::edit_pane::FileEditor>,
+    /// Three-way merge tool views for conflicted files (`merge_ops.rs`).
+    pub(crate) merges: crate::merge_ops::Merges,
     /// File viewer for the Files tab (code, markdown, image, binary).
     pub(crate) viewer: Option<crate::viewer::Viewer>,
     /// Markdown files show rendered by default; this toggles to source.
@@ -329,10 +332,7 @@ impl Osier {
         } else {
             crate::config_watch::ConfigWatch::new(&paths.settings_file())
         };
-        let mode = match settings.diff.mode {
-            osier_config::settings::DiffMode::Unified => DiffMode::Unified,
-            osier_config::settings::DiffMode::Split => DiffMode::Split,
-        };
+        let mode = kit_mode(settings.diff.mode);
         let diff = cx.new(|cx| {
             DiffState::new([], cx)
                 .with_mode(mode)
@@ -381,6 +381,7 @@ impl Osier {
             focus_handle: cx.focus_handle(),
             commit_message,
             editor: None,
+            merges: crate::merge_ops::Merges::default(),
             viewer: None,
             markdown_as_code: false,
             files_filter,
@@ -1953,6 +1954,16 @@ impl Osier {
             DiffMode::Split => osier_config::settings::DiffMode::Split,
             _ => osier_config::settings::DiffMode::Unified,
         };
+        self.merges.expanded = false;
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// The three-pane merge tool for conflicted files (split for the others).
+    pub(crate) fn set_three_way(&mut self, cx: &mut Context<Self>) {
+        self.diff
+            .update(cx, |state, cx| state.set_mode(DiffMode::Split, cx));
+        self.settings.diff.mode = osier_config::settings::DiffMode::ThreeWay;
         self.save_settings();
         cx.notify();
     }
@@ -2454,6 +2465,15 @@ impl Osier {
 }
 
 /// Conflicts first, then staged, unstaged, untracked.
+/// gpui-kit's layout for a diff mode setting (three-way shows split for files without
+/// conflicts).
+pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
+    match mode.two_way() {
+        osier_config::settings::DiffMode::Split => DiffMode::Split,
+        _ => DiffMode::Unified,
+    }
+}
+
 pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
     status
         .conflicted()
@@ -2581,6 +2601,7 @@ impl Render for Osier {
             });
         }
         let has_project = self.active.is_some();
+        let merge_fills = self.merge_fills_window();
         v_flex()
             .track_focus(&self.focus_handle)
             .key_context("Osier")
@@ -2605,6 +2626,11 @@ impl Render for Osier {
             .on_action(
                 cx.listener(|this, _: &ToggleCommitDetails, _, cx| this.toggle_commit_details(cx)),
             )
+            .on_action(cx.listener(|this, _: &ToggleMergeExpanded, _, cx| {
+                if this.three_way_target().is_some() {
+                    this.toggle_merge_expanded(cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
@@ -2664,7 +2690,7 @@ impl Render for Osier {
                 div().flex_1().min_h_0().child(
                     h_flex()
                         .size_full()
-                        .when(self.sidebar_visible, |this| {
+                        .when(self.sidebar_visible && !merge_fills, |this| {
                             this.child(self.render_sidebar(window, cx))
                         })
                         .child(
@@ -2672,7 +2698,16 @@ impl Render for Osier {
                                 .flex_1()
                                 .min_w_0()
                                 .size_full()
-                                .child(
+                                .when(merge_fills, |this| {
+                                    this.child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .child(self.render_diff_pane(window, cx)),
+                                    )
+                                })
+                                .when(!merge_fills, |this| {
+                                    this.child(
                                     div().flex_1().min_h_0().child(
                                         h_resizable("panes")
                                             .on_resize(cx.listener(
@@ -2708,6 +2743,7 @@ impl Render for Osier {
                                             ),
                                     ),
                                 )
+                                })
                                 .when(self.command_log_visible, |this| {
                                     this.child(self.render_command_log(cx))
                                 }),
@@ -7552,6 +7588,256 @@ mod tests {
         );
         h.read(cx, |o, _| {
             assert_eq!(o.updates.install, crate::update_ui::InstallState::Idle)
+        });
+    }
+
+    // ----- three-way merge tool -----
+
+    /// A merge stopped on conflicts in `c.txt` (line 2 changed on both sides, line 6 only on
+    /// theirs) and, with `two`, in `d.txt` too. The diff pane is switched to 3-way through its
+    /// button and `c.txt` is selected.
+    fn three_way_merge(cx: &mut TestAppContext, two: bool) -> (TempRepo, Harness) {
+        use osier_git::ops::integrate::MergeMode;
+        let repo = TempRepo::new();
+        let commit = |c: &str, d: &str, message: &str| {
+            repo.write("c.txt", c);
+            repo.write("d.txt", d);
+            repo.git(["add", "c.txt", "d.txt"]);
+            repo.commit(message);
+        };
+        commit("a\nb\nc\nd\ne\nf\n", "base\n", "base");
+        repo.checkout_new("feature");
+        commit(
+            "a\nB-theirs\nc\nd\ne\nF\n",
+            if two { "theirs\n" } else { "base\n" },
+            "theirs",
+        );
+        repo.checkout("main");
+        commit(
+            "a\nB-ours\nc\nd\ne\nf\n",
+            if two { "ours\n" } else { "base\n" },
+            "ours",
+        );
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, window, cx| {
+            o.merge_branch("feature".into(), MergeMode::Default, window, cx)
+        });
+        h.act(cx, |o, _, cx| {
+            o.select_file("c.txt".into(), Area::Conflicted, cx)
+        });
+        h.click(cx, "three-way");
+        // The versions load in the background; the gutter buttons appear once the panes
+        // have been laid out.
+        h.act(cx, |_, _, cx| cx.notify());
+        h.act(cx, |_, _, cx| cx.notify());
+        (repo, h)
+    }
+
+    fn merge_view(h: &Harness, cx: &mut TestAppContext) -> Entity<crate::merge_view::MergeView> {
+        h.read(cx, |o, _| {
+            o.merges
+                .views
+                .values()
+                .next()
+                .expect("a merge view")
+                .view
+                .clone()
+        })
+    }
+
+    fn conflicted_files(h: &Harness, cx: &mut TestAppContext) -> Vec<String> {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .status
+                .conflicted()
+                .map(|e| e.path.clone())
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn ui_three_way_apply_ignore_and_resolve(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        assert!(
+            h.bounds(cx, "merge-result").is_some(),
+            "the merge tool shows"
+        );
+        assert!(
+            h.bounds(cx, "apply-resolution").is_none(),
+            "inline controls are hidden"
+        );
+        let view = merge_view(&h, cx);
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).merge().pending_counts()),
+            (1, 1)
+        );
+        // The result starts as the base.
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nf\n"
+        );
+
+        h.click(cx, "merge-apply-all");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nF\n"
+        );
+        assert!(
+            h.bounds(cx, "merge-chunk-apply:left:0").is_some(),
+            "gutter buttons drawn"
+        );
+        h.click(cx, "merge-chunk-apply:left:0");
+        h.click(cx, "merge-chunk-ignore:right:0");
+        assert!(h.read(cx, |_, cx| view.read(cx).merge().is_resolved()));
+        assert!(
+            h.bounds(cx, "merge-chunk-apply:left:0").is_none(),
+            "decided chunks lose them"
+        );
+
+        h.click(cx, "merge-apply");
+        assert!(!h.has_settings(cx), "nothing undecided: no question");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nB-ours\nc\nd\ne\nF\n");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_append_the_second_side_and_revert(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        h.click(cx, "merge-chunk-apply:right:0");
+        h.act(cx, |_, _, cx| cx.notify());
+        h.click(cx, "merge-chunk-apply:left:0");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nB-theirs\nB-ours\nc\nd\ne\nf\n",
+            "the second side goes below the first"
+        );
+        h.click(cx, "merge-revert");
+        h.click(cx, "dialog-ok");
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).result_text(cx)),
+            "a\nb\nc\nd\ne\nf\n"
+        );
+        assert_eq!(
+            h.read(cx, |_, cx| view.read(cx).merge().pending_counts()),
+            (1, 1)
+        );
+    }
+
+    #[gpui::test]
+    fn ui_three_way_apply_with_undecided_changes_asks_first(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        h.click(cx, "merge-apply");
+        assert!(h.has_settings(cx), "asks before saving undecided changes");
+        h.click(cx, "dialog-cancel");
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        // ctrl-enter in the result is Apply too.
+        h.click(cx, "merge-result");
+        h.keys(cx, "ctrl-enter");
+        assert!(h.has_settings(cx), "ctrl-enter asks the same question");
+        h.click(cx, "dialog-ok");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nb\nc\nd\ne\nf\n", "saved as shown");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_accept_a_whole_side_and_typed_edits_count(cx: &mut TestAppContext) {
+        let (repo, h) = three_way_merge(cx, false);
+        let view = merge_view(&h, cx);
+        // Typing into the result moves the chunks with it.
+        h.act(cx, |_, window, cx| {
+            let editor = view.read(cx).result_editor().clone();
+            editor.update(cx, |s, cx| {
+                s.set_selected_range(0..0, cx);
+                s.replace("top\n", window, cx);
+            });
+        });
+        h.read(cx, |_, cx| {
+            let v = view.read(cx);
+            assert_eq!(v.merge().chunks()[0].result, 2..3);
+            assert!(v.is_modified());
+        });
+        h.click(cx, "merge-accept-right");
+        assert!(conflicted_files(&h, cx).is_empty());
+        assert_eq!(repo.read("c.txt"), "a\nB-theirs\nc\nd\ne\nF\n");
+    }
+
+    #[gpui::test]
+    fn ui_three_way_expand_and_walk_the_conflicted_files(cx: &mut TestAppContext) {
+        let (_repo, h) = three_way_merge(cx, true);
+        assert!(h.bounds(cx, "center-pane").is_some());
+        h.click(cx, "merge-expand");
+        assert!(h.bounds(cx, "center-pane").is_none(), "file list hidden");
+        assert!(h.bounds(cx, "merge-result").is_some());
+        h.click(cx, "merge-next-file");
+        h.act(cx, |_, _, cx| cx.notify());
+        let selected = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        assert_eq!(
+            selected,
+            Selection::File {
+                path: "d.txt".into(),
+                area: Area::Conflicted
+            }
+        );
+        assert!(
+            h.bounds(cx, "merge-result").is_some(),
+            "still the merge tool, still expanded"
+        );
+        assert!(h.bounds(cx, "center-pane").is_none());
+        // Resolving the last but one file moves on to the next; the progress made on another
+        // file is kept meanwhile.
+        h.click(cx, "merge-accept-left");
+        h.act(cx, |_, _, cx| cx.notify());
+        assert_eq!(conflicted_files(&h, cx), ["c.txt"]);
+        let selected = h.read(cx, |o, _| o.active_project().unwrap().selection.clone());
+        assert_eq!(
+            selected,
+            Selection::File {
+                path: "c.txt".into(),
+                area: Area::Conflicted
+            }
+        );
+        // Escape from the result editor goes back to the normal layout.
+        h.click(cx, "merge-result");
+        h.keys(cx, "escape");
+        assert!(
+            h.bounds(cx, "center-pane").is_some(),
+            "back to the normal layout"
+        );
+    }
+
+    #[gpui::test]
+    fn ui_three_way_falls_back_to_split_for_other_files(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        repo.commit_file("a.txt", "one\n", "init");
+        repo.write("a.txt", "two\n");
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| {
+            o.select_file("a.txt".into(), Area::Unstaged, cx)
+        });
+        h.click(cx, "three-way");
+        h.read(cx, |o, cx| {
+            assert_eq!(
+                o.settings.diff.mode,
+                osier_config::settings::DiffMode::ThreeWay
+            );
+            assert_eq!(
+                o.diff.read(cx).mode(),
+                gpui_kit::component::diff::DiffMode::Split
+            );
+            assert!(o.three_way_target().is_none());
+        });
+        assert!(h.bounds(cx, "merge-result").is_none());
+        h.click(cx, "unified");
+        h.read(cx, |o, _| {
+            assert_eq!(
+                o.settings.diff.mode,
+                osier_config::settings::DiffMode::Unified
+            )
         });
     }
 }

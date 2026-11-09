@@ -8,6 +8,14 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Three-way merge tool: a **3-way** layout next to Unified and Split shows conflicted files
+  as your version, the result and their version side by side, like PhpStorm's merge dialog.
+  Apply (`>>` / `<<`) or ignore (`X`) each change, apply every non-conflicting change from
+  one side or both, type in the result, accept a whole side, and Save or Apply (marks the
+  file resolved). Changes are highlighted word by word, joined across the panes, and the
+  panes scroll together. During a rebase your commit stays on the left.
+- The merge tool expands to the whole window (button or `ctrl-shift-m`, `Esc` to go back),
+  with previous / next conflicted file; Apply moves on to the next file.
 - `osier merge <left> [<base>] <right> <output>` and `osier diff <left> <right>` open the
   merge tool or the diff view in a window of their own, for any files and as git's
   `mergetool` / `difftool` (setup in the README). Without a base every difference is a

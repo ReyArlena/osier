@@ -213,7 +213,7 @@ pub struct Diff {
     pub context_lines: u32,
     pub line_numbers: bool,
     pub soft_wrap: bool,
-    /// `unified` or `split`.
+    /// `unified`, `split` or `three-way` (conflicted files only; others show `split`).
     pub mode: DiffMode,
     /// Files larger than this (bytes) ask before rendering.
     pub large_file_bytes: u64,
@@ -237,6 +237,19 @@ pub enum DiffMode {
     #[default]
     Unified,
     Split,
+    /// The three-pane merge tool for conflicted files; other files show split.
+    #[serde(rename = "three-way")]
+    ThreeWay,
+}
+
+impl DiffMode {
+    /// The two-pane layout this mode uses for files without conflicts.
+    pub fn two_way(self) -> DiffMode {
+        match self {
+            DiffMode::ThreeWay => DiffMode::Split,
+            m => m,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

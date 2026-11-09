@@ -249,6 +249,11 @@ impl MergeView {
         view
     }
 
+    #[cfg(test)]
+    pub fn merge(&self) -> &Merge {
+        &self.merge
+    }
+
     /// The result as it is in the editor (the user may have typed in it).
     pub fn result_text(&self, cx: &App) -> String {
         self.editors[1].read(cx).value().to_string()
@@ -256,6 +261,12 @@ impl MergeView {
 
     pub fn result_editor(&self) -> &Entity<EditorState> {
         &self.editors[1]
+    }
+
+    /// Something was applied, ignored or typed.
+    #[cfg(test)]
+    pub fn is_modified(&self) -> bool {
+        self.merge.is_modified()
     }
 
     // ----- user actions -----
