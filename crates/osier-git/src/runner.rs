@@ -333,11 +333,20 @@ impl GitRunner {
 
         let mut child = self.spawn(&mut cmd)?;
 
-        if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
-            use std::io::Write;
-            // A closed pipe just means git did not want the input.
-            let _ = pipe.write_all(data);
-        }
+        // Input goes in on its own thread: git can fill its output pipe before it has read
+        // everything, and writing here first would block both sides. Dropping the pipe at
+        // the end closes git's stdin.
+        let stdin_thread = match (stdin, child.stdin.take()) {
+            (Some(data), Some(mut pipe)) => {
+                let data = data.to_vec();
+                Some(std::thread::spawn(move || {
+                    use std::io::Write;
+                    // A closed pipe just means git did not want the input.
+                    let _ = pipe.write_all(&data);
+                }))
+            }
+            _ => None,
+        };
 
         // Drain pipes on threads so a chatty git never deadlocks on a full pipe.
         let mut stdout_pipe = child.stdout.take();
@@ -365,6 +374,9 @@ impl GitRunner {
                 None
             }
         };
+        if let Some(t) = stdin_thread {
+            let _ = t.join();
+        }
         let stdout = stdout_thread.join().unwrap_or_default();
         let mut stderr = stderr_thread.join().unwrap_or_default();
         stderr.truncate(STDERR_CAP);
@@ -476,6 +488,31 @@ mod tests {
         assert!(out.stdout_str().unwrap().starts_with("git version"));
         assert_eq!(sink.records().len(), 1);
         assert_eq!(sink.records()[0].status, Some(0));
+    }
+
+    #[test]
+    fn large_stdin_with_large_output_does_not_block() {
+        // Far more than a pipe holds both ways: check-ignore answers each path as it reads
+        // it, so git writes output while we still write input.
+        let dir = tempfile::tempdir().unwrap();
+        let runner = GitRunner::default().with_timeout(Duration::from_secs(10));
+        runner.run(Some(dir.path()), ["init", "-q"]).expect("init");
+        let input: String = (0..50_000).map(|i| format!("dir/file-{i}.txt\n")).collect();
+        let out = runner
+            .run_allowing_with_stdin(
+                Some(dir.path()),
+                ["check-ignore", "--stdin", "--verbose", "--non-matching"],
+                input.as_bytes(),
+                &[0, 1],
+            )
+            .expect("check-ignore");
+        assert_eq!(
+            out.record.status,
+            Some(1),
+            "git was killed: {:?}",
+            out.record.status
+        );
+        assert_eq!(out.stdout_str().unwrap().lines().count(), 50_000);
     }
 
     #[test]

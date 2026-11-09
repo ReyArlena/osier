@@ -19,6 +19,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Git commands that take a long list of paths no longer hang when git answers faster than
+  Osier can send the list. This left the Files tab without ignored files in repositories
+  with many of them (eg `target/`), and could stop the check for files a pull removed after
+  they were gitignored.
 - Folders you open or close in the Files tab stay that way when files are added or removed,
   instead of every folder going back to its default. Clearing the filter brings back the
   folders you had open before filtering.
