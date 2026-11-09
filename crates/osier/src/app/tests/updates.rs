@@ -10,7 +10,7 @@ struct FakeUpdates {
     installs: std::sync::Mutex<Vec<(std::path::PathBuf, String)>>,
 }
 
-impl crate::update_ui::UpdateSource for FakeUpdates {
+impl crate::app::update_ui::UpdateSource for FakeUpdates {
     fn latest(&self) -> Result<String, String> {
         self.checks
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -48,7 +48,7 @@ fn updates_harness(
         o.updates.source = source;
         o.updates.current = "0.1.0".into();
         o.updates.route = Some(route);
-        o.updates.check = crate::update_ui::CheckState::NotChecked;
+        o.updates.check = crate::app::update_ui::CheckState::NotChecked;
         o.state.update_check = Default::default();
     });
     (h, repo, fake)
@@ -180,6 +180,6 @@ fn ui_package_installs_get_the_badge_but_no_update_button(cx: &mut TestAppContex
         "the button is disabled"
     );
     h.read(cx, |o, _| {
-        assert_eq!(o.updates.install, crate::update_ui::InstallState::Idle)
+        assert_eq!(o.updates.install, crate::app::update_ui::InstallState::Idle)
     });
 }

@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 
 impl Osier {
@@ -129,28 +130,23 @@ impl Osier {
                 let (n1, n2) = (n1.clone(), n2.clone());
                 let (o1, o2, o3, o4) = (w.clone(), w.clone(), w.clone(), w.clone());
                 menu.item(
-                    crate::row_actions::menu_item(
-                        "Copy patch text",
-                        crate::row_actions::RowKind::CopyAsPatch,
-                    )
-                    .icon(Lucide::ClipboardCopy)
-                    .on_click(move |_, window, cx| {
-                        let _ = o1.update(cx, |this, cx| this.copy_stored(i4.clone(), window, cx));
-                    }),
+                    row_actions::menu_item("Copy patch text", row_actions::RowKind::CopyAsPatch)
+                        .icon(Lucide::ClipboardCopy)
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                o1.update(cx, |this, cx| this.copy_stored(i4.clone(), window, cx));
+                        }),
                 )
                 .item(
-                    crate::row_actions::menu_item(
-                        "Export to file…",
-                        crate::row_actions::RowKind::ExportPatch,
-                    )
-                    .icon(Lucide::FileOutput)
-                    .on_click(move |_, window, cx| {
-                        let _ =
-                            o2.update(cx, |this, cx| this.export_stored(i5.clone(), window, cx));
-                    }),
+                    row_actions::menu_item("Export to file…", row_actions::RowKind::ExportPatch)
+                        .icon(Lucide::FileOutput)
+                        .on_click(move |_, window, cx| {
+                            let _ = o2
+                                .update(cx, |this, cx| this.export_stored(i5.clone(), window, cx));
+                        }),
                 )
                 .item(
-                    crate::row_actions::menu_item("Rename…", crate::row_actions::RowKind::Rename)
+                    row_actions::menu_item("Rename…", row_actions::RowKind::Rename)
                         .icon(Lucide::Pencil)
                         .on_click(move |_, window, cx| {
                             let _ = o3.update(cx, |this, cx| {
@@ -160,7 +156,7 @@ impl Osier {
                 )
                 .separator()
                 .item(
-                    crate::row_actions::menu_item("Delete…", crate::row_actions::RowKind::Delete)
+                    row_actions::menu_item("Delete…", row_actions::RowKind::Delete)
                         .icon(Lucide::Trash)
                         .on_click(move |_, window, cx| {
                             let _ = o4.update(cx, |this, cx| {
@@ -174,23 +170,21 @@ impl Osier {
                 let menu = if has_project {
                     let (w1, w2, i1, i2) = (wa.clone(), wa.clone(), ia.clone(), iu.clone());
                     menu.item(
-                        crate::row_actions::menu_item("Apply", crate::row_actions::RowKind::Apply)
-                            .on_click(move |_, window, cx| {
+                        row_actions::menu_item("Apply", row_actions::RowKind::Apply).on_click(
+                            move |_, window, cx| {
                                 let _ = w1.update(cx, |this, cx| {
                                     this.apply_stored(i1.clone(), false, window, cx)
                                 });
-                            }),
+                            },
+                        ),
                     )
                     .item(
-                        crate::row_actions::menu_item(
-                            "Unshelve",
-                            crate::row_actions::RowKind::Unshelve,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w2.update(cx, |this, cx| {
-                                this.apply_stored(i2.clone(), true, window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Unshelve", row_actions::RowKind::Unshelve)
+                            .on_click(move |_, window, cx| {
+                                let _ = w2.update(cx, |this, cx| {
+                                    this.apply_stored(i2.clone(), true, window, cx)
+                                });
+                            }),
                     )
                     .separator()
                 } else {

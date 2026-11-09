@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 
 impl Osier {
@@ -85,29 +86,32 @@ impl Osier {
                     let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                     let m = menu_message.clone();
                     menu.item(
-                        crate::row_actions::menu_item("Apply", crate::row_actions::RowKind::Apply)
-                            .on_click(move |_, window, cx| {
+                        row_actions::menu_item("Apply", row_actions::RowKind::Apply).on_click(
+                            move |_, window, cx| {
                                 let _ = w1.update(cx, |this, cx| {
                                     this.stash_apply(index, false, window, cx)
                                 });
-                            }),
+                            },
+                        ),
                     )
                     .item(
-                        crate::row_actions::menu_item("Pop", crate::row_actions::RowKind::Pop)
-                            .on_click(move |_, window, cx| {
+                        row_actions::menu_item("Pop", row_actions::RowKind::Pop).on_click(
+                            move |_, window, cx| {
                                 let _ = w2.update(cx, |this, cx| {
                                     this.stash_apply(index, true, window, cx)
                                 });
-                            }),
+                            },
+                        ),
                     )
                     .separator()
                     .item(
-                        crate::row_actions::menu_item("Drop…", crate::row_actions::RowKind::Delete)
-                            .on_click(move |_, window, cx| {
+                        row_actions::menu_item("Drop…", row_actions::RowKind::Delete).on_click(
+                            move |_, window, cx| {
                                 let _ = w3.update(cx, |this, cx| {
                                     this.confirm_stash_drop(index, m.clone(), window, cx)
                                 });
-                            }),
+                            },
+                        ),
                     )
                 };
             list = list.child(

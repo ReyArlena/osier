@@ -14,6 +14,7 @@ use gpui_kit::*;
 use osier_git::status::StatusEntry;
 
 use crate::app::Osier;
+use crate::app::row_actions;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
@@ -160,9 +161,9 @@ impl Osier {
                                 let (p7, p8) = (p.clone(), p.clone());
                                 let menu = menu
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Open in editor",
-                                            crate::row_actions::RowKind::OpenInEditor,
+                                            row_actions::RowKind::OpenInEditor,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -177,9 +178,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Open in file manager",
-                                            crate::row_actions::RowKind::OpenInFileManager,
+                                            row_actions::RowKind::OpenInFileManager,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -194,9 +195,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Copy path",
-                                            crate::row_actions::RowKind::CopyPath,
+                                            row_actions::RowKind::CopyPath,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -208,9 +209,9 @@ impl Osier {
                                     )
                                     .separator()
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Blame",
-                                            crate::row_actions::RowKind::Blame,
+                                            row_actions::RowKind::Blame,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -221,9 +222,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "History",
-                                            crate::row_actions::RowKind::FileHistory,
+                                            row_actions::RowKind::FileHistory,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -235,9 +236,9 @@ impl Osier {
                                     )
                                     .separator()
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Copy as patch",
-                                            crate::row_actions::RowKind::CopyAsPatch,
+                                            row_actions::RowKind::CopyAsPatch,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -249,9 +250,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Save to Patches…",
-                                            crate::row_actions::RowKind::SaveToPatches,
+                                            row_actions::RowKind::SaveToPatches,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -268,9 +269,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Shelve…",
-                                            crate::row_actions::RowKind::Shelve,
+                                            row_actions::RowKind::Shelve,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -302,12 +303,13 @@ impl Osier {
                                 Osier::ignore_menu(menu.separator(), w9, path, row)
                                     .separator()
                                     .item(
-                                        crate::row_actions::action_menu_item(discard, "discard")
-                                            .on_click(move |_, window, cx| {
+                                        row_actions::action_menu_item(discard, "discard").on_click(
+                                            move |_, window, cx| {
                                                 let _ = w10.update(cx, |this, cx| {
                                                     this.discard_file(p10.clone(), area, window, cx)
                                                 });
-                                            }),
+                                            },
+                                        ),
                                     )
                             }
                         })

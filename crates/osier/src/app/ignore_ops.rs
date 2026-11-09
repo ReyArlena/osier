@@ -62,25 +62,25 @@ impl Osier {
             }
         };
         let mut menu = menu.item(
-            crate::row_actions::menu_item(
+            crate::app::row_actions::menu_item(
                 "Add to .gitignore",
-                crate::row_actions::RowKind::AddToGitignore,
+                crate::app::row_actions::RowKind::AddToGitignore,
             )
             .on_click(pick(PatternKind::Exact, IgnoreFile::Gitignore)),
         );
         if let Some(pattern) = &ext {
             menu = menu.item(
-                crate::row_actions::menu_item(
+                crate::app::row_actions::menu_item(
                     format!("Add all {pattern} files to .gitignore"),
-                    crate::row_actions::RowKind::AddExtensionToGitignore,
+                    crate::app::row_actions::RowKind::AddExtensionToGitignore,
                 )
                 .on_click(pick(PatternKind::Extension, IgnoreFile::Gitignore)),
             );
         }
         menu = menu.item(
-            crate::row_actions::menu_item(
+            crate::app::row_actions::menu_item(
                 "Ignore only on this machine",
-                crate::row_actions::RowKind::IgnoreLocally,
+                crate::app::row_actions::RowKind::IgnoreLocally,
             )
             .on_click(pick(PatternKind::Exact, IgnoreFile::LocalExclude)),
         );
@@ -88,9 +88,9 @@ impl Osier {
             return menu;
         }
         menu.item(
-            crate::row_actions::menu_item(
+            crate::app::row_actions::menu_item(
                 format!("Untrack this {what}"),
-                crate::row_actions::RowKind::Untrack,
+                crate::app::row_actions::RowKind::Untrack,
             )
             .on_click(move |_, window, cx| {
                 let _ = weak.update(cx, |this, cx| {

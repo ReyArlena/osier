@@ -20,6 +20,7 @@ use crate::test_ids::TestId as _;
 
 /// Menu handler receiving the commit hash.
 type CommitHandler = std::rc::Rc<dyn Fn(&mut Osier, String, &mut Window, &mut Context<Osier>)>;
+use crate::app::row_actions;
 use crate::graph::{graph_cell, lane_colors};
 
 impl Osier {
@@ -212,7 +213,7 @@ impl Osier {
                                                 let h = h.clone();
                                                 let o = o.clone();
                                                 match log_menu_kind(label) {
-                                                    Some(kind) => crate::row_actions::menu_item(
+                                                    Some(kind) => row_actions::menu_item(
                                                         label.to_string(),
                                                         kind,
                                                     ),
@@ -789,8 +790,8 @@ fn subject_with_refs(
 }
 
 /// The bindable action behind a Log commit menu entry, for its key hint.
-fn log_menu_kind(label: &str) -> Option<crate::row_actions::RowKind> {
-    use crate::row_actions::RowKind as K;
+fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
+    use row_actions::RowKind as K;
     Some(match label {
         "Checkout (detached)" => K::Checkout,
         "New branch here…" => K::NewBranchHere,

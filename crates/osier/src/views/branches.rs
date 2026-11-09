@@ -9,9 +9,10 @@ use gpui_kit::*;
 use osier_git::refs::Branch;
 
 use crate::app::Osier;
-use crate::row_actions::RefRow;
+use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::MergeMode;
+use row_actions::RefRow;
 
 impl Osier {
     pub(crate) fn render_branches(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -74,9 +75,9 @@ impl Osier {
                         let (wm, wc) = (wm.clone(), wc.clone());
                         let (m1, c1) = (m1.clone(), c1.clone());
                         menu.item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Merge into current branch",
-                                crate::row_actions::RowKind::MergeIntoCurrent,
+                                row_actions::RowKind::MergeIntoCurrent,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = wm.update(cx, |this, cx| {
@@ -85,9 +86,9 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Compare with current branch",
-                                crate::row_actions::RowKind::CompareWithCurrent,
+                                row_actions::RowKind::CompareWithCurrent,
                             )
                             .on_click(move |_, _, cx| {
                                 let _ = wc.update(cx, |this, cx| {
@@ -125,9 +126,9 @@ impl Osier {
                         );
                         let menu = menu
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Merge into current branch",
-                                    crate::row_actions::RowKind::MergeIntoCurrent,
+                                    row_actions::RowKind::MergeIntoCurrent,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, window, cx| {
@@ -170,9 +171,9 @@ impl Osier {
                                     }),
                             )
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Rebase current branch onto this…",
-                                    crate::row_actions::RowKind::RebaseCurrentOnto,
+                                    row_actions::RowKind::RebaseCurrentOnto,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, window, cx| {
@@ -182,9 +183,9 @@ impl Osier {
                                 }),
                             )
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Compare with current branch",
-                                    crate::row_actions::RowKind::CompareWithCurrent,
+                                    row_actions::RowKind::CompareWithCurrent,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, _, cx| {
@@ -200,9 +201,9 @@ impl Osier {
                             )
                             .separator();
                         menu.item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "New branch from here…",
-                                crate::row_actions::RowKind::NewBranchHere,
+                                row_actions::RowKind::NewBranchHere,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = w1.update(cx, |this, cx| {
@@ -211,28 +212,22 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
-                                "Rename…",
-                                crate::row_actions::RowKind::Rename,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w2.update(cx, |this, cx| {
-                                    this.prompt_rename_branch(n2.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Rename…", row_actions::RowKind::Rename)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w2.update(cx, |this, cx| {
+                                        this.prompt_rename_branch(n2.clone(), window, cx)
+                                    });
+                                }),
                         )
                         .separator()
                         .item(
-                            crate::row_actions::menu_item(
-                                "Delete",
-                                crate::row_actions::RowKind::Delete,
-                            )
-                            .disabled(is_head)
-                            .on_click(move |_, window, cx| {
-                                let _ = w3.update(cx, |this, cx| {
-                                    this.confirm_delete_branch(n3.clone(), false, window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Delete", row_actions::RowKind::Delete)
+                                .disabled(is_head)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w3.update(cx, |this, cx| {
+                                        this.confirm_delete_branch(n3.clone(), false, window, cx)
+                                    });
+                                }),
                         )
                         .item(
                             PopupMenuItem::new("Force delete")
@@ -251,15 +246,12 @@ impl Osier {
                         Some((w, n)) => {
                             let (w, n) = (w.clone(), n.clone());
                             menu.item(
-                                crate::row_actions::menu_item(
-                                    "Checkout",
-                                    crate::row_actions::RowKind::Checkout,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    let _ = w.update(cx, |this, cx| {
-                                        this.checkout_branch(n.clone(), is_remote, window, cx)
-                                    });
-                                }),
+                                row_actions::menu_item("Checkout", row_actions::RowKind::Checkout)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = w.update(cx, |this, cx| {
+                                            this.checkout_branch(n.clone(), is_remote, window, cx)
+                                        });
+                                    }),
                             )
                             .separator()
                         }
@@ -406,19 +398,17 @@ impl Osier {
                     let (w1, w2, w3, w4) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
                     let mut menu = menu
                         .item(
-                            crate::row_actions::menu_item(
-                                "Show commit",
-                                crate::row_actions::RowKind::ShowCommit,
-                            )
-                            .on_click(move |_, _, cx| {
-                                let _ = w1
-                                    .update(cx, |this, cx| this.select_commit_hash(t1.clone(), cx));
-                            }),
+                            row_actions::menu_item("Show commit", row_actions::RowKind::ShowCommit)
+                                .on_click(move |_, _, cx| {
+                                    let _ = w1.update(cx, |this, cx| {
+                                        this.select_commit_hash(t1.clone(), cx)
+                                    });
+                                }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Check out (detached)",
-                                crate::row_actions::RowKind::Checkout,
+                                row_actions::RowKind::Checkout,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = w2.update(cx, |this, cx| {
@@ -427,27 +417,21 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
-                                "Copy name",
-                                crate::row_actions::RowKind::CopyName,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w3.update(cx, |this, cx| {
-                                    this.copy_to_clipboard(n1.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Copy name", row_actions::RowKind::CopyName)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w3.update(cx, |this, cx| {
+                                        this.copy_to_clipboard(n1.clone(), window, cx)
+                                    });
+                                }),
                         )
                         .separator()
                         .item(
-                            crate::row_actions::menu_item(
-                                "Delete…",
-                                crate::row_actions::RowKind::Delete,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w4.update(cx, |this, cx| {
-                                    this.confirm_delete_tag(n2.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Delete…", row_actions::RowKind::Delete)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w4.update(cx, |this, cx| {
+                                        this.confirm_delete_tag(n2.clone(), window, cx)
+                                    });
+                                }),
                         );
                     for r in &remotes {
                         let (w, n, r2) = (weak.clone(), n3.clone(), r.clone());
@@ -695,38 +679,31 @@ impl Osier {
                     let (n1, n2, n3, u1) = (name.clone(), name.clone(), name.clone(), url.clone());
                     let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                     menu.item(
-                        crate::row_actions::menu_item(
-                            "Edit URL…",
-                            crate::row_actions::RowKind::EditRemoteUrl,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w1.update(cx, |this, cx| {
-                                this.prompt_remote_url(n1.clone(), u1.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Edit URL…", row_actions::RowKind::EditRemoteUrl)
+                            .on_click(move |_, window, cx| {
+                                let _ = w1.update(cx, |this, cx| {
+                                    this.prompt_remote_url(n1.clone(), u1.clone(), window, cx)
+                                });
+                            }),
                     )
                     .item(
-                        crate::row_actions::menu_item(
-                            "Rename…",
-                            crate::row_actions::RowKind::Rename,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w2.update(cx, |this, cx| {
-                                this.prompt_rename_remote(n2.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Rename…", row_actions::RowKind::Rename).on_click(
+                            move |_, window, cx| {
+                                let _ = w2.update(cx, |this, cx| {
+                                    this.prompt_rename_remote(n2.clone(), window, cx)
+                                });
+                            },
+                        ),
                     )
                     .separator()
                     .item(
-                        crate::row_actions::menu_item(
-                            "Remove",
-                            crate::row_actions::RowKind::Delete,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w3.update(cx, |this, cx| {
-                                this.confirm_remove_remote(n3.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Remove", row_actions::RowKind::Delete).on_click(
+                            move |_, window, cx| {
+                                let _ = w3.update(cx, |this, cx| {
+                                    this.confirm_remove_remote(n3.clone(), window, cx)
+                                });
+                            },
+                        ),
                     )
                 });
                 list = list.child(

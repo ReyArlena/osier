@@ -1484,9 +1484,9 @@ fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
 
 /// About > Updates: where Osier stands against the latest release, and what can be done.
 fn updates_group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
+    use crate::app::update_ui::{CheckState, InstallState};
     use crate::install_route::InstallRoute;
     use crate::update::Decision;
-    use crate::update_ui::{CheckState, InstallState};
     let (v_check, v_install, v_restart, v_notes) =
         (view.clone(), view.clone(), view.clone(), view.clone());
     let group = SettingGroup::new()

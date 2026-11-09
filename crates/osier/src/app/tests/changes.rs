@@ -387,7 +387,7 @@ fn ui_add_to_gitignore_from_the_changes_menu(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ignoring_the_selected_file_selects_its_neighbour(cx: &mut TestAppContext) {
-    use crate::row_actions::RowKind;
+    use crate::app::row_actions::RowKind;
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     for f in ["one.tmp", "two.tmp", "three.tmp"] {

@@ -463,7 +463,7 @@ fn ui_context_menu_keys_fire_on_the_selected_row(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ui_branch_tag_and_stash_rows_select_and_take_menu_keys(cx: &mut TestAppContext) {
-    use crate::row_actions::RefRow;
+    use crate::app::row_actions::RefRow;
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     repo.git(["branch", "feature"]);
@@ -534,7 +534,7 @@ fn ui_branch_tag_and_stash_rows_select_and_take_menu_keys(cx: &mut TestAppContex
 
 #[gpui::test]
 fn menu_entries_show_their_key(cx: &mut TestAppContext) {
-    use crate::row_actions::{RowKind, key_hint};
+    use crate::app::row_actions::{RowKind, key_hint};
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     let _h = Harness::open(cx, &repo);

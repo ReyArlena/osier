@@ -90,7 +90,7 @@ fn files_cursor(h: &Harness, cx: &mut TestAppContext) -> (Option<String>, Option
 
 #[gpui::test]
 fn ui_files_tab_keeps_its_row_when_the_tree_changes(cx: &mut TestAppContext) {
-    use crate::row_actions::RowKind;
+    use crate::app::row_actions::RowKind;
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     for f in ["one.tmp", "two.tmp", "three.tmp"] {
@@ -267,7 +267,7 @@ fn ui_files_tab_keeps_open_folders_open(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn ui_files_tab_with_ignored_shown_stays_on_an_ignored_file(cx: &mut TestAppContext) {
-    use crate::row_actions::RowKind;
+    use crate::app::row_actions::RowKind;
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     repo.write("notes.tmp", "x\n");

@@ -27,8 +27,8 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::app::switch_project::{ProjectEntry, Section};
 use crate::app::{Osier, Tab};
-use crate::switch_project::{ProjectEntry, Section};
 use crate::test_ids::TestId as _;
 
 type Run = Rc<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;

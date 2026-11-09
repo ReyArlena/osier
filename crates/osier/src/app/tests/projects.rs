@@ -216,7 +216,7 @@ fn ui_palette_submenu_back_and_escape(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn switch_project_rows_carry_the_sidebar_markers(cx: &mut TestAppContext) {
-    use crate::switch_project::Section;
+    use crate::app::switch_project::Section;
     use osier_config::settings::ChangesIndicator;
     let repo = repo_with_upstream(2, true);
     let h = Harness::open(cx, &repo);

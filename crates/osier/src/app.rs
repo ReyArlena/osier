@@ -33,12 +33,16 @@ mod patch_ops;
 mod prefix;
 mod projects;
 mod rebase_dialog;
+pub(crate) mod recent_status;
 mod refresh;
 pub(crate) mod remote_ops;
+pub(crate) mod row_actions;
 mod selection;
 mod sidebar;
 mod squash_ui;
+pub(crate) mod switch_project;
 mod update_project;
+pub(crate) mod update_ui;
 
 pub(crate) use selection::{first_change, kit_mode, whitespace_applies};
 
@@ -270,7 +274,7 @@ pub struct Osier {
     pub(crate) ssh_status: Option<osier_auth::SshStatus>,
     pub(crate) git_version: Option<String>,
     /// Update check, install and the install route (`update_ui.rs`).
-    pub(crate) updates: crate::update_ui::Updates,
+    pub(crate) updates: crate::app::update_ui::Updates,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
     /// Waiting for the key after the prefix key (see `prefix.rs`).
@@ -278,7 +282,7 @@ pub struct Osier {
     /// The desktop's light/dark preference, for System mode (`system_scheme.rs`).
     pub(crate) system_scheme: crate::system_scheme::SystemScheme,
     /// Selected row in the Branches tab (branch, tag or remote).
-    pub(crate) ref_selected: Option<crate::row_actions::RefRow>,
+    pub(crate) ref_selected: Option<crate::app::row_actions::RefRow>,
     /// Selected stash, by commit id.
     pub(crate) stash_selected: Option<String>,
     pub(crate) prefix_generation: u64,
@@ -300,7 +304,7 @@ pub struct Osier {
     /// Where the DMS cheatsheet goes (`dms_cheatsheet.rs`). `None` in tests unless set.
     pub(crate) dms_dir: Option<PathBuf>,
     /// Badges for projects that are not open (`recent_status.rs`).
-    pub(crate) recent_status: crate::recent_status::RecentStatus,
+    pub(crate) recent_status: crate::app::recent_status::RecentStatus,
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
     pub(crate) recent_interval: Entity<gpui_kit::component::slider::SliderState>,
     pub(crate) tooltip_delay: Entity<gpui_kit::component::slider::SliderState>,
@@ -331,7 +335,7 @@ impl Osier {
             tracing::warn!(%error, "could not list patches");
             Vec::new()
         });
-        let recent_status = crate::recent_status::RecentStatus::new(
+        let recent_status = crate::app::recent_status::RecentStatus::new(
             settings.projects.recent_status,
             &paths,
             sink.clone(),
@@ -896,7 +900,7 @@ impl Render for Osier {
             }))
             .on_action(cx.listener(|this, _: &PrefixKey, window, cx| this.start_prefix(window, cx)))
             .on_action(
-                cx.listener(|this, a: &crate::row_actions::RowAction, window, cx| {
+                cx.listener(|this, a: &crate::app::row_actions::RowAction, window, cx| {
                     this.run_row_action(a.kind, window, cx)
                 }),
             )

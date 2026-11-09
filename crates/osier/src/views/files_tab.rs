@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 
 /// Build a tree from flat paths. Folders first, then files, both alphabetical.
@@ -708,9 +709,9 @@ impl Osier {
                             let menu = menu
                                 .when(!is_folder, |m| {
                                     m.item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "View at HEAD",
-                                            crate::row_actions::RowKind::ViewAtHead,
+                                            row_actions::RowKind::ViewAtHead,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -725,9 +726,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Blame",
-                                            crate::row_actions::RowKind::Blame,
+                                            row_actions::RowKind::Blame,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -738,9 +739,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "History",
-                                            crate::row_actions::RowKind::FileHistory,
+                                            row_actions::RowKind::FileHistory,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -754,9 +755,9 @@ impl Osier {
                                 })
                                 .when(!is_folder, |m| {
                                     m.item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Open in editor",
-                                            crate::row_actions::RowKind::OpenInEditor,
+                                            row_actions::RowKind::OpenInEditor,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -772,9 +773,9 @@ impl Osier {
                                     )
                                 })
                                 .item(
-                                    crate::row_actions::menu_item(
+                                    row_actions::menu_item(
                                         "Open in file manager",
-                                        crate::row_actions::RowKind::OpenInFileManager,
+                                        row_actions::RowKind::OpenInFileManager,
                                     )
                                     .on_click(
                                         move |_, window, cx| {
@@ -789,9 +790,9 @@ impl Osier {
                                     ),
                                 )
                                 .item(
-                                    crate::row_actions::menu_item(
+                                    row_actions::menu_item(
                                         "Copy path",
-                                        crate::row_actions::RowKind::CopyPath,
+                                        row_actions::RowKind::CopyPath,
                                     )
                                     .on_click(
                                         move |_, window, cx| {

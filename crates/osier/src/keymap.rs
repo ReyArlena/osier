@@ -321,7 +321,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         spec!("pull", "Pull", "Remote", ["ctrl-shift-l"], App, Pull),
         spec!("push", "Push", "Remote", ["ctrl-shift-p"], App, Push),
     ];
-    all.extend(crate::row_actions::specs());
+    all.extend(crate::app::row_actions::specs());
     all
 }
 
