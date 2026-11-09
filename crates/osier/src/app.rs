@@ -198,6 +198,11 @@ pub struct Osier {
     /// Repository the tree was last built for, so its cursor is only carried over within
     /// one project.
     pub(crate) files_tree_root: Option<PathBuf>,
+    /// Which folders were open (true) or closed in the Files tree, by id, from the last
+    /// unfiltered tree: kept when the tree is rebuilt, and brought back after filtering.
+    pub(crate) files_tree_folders: std::collections::HashMap<String, bool>,
+    /// Whether the tree was last built for a filter (every folder open).
+    pub(crate) files_tree_filtering: bool,
     pub(crate) amend: bool,
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
@@ -411,6 +416,8 @@ impl Osier {
             show_ignored: false,
             files_tree_key: 0,
             files_tree_root: None,
+            files_tree_folders: std::collections::HashMap::new(),
+            files_tree_filtering: false,
             amend: false,
             signoff: false,
             sidebar_visible: state.layout.sidebar_visible,
@@ -5384,6 +5391,42 @@ mod tests {
             files_cursor(&h, cx),
             (Some("src".to_string()), Some("src/lib.rs".to_string()))
         );
+    }
+
+    #[gpui::test]
+    fn ui_files_tab_keeps_open_folders_open(cx: &mut TestAppContext) {
+        let repo = TempRepo::new();
+        // Four top-level folders: all start closed.
+        for f in ["docs/d.md", "src/lib.rs", "tests/t.rs", "web/w.js"] {
+            repo.commit_file(f, "x\n", f);
+        }
+        let h = Harness::open(cx, &repo);
+        h.act(cx, |o, _, cx| o.set_tab(super::Tab::Files, cx));
+        let shown = |h: &Harness, cx: &mut TestAppContext, id: &str| {
+            h.bounds(cx, &format!("files-row:{id}")).is_some()
+        };
+        assert!(!shown(&h, cx, "src/lib.rs"));
+        h.click(cx, "files-row:src");
+        assert!(shown(&h, cx, "src/lib.rs"));
+
+        // A new file rebuilds the tree: src stays open, the others stay closed.
+        repo.write("new.txt", "n\n");
+        h.act(cx, |o, _, cx| o.refresh_project(0, cx));
+        assert!(shown(&h, cx, "new.txt"));
+        assert!(shown(&h, cx, "src/lib.rs"));
+        assert!(!shown(&h, cx, "docs/d.md"));
+
+        // Filtering opens every folder; clearing it brings the old layout back.
+        let set_filter = |h: &Harness, cx: &mut TestAppContext, text: &'static str| {
+            h.act(cx, move |o, w, cx| {
+                o.files_filter.update(cx, |s, cx| s.set_value(text, w, cx))
+            });
+        };
+        set_filter(&h, cx, ".");
+        assert!(shown(&h, cx, "docs/d.md"));
+        set_filter(&h, cx, "");
+        assert!(shown(&h, cx, "src/lib.rs"));
+        assert!(!shown(&h, cx, "docs/d.md"));
     }
 
     #[gpui::test]

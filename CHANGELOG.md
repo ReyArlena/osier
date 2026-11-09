@@ -19,6 +19,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Folders you open or close in the Files tab stay that way when files are added or removed,
+  instead of every folder going back to its default. Clearing the filter brings back the
+  folders you had open before filtering.
 - With "Ignored" on, the Files tab no longer runs git each time it redraws (every hover and
   key press). The ignored list is read in the background when files change, so the tab
   stays smooth in repositories with many ignored files (eg `target/` or `node_modules`).

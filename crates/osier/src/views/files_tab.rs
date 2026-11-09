@@ -144,6 +144,39 @@ pub(crate) fn ignored_rows(
     rows
 }
 
+/// Open (true) or closed state of every folder in `tree`, collapsed ones' subfolders
+/// included.
+fn folder_states(
+    tree: &gpui_kit::component::tree::TreeState,
+) -> std::collections::HashMap<String, bool> {
+    fn walk(item: &TreeItem, out: &mut std::collections::HashMap<String, bool>) {
+        if item.is_folder() {
+            out.insert(item.id.to_string(), item.is_expanded());
+            for child in &item.children {
+                walk(child, out);
+            }
+        }
+    }
+    let mut out = std::collections::HashMap::new();
+    for entry in (0..).map_while(|ix| tree.entry(ix)) {
+        if entry.is_root() {
+            walk(entry.item(), &mut out);
+        }
+    }
+    out
+}
+
+/// Give folders the state they had in `states`; new folders keep `build_items`' default.
+fn apply_folder_states(items: &mut [TreeItem], states: &std::collections::HashMap<String, bool>) {
+    for item in items {
+        if let Some(&open) = states.get(item.id.as_ref()) {
+            // Items share their state with their clones, so this sets `item` itself.
+            let _ = item.clone().expanded(open);
+        }
+        apply_folder_states(&mut item.children, states);
+    }
+}
+
 /// Every id `build_items` gives `paths`: each file and each folder above one.
 fn tree_ids(paths: &[String]) -> std::collections::HashSet<&str> {
     let mut ids = std::collections::HashSet::new();
@@ -310,10 +343,21 @@ impl Osier {
         let key = hasher.finish();
         if key != self.files_tree_key {
             self.files_tree_key = key;
-            let items = build_items(&paths, filtering);
             let root = repo.workdir().to_path_buf();
             let same_project = self.files_tree_root.as_ref() == Some(&root);
             self.files_tree_root = Some(root);
+            // Folders keep the open or closed state they had. A filtered tree opens every
+            // folder, so the state from before the filter is kept for when it is cleared.
+            if !same_project {
+                self.files_tree_folders.clear();
+            } else if !self.files_tree_filtering {
+                self.files_tree_folders = folder_states(self.files_tree.read(cx));
+            }
+            self.files_tree_filtering = filtering;
+            let mut items = build_items(&paths, filtering);
+            if !filtering {
+                apply_folder_states(&mut items, &self.files_tree_folders);
+            }
             // Rebuilding the tree clears its cursor. Put it back on the same entry, or on
             // the closest one when that entry has gone (eg a file that was just ignored).
             let (was, cursor) = {
