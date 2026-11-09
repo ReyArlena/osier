@@ -413,6 +413,9 @@ impl Osier {
             (RemoteOp::Pull(o) | RemoteOp::Update(o), GitError::NoUpstream(_)) => {
                 self.prompt_set_upstream_and_pull(o.clone(), window, cx);
             }
+            (RemoteOp::Pull(_) | RemoteOp::Update(_), GitError::UpstreamGone(_)) => {
+                self.prompt_upstream_gone(op.clone(), window, cx);
+            }
             (_, GitError::AuthRequired(_)) => {
                 let text = describe(&error);
                 let hint = if self.gh_accounts.is_empty() {
@@ -688,6 +691,111 @@ impl Osier {
                 options.branch = Some(branch.clone());
                 options.set_upstream = true;
                 this.start_remote(RemoteOp::Push(options), window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// The pull found the branch's upstream deleted on the remote (merged on GitHub, usually):
+    /// offer to switch to the default branch, pull it, and delete the local branch when that
+    /// loses nothing.
+    fn prompt_upstream_gone(&mut self, op: RemoteOp, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repo) = self.active_project().map(|p| p.repo.clone()) else {
+            return;
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let plan = cx
+                .background_spawn(async move { osier_git::ops::branch::gone_upstream(&repo) })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.show_upstream_gone(plan, op, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    fn show_upstream_gone(
+        &mut self,
+        plan: Option<osier_git::ops::branch::GoneUpstream>,
+        op: RemoteOp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = "Branch deleted on the remote";
+        let Some(plan) = plan else {
+            window.push_notification(
+                Notification::warning(
+                    "The branch this one tracks no longer exists on the remote, usually because \
+                     it was merged. Switch to another branch, or link this one to another \
+                     upstream in the Branches tab.",
+                )
+                .title(title),
+                cx,
+            );
+            return;
+        };
+        let (branch, remote) = (plan.branch.clone(), plan.remote.clone());
+        let Some(default) = plan.default.clone() else {
+            window.push_notification(
+                Notification::warning(format!(
+                    "{remote}/{branch} no longer exists, usually because {branch} was merged \
+                     and its branch deleted. Switch to another branch, or link {branch} to \
+                     another upstream in the Branches tab."
+                ))
+                .title(title),
+                cx,
+            );
+            return;
+        };
+        let body = if plan.merged {
+            format!(
+                "{remote}/{branch} no longer exists, usually because {branch} was merged and \
+                 its branch deleted. Everything on {branch} is already on {remote}/{default}. \
+                 Switch to {default} and pull to carry on there."
+            )
+        } else {
+            format!(
+                "{remote}/{branch} no longer exists, usually because {branch} was merged and \
+                 its branch deleted. Switch to {default} and pull to carry on there. {branch} \
+                 stays here: it has commits that are not on {remote}/{default}."
+            )
+        };
+        // Offered only when deleting loses nothing.
+        let flag = plan.merged.then(|| {
+            crate::actions::PromptFlag::new("Also delete the branch here", true).hint(
+                "Nothing is lost: all of its commits are already on the remote's default branch.",
+            )
+        });
+        let delete_value = flag.as_ref().map(|f| f.value.clone());
+        let flags: Vec<_> = flag.into_iter().collect();
+        self.confirm_with_flags(
+            title,
+            body,
+            format!("Switch to {default} and pull"),
+            false,
+            flags,
+            move |this, window, cx| {
+                let (b, d) = (branch.clone(), default.clone());
+                let delete = delete_value.as_ref().is_some_and(|v| v.get());
+                let op = op.clone();
+                this.run_op_then(
+                    if delete {
+                        format!("Switched to {d} and deleted {b}")
+                    } else {
+                        format!("Switched to {d}")
+                    },
+                    move |repo| {
+                        osier_git::ops::branch::checkout(repo, &d)?;
+                        if delete {
+                            osier_git::ops::branch::delete(repo, &b, true)?;
+                        }
+                        Ok(())
+                    },
+                    move |this, window, cx| this.start_remote(op.clone(), window, cx),
+                    window,
+                    cx,
+                );
             },
             window,
             cx,

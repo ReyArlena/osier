@@ -411,6 +411,8 @@ fn classify(status: i32, record: CommandRecord, stdout: &str) -> GitError {
         GitError::NonFastForward(Box::new(record))
     } else if has("has no upstream branch") || has("no tracking information") {
         GitError::NoUpstream(Box::new(record))
+    } else if has("but no such ref was fetched") {
+        GitError::UpstreamGone(Box::new(record))
     } else if has("Could not resolve host")
         || has("Connection refused")
         || has("Connection timed out")

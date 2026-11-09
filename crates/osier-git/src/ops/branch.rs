@@ -74,10 +74,127 @@ pub fn delete_remote(repo: &Repository, remote: &str, name: &str) -> Result<()> 
     Ok(())
 }
 
+/// A branch whose upstream was deleted on the remote (usually merged on GitHub and the
+/// branch removed), and what to offer instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoneUpstream {
+    /// The current branch.
+    pub branch: String,
+    /// The remote it tracked.
+    pub remote: String,
+    /// The remote's default branch, as a local name (`main`), when known and not `branch`.
+    pub default: Option<String>,
+    /// Every commit of `branch` is already in the remote's default branch, so deleting the
+    /// local branch loses nothing.
+    pub merged: bool,
+}
+
+/// The local name of `remote`'s default branch: its `HEAD`, else a `main` or `master` it has.
+pub fn default_branch(repo: &Repository, remote: &str) -> Option<String> {
+    let head = format!("refs/remotes/{remote}/HEAD");
+    if let Ok(out) = repo.git(["symbolic-ref", "--quiet", "--short", &head]) {
+        let full = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if let Some(name) = full.strip_prefix(&format!("{remote}/"))
+            && !name.is_empty()
+        {
+            return Some(name.to_string());
+        }
+    }
+    ["main", "master"]
+        .into_iter()
+        .find(|name| {
+            let r = format!("refs/remotes/{remote}/{name}");
+            repo.git(["rev-parse", "--verify", "--quiet", &r]).is_ok()
+        })
+        .map(str::to_string)
+}
+
+/// Whether every commit of `branch` is in `target`.
+pub fn is_merged_into(repo: &Repository, branch: &str, target: &str) -> bool {
+    repo.runner()
+        .run_allowing(
+            Some(repo.workdir()),
+            ["merge-base", "--is-ancestor", branch, target],
+            &[0, 1],
+        )
+        .is_ok_and(|o| o.record.status == Some(0))
+}
+
+/// What to offer after a pull failed with [`crate::GitError::UpstreamGone`].
+pub fn gone_upstream(repo: &Repository) -> Option<GoneUpstream> {
+    let branch = String::from_utf8_lossy(
+        &repo
+            .git(["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .ok()?
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let key = format!("branch.{branch}.remote");
+    let remote = repo
+        .git(["config", "--get", &key])
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|r| !r.is_empty() && r != ".")
+        .unwrap_or_else(|| "origin".to_string());
+    let default = default_branch(repo, &remote).filter(|d| *d != branch);
+    let merged = default
+        .as_ref()
+        .is_some_and(|d| is_merged_into(repo, &branch, &format!("{remote}/{d}")));
+    Some(GoneUpstream {
+        branch,
+        remote,
+        default,
+        merged,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::GitError;
+
+    #[test]
+    fn a_merged_and_deleted_upstream_is_typed_and_explained() {
+        use crate::ops::remote::{PullOptions, RemoteContext, pull};
+        let t = crate::testing::TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["fetch", "-q", "origin"]);
+        t.git(["remote", "set-head", "origin", "main"]);
+        t.checkout_new("feature");
+        t.commit_file("b.txt", "b\n", "feature work");
+        t.git(["push", "-q", "-u", "origin", "feature"]);
+        // Merged on the remote (a merge commit), then the branch deleted there.
+        t.git(["push", "-q", "origin", "feature:main"]);
+        let bare_git = |args: &[&str]| {
+            let mut all = vec!["--git-dir", bare.to_str().unwrap()];
+            all.extend_from_slice(args);
+            t.git(all)
+        };
+        bare_git(&["branch", "-D", "feature"]);
+        let repo = t.repo();
+        let err = pull(
+            &repo,
+            &PullOptions::default(),
+            &RemoteContext::default(),
+            |_| {},
+        );
+        assert!(matches!(err, Err(GitError::UpstreamGone(_))), "{err:?}");
+        let gone = gone_upstream(&repo).unwrap();
+        assert_eq!(
+            gone,
+            GoneUpstream {
+                branch: "feature".into(),
+                remote: "origin".into(),
+                default: Some("main".into()),
+                merged: true,
+            }
+        );
+        // A commit that never reached the remote: not merged, the branch must be kept.
+        t.commit_file("c.txt", "c\n", "local only");
+        assert!(!gone_upstream(&repo).unwrap().merged);
+    }
     use crate::refs::branches;
     use crate::testing::TempRepo;
 

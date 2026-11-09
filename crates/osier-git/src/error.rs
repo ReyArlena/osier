@@ -46,6 +46,10 @@ pub enum GitError {
     #[error("the current branch has no upstream")]
     NoUpstream(Box<CommandRecord>),
 
+    /// The branch's upstream no longer exists on the remote (merged and deleted, usually).
+    #[error("the branch this one tracks was deleted on the remote")]
+    UpstreamGone(Box<CommandRecord>),
+
     #[error("cancelled")]
     Cancelled(Box<CommandRecord>),
 
@@ -111,6 +115,7 @@ impl GitError {
             | Self::BranchNotMerged(r)
             | Self::Network(r)
             | Self::NoUpstream(r)
+            | Self::UpstreamGone(r)
             | Self::Cancelled(r) => Some(r),
             Self::Failed { record, .. } | Self::Timeout { record, .. } => Some(record),
             _ => None,

@@ -8150,4 +8150,38 @@ mod tests {
             "scrolling up stays where the user put it: {down} then {up}"
         );
     }
+
+    #[gpui::test]
+    fn ui_pulling_a_branch_deleted_after_merge_offers_main(cx: &mut TestAppContext) {
+        let t = TempRepo::new();
+        t.commit_file("a.txt", "a\n", "first");
+        let bare = t.add_bare_origin();
+        t.git(["push", "-q", "-u", "origin", "HEAD"]);
+        t.git(["remote", "set-head", "origin", "main"]);
+        t.checkout_new("feature");
+        t.commit_file("b.txt", "b\n", "feature work");
+        t.git(["push", "-q", "-u", "origin", "feature"]);
+        // Merged on GitHub and the branch deleted there.
+        t.git(["push", "-q", "origin", "feature:main"]);
+        t.git([
+            "--git-dir",
+            bare.to_str().unwrap(),
+            "branch",
+            "-D",
+            "feature",
+        ]);
+        let h = Harness::open(cx, &t);
+        h.act(cx, |o, window, cx| {
+            o.start_remote(crate::remote_ops::RemoteOp::pull_default(), window, cx)
+        });
+        assert!(h.has_settings(cx), "a dialog explains and offers main");
+        h.click(cx, "dialog-ok");
+        assert_eq!(t.git(["branch", "--show-current"]).trim(), "main");
+        assert!(
+            t.try_git(["rev-parse", "--verify", "--quiet", "refs/heads/feature"])
+                .is_err(),
+            "the merged branch is deleted"
+        );
+        assert_eq!(t.read("b.txt"), "b\n", "main was pulled");
+    }
 }
