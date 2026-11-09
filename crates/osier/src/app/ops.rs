@@ -11,6 +11,7 @@ use osier_config::history::{self, HistoryEntry};
 use osier_git::{GitError, Repository};
 
 use crate::app::Osier;
+use crate::test_ids::TestId as _;
 
 /// One line a user can act on, with the stderr detail for failures.
 pub(crate) fn describe(error: &GitError) -> String {
@@ -373,7 +374,9 @@ pub(crate) fn failure_title(summary: &str) -> String {
     }
 }
 
-/// Add a "Command log" button that opens the log on the failed command.
+/// Add a "View command log" button that opens the log on the failed command. It sits under
+/// the message (the toast's own action slot goes beside it and squeezes the text), and like
+/// an action it keeps the toast up until dismissed.
 pub(crate) fn with_command_log(
     notification: Notification,
     error: &GitError,
@@ -381,15 +384,23 @@ pub(crate) fn with_command_log(
 ) -> Notification {
     let owner = cx.weak_entity();
     let id = error.record().map(|r| r.id);
-    notification.action(move |_, _, _| {
+    notification.autohide(false).content(move |_, _, _| {
         let owner = owner.clone();
-        Button::new("show-command-log")
-            .ghost()
-            .xsmall()
-            .label("Command log")
-            .on_click(move |_, _, cx| {
-                let _ = owner.update(cx, |this, cx| this.show_failed_command(id, cx));
-            })
+        div()
+            .mt_1()
+            .flex()
+            .justify_end()
+            .child(
+                Button::new("show-command-log")
+                    .test_id("show-command-log")
+                    .ghost()
+                    .xsmall()
+                    .label("View command log")
+                    .on_click(move |_, _, cx| {
+                        let _ = owner.update(cx, |this, cx| this.show_failed_command(id, cx));
+                    }),
+            )
+            .into_any_element()
     })
 }
 

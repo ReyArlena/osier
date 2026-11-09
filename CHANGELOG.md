@@ -25,6 +25,16 @@ All notable changes to Osier are documented here. The format follows
 - The command log shows when each command started (time of day on the row, the full date
   when expanded, and in "Copy details").
 
+### Changed
+
+- Error toasts put their "View command log" button under the message instead of beside it,
+  so the message gets the full width.
+
+### Removed
+
+- The `ctrl-q` Quit hint in the status bar. The shortcut is unchanged and listed in the
+  command palette and the keymap.
+
 ### Fixed
 
 - Git commands that take a long list of paths no longer hang when git answers faster than
