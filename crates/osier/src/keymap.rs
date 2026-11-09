@@ -188,6 +188,14 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ToggleCommandLog
         ),
         spec!(
+            "toggle_notifications",
+            "Toggle notifications",
+            "View",
+            ["ctrl-shift-n"],
+            App,
+            ToggleNotifications
+        ),
+        spec!(
             "toggle_commit_details",
             "Toggle commit details",
             "View",

@@ -4,7 +4,7 @@
 use gpui_kit::component::diff::{DiffEvent, DiffState};
 use gpui_kit::*;
 
-use super::{Osier, Tab};
+use super::{BottomTab, Osier, Tab};
 use crate::project::{Project, Selection};
 
 impl Osier {
@@ -220,19 +220,50 @@ impl Osier {
         cx.notify();
     }
 
-    pub(crate) fn toggle_command_log(&mut self, cx: &mut Context<Self>) {
-        self.command_log_visible = !self.command_log_visible;
+    /// Show the bottom panel on `tab`, or hide it when it already shows that tab.
+    fn toggle_bottom_panel(&mut self, tab: BottomTab, cx: &mut Context<Self>) {
+        if self.command_log_visible && self.bottom_tab == tab {
+            self.command_log_visible = false;
+        } else {
+            self.show_bottom_tab(tab, cx);
+        }
         self.save_state();
         cx.notify();
+    }
+
+    /// Open the bottom panel on `tab`. Showing the notifications marks them all as seen.
+    pub(crate) fn show_bottom_tab(&mut self, tab: BottomTab, cx: &mut Context<Self>) {
+        self.command_log_visible = true;
+        self.bottom_tab = tab;
+        if tab == BottomTab::Notifications {
+            self.notices_seen = crate::notices::NoticeLog::latest(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_command_log(&mut self, cx: &mut Context<Self>) {
+        self.toggle_bottom_panel(BottomTab::Commands, cx);
+    }
+
+    pub(crate) fn toggle_notifications(&mut self, cx: &mut Context<Self>) {
+        self.toggle_bottom_panel(BottomTab::Notifications, cx);
+    }
+
+    /// Notices raised after the panel was last open on them.
+    pub(crate) fn unread_notices(&self, cx: &App) -> usize {
+        if self.command_log_visible && self.bottom_tab == BottomTab::Notifications {
+            return 0;
+        }
+        crate::notices::NoticeLog::unread(self.notices_seen, cx)
     }
 
     /// From an error notification: open the command log on failures only, with the command
     /// that failed (when known) expanded. Failures are few, so it is at or near the top.
     pub(crate) fn show_failed_command(&mut self, id: Option<u64>, cx: &mut Context<Self>) {
         if !self.command_log_visible {
-            self.command_log_visible = true;
             self.save_state();
         }
+        self.show_bottom_tab(BottomTab::Commands, cx);
         self.command_log_failures_only = true;
         self.expanded_command = id;
         cx.notify();

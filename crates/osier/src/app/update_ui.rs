@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::app::Osier;
 use crate::install_route::InstallRoute;
+use crate::notices::WindowNoticeExt as _;
 use crate::update::{self, Decision};
 
 /// Startup checks are skipped when the last one is younger than this.
@@ -220,7 +221,6 @@ impl Osier {
 
     /// "Restart now" after an update: start the new binary once this one has exited.
     pub(crate) fn restart_after_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use gpui_kit::component::WindowExt as _;
         let Some(InstallRoute::Script { bin_dir }) = self.updates.route.clone() else {
             return;
         };
@@ -228,11 +228,9 @@ impl Osier {
         self.save_state();
         match self.updates.source.restart(&binary) {
             Ok(()) => cx.quit(),
-            Err(e) => window.push_notification(
-                gpui_kit::component::notification::Notification::warning(format!(
-                    "{e}. Close Osier and start it again."
-                ))
-                .title("Could not restart"),
+            Err(e) => window.push_notice(
+                crate::notices::Notice::warning(format!("{e}. Close Osier and start it again."))
+                    .title("Could not restart"),
                 cx,
             ),
         }

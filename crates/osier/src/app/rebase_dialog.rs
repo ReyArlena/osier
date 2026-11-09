@@ -8,12 +8,12 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use osier_git::ops::rebase_interactive::{self, TodoAction, TodoItem};
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 
 fn action_label(a: &TodoAction) -> &'static str {
     match a {
@@ -37,8 +37,8 @@ impl Osier {
             return;
         };
         if self.in_progress().is_some() {
-            window.push_notification(
-                Notification::warning("Finish or abort the current operation first"),
+            window.push_notice(
+                Notice::warning("Finish or abort the current operation first"),
                 cx,
             );
             return;
@@ -46,15 +46,15 @@ impl Osier {
         let items = match rebase_interactive::commits_since(&project.repo, &base) {
             Ok(items) => items,
             Err(e) => {
-                window.push_notification(
-                    Notification::error(e.to_string()).title("Cannot list commits"),
+                window.push_notice(
+                    Notice::error(e.to_string()).title("Cannot list commits"),
                     cx,
                 );
                 return;
             }
         };
         if items.is_empty() {
-            window.push_notification("No commits above that point to rebase", cx);
+            window.push_notice("No commits above that point to rebase", cx);
             return;
         }
         let items: Rc<RefCell<Vec<TodoItem>>> = Rc::new(RefCell::new(items));

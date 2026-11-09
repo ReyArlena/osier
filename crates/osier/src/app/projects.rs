@@ -7,6 +7,7 @@ use gpui_kit::*;
 use osier_git::GitRunner;
 
 use super::{Osier, reopen_error};
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::Project;
 
 impl Osier {
@@ -218,8 +219,6 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use gpui_kit::component::WindowExt as _;
-        use gpui_kit::component::notification::Notification;
         let before = self.projects.len();
         match self.open_project(path, true, cx) {
             Ok(ix) => {
@@ -231,8 +230,8 @@ impl Osier {
                 }
                 self.activate(ix, window, cx)
             }
-            Err(error) => window.push_notification(
-                Notification::warning(format!("{error}. It was removed from the recent list."))
+            Err(error) => window.push_notice(
+                Notice::warning(format!("{error}. It was removed from the recent list."))
                     .title("Could not open repository"),
                 cx,
             ),
@@ -246,7 +245,6 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use gpui_kit::component::WindowExt as _;
         if let Some(dir) = osier_config::scan::provider(&self.settings.projects.scan_dirs, path) {
             let dir = crate::format::tilde(dir);
             let name = crate::format::tilde(path);
@@ -265,7 +263,7 @@ impl Osier {
         }
         self.state.forget_recent(path);
         self.save_state();
-        window.push_notification(
+        window.push_notice(
             format!("Removed {} from recents", crate::format::tilde(path)),
             cx,
         );

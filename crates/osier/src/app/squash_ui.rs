@@ -9,12 +9,12 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Textarea, TextareaState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme as _, v_flex};
 use gpui_kit::*;
 use osier_git::ops::squash::{self, SquashPlan};
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::Selection;
 use crate::test_ids::TestId as _;
 
@@ -26,8 +26,8 @@ impl Osier {
         };
         let picked = project.picked.clone();
         if picked.len() < 2 {
-            window.push_notification(
-                Notification::warning(
+            window.push_notice(
+                Notice::warning(
                     "Pick at least two commits: shift-click selects a range, ctrl-click adds \
                      single commits.",
                 )
@@ -43,8 +43,8 @@ impl Osier {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match plan {
                 Ok(plan) => this.open_squash_dialog(plan, window, cx),
-                Err(error) => window.push_notification(
-                    Notification::warning(crate::app::ops::describe(&error))
+                Err(error) => window.push_notice(
+                    Notice::warning(crate::app::ops::describe(&error))
                         .title("Cannot squash these commits"),
                     cx,
                 ),

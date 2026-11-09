@@ -3,22 +3,134 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::notices::WindowNoticeExt as _;
 use crate::test_ids::TestId as _;
 use osier_git::runner::CommandRecord;
 
 impl Osier {
-    pub(crate) fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The bottom panel: a tab row (git commands, notifications), then the chosen list.
+    pub(crate) fn render_bottom_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::app::BottomTab;
+        let muted = cx.theme().muted_foreground;
+        let tab = self.bottom_tab;
+        let commands = self.sink.records().len();
+        let failed = self.sink.records().iter().filter(|r| !r.expected).count();
+        let failures_only = self.command_log_failures_only;
+        let notices = crate::notices::NoticeLog::notices(cx).len();
+        let tab_button = |id: &'static str, label: &'static str, which: BottomTab| {
+            Button::new(id)
+                .test_id(id)
+                .xsmall()
+                .map(|b| if tab == which { b.primary() } else { b.ghost() })
+                .label(label)
+                .on_click(cx.listener(move |this, _, _, cx| this.show_bottom_tab(which, cx)))
+        };
+        let header = h_flex()
+            .px_3()
+            .py_1()
+            .gap_2()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(tab_button(
+                "panel-commands",
+                "Git commands",
+                BottomTab::Commands,
+            ))
+            .child(tab_button(
+                "panel-notifications",
+                "Notifications",
+                BottomTab::Notifications,
+            ))
+            .child(div().text_xs().text_color(muted).child(match tab {
+                BottomTab::Commands => format!("{commands} recorded"),
+                BottomTab::Notifications => crate::format::count(notices, "notification"),
+            }))
+            .child(div().flex_1())
+            .when(tab == BottomTab::Commands, |this| {
+                this.child(
+                    Button::new("log-failures-only")
+                        .test_id("log-failures-only")
+                        .xsmall()
+                        .map(|b| {
+                            if failures_only {
+                                b.primary()
+                            } else {
+                                b.ghost()
+                            }
+                        })
+                        .label(match failed {
+                            0 => "Failures only".to_string(),
+                            1 => "Failures only (1)".to_string(),
+                            n => format!("Failures only ({n})"),
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.command_log_failures_only = !this.command_log_failures_only;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("clear-log")
+                        .test_id("clear-log")
+                        .ghost()
+                        .xsmall()
+                        .label("Clear")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.sink.clear();
+                            this.expanded_command = None;
+                            cx.notify();
+                        })),
+                )
+            })
+            .when(tab == BottomTab::Notifications, |this| {
+                this.child(
+                    Button::new("clear-notices")
+                        .test_id("clear-notices")
+                        .ghost()
+                        .xsmall()
+                        .label("Clear")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            crate::notices::NoticeLog::clear(cx);
+                            this.notices_seen = crate::notices::NoticeLog::latest(cx);
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(
+                Button::new("close-log")
+                    .test_id("close-log")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::X)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.command_log_visible = false;
+                        this.save_state();
+                        cx.notify();
+                    })),
+            );
+        v_flex()
+            .h(px(220.))
+            .flex_none()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(header)
+            .child(match tab {
+                BottomTab::Commands => self.render_command_log(cx).into_any_element(),
+                BottomTab::Notifications => self.render_notices(cx).into_any_element(),
+            })
+    }
+
+    /// The git command list of the bottom panel.
+    fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
         let all = self.sink.records();
-        let failed = all.iter().filter(|r| !r.expected).count();
         let failures_only = self.command_log_failures_only;
         // Failures are easy to miss: a refresh right after one runs a dozen routine commands.
         let records: Vec<CommandRecord> = if failures_only {
@@ -159,72 +271,7 @@ impl Osier {
                 "No git commands run yet."
             }));
         }
-
-        v_flex()
-            .h(px(220.))
-            .flex_none()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                h_flex()
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(div().text_xs().font_medium().child("Git commands"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(format!("{} recorded", all.len())),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("log-failures-only")
-                            .test_id("log-failures-only")
-                            .xsmall()
-                            .map(|b| {
-                                if failures_only {
-                                    b.primary()
-                                } else {
-                                    b.ghost()
-                                }
-                            })
-                            .label(match failed {
-                                0 => "Failures only".to_string(),
-                                1 => "Failures only (1)".to_string(),
-                                n => format!("Failures only ({n})"),
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.command_log_failures_only = !this.command_log_failures_only;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("clear-log")
-                            .test_id("clear-log")
-                            .ghost()
-                            .xsmall()
-                            .label("Clear")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.sink.clear();
-                                this.expanded_command = None;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("close-log")
-                            .test_id("close-log")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::X)
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_command_log(cx))),
-                    ),
-            )
-            .child(list)
+        list
     }
 
     /// Copy one recorded command: the shell line, or everything the expanded row shows.
@@ -244,7 +291,7 @@ impl Osier {
             (rec.as_shell(), "command")
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        window.push_notification(format!("Copied {what}"), cx);
+        window.push_notice(format!("Copied {what}"), cx);
     }
 }
 

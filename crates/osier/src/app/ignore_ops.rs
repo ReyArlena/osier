@@ -13,13 +13,13 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::ops::ignore::{self, IgnoreFile};
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::test_ids::TestId as _;
 
 /// Which pattern to add.
@@ -132,15 +132,14 @@ impl Osier {
         cx.spawn_in(window, async move |this, cx| {
             let result = check.await;
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Err(e) => window.push_notification(
-                    Notification::error(e.to_string()).title("Could not check the path"),
+                Err(e) => window.push_notice(
+                    Notice::error(e.to_string()).title("Could not check the path"),
                     cx,
                 ),
                 // Already ignored, and git is not tracking it: nothing to do.
-                Ok((false, true)) => window.push_notification(
-                    Notification::info(format!("{path} is already ignored")),
-                    cx,
-                ),
+                Ok((false, true)) => {
+                    window.push_notice(Notice::info(format!("{path} is already ignored")), cx)
+                }
                 Ok((false, false)) => {
                     let summary = format!("Ignored {pattern} in {}", file.label());
                     this.run_op_reporting(

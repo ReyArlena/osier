@@ -23,6 +23,7 @@ mod keymap;
 mod merge_view;
 mod merge_window;
 mod new_repo;
+mod notices;
 mod palette;
 mod project;
 mod project_choices;

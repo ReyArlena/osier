@@ -18,7 +18,6 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::{Select, SelectState};
@@ -34,6 +33,7 @@ use osier_git::ops::remote::{self, CloneOptions, RemoteContext};
 use osier_git::{CancelToken, GitError, Progress};
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::palette::{Choice, ChoicePick};
 use crate::test_ids::TestId as _;
 
@@ -645,8 +645,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         if let Some(job) = &self.remote_job {
-            window.push_notification(
-                Notification::warning(format!("{} is still running", job.label)),
+            window.push_notice(
+                Notice::warning(format!("{} is still running", job.label)),
                 cx,
             );
             return;
@@ -744,8 +744,8 @@ impl Osier {
         }
         match result {
             Ok(_) => {
-                window.push_notification(
-                    Notification::success(format!("In {}", crate::format::tilde(target)))
+                window.push_notice(
+                    Notice::success(format!("In {}", crate::format::tilde(target)))
                         .title(label.to_string()),
                     cx,
                 );
@@ -758,11 +758,10 @@ impl Osier {
                 }
             }
             Err(GitError::Cancelled(_)) => {
-                window.push_notification(format!("{label}: cancelled"), cx);
+                window.push_notice(format!("{label}: cancelled"), cx);
             }
-            Err(e) => window.push_notification(
-                Notification::warning(crate::app::ops::describe(&e))
-                    .title(format!("{label} failed")),
+            Err(e) => window.push_notice(
+                Notice::warning(crate::app::ops::describe(&e)).title(format!("{label} failed")),
                 cx,
             ),
         }
@@ -1282,8 +1281,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         if let Some(job) = &self.remote_job {
-            window.push_notification(
-                Notification::warning(format!("{} is still running", job.label)),
+            window.push_notice(
+                Notice::warning(format!("{} is still running", job.label)),
                 cx,
             );
             return;
@@ -1323,8 +1322,8 @@ impl Osier {
                                 );
                             }
                             Err(e) => {
-                                window.push_notification(
-                                    Notification::warning(e).title(format!("{label} failed")),
+                                window.push_notice(
+                                    Notice::warning(e).title(format!("{label} failed")),
                                     cx,
                                 );
                                 cx.notify();

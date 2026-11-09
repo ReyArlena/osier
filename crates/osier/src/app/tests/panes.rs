@@ -398,3 +398,97 @@ fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestA
         }
     );
 }
+
+#[gpui::test]
+fn ui_notifications_panel_keeps_every_toast(cx: &mut TestAppContext) {
+    use crate::app::BottomTab;
+    use crate::notices::{Notice, NoticeLog, WindowNoticeExt as _};
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    // A failing command, so the error toast has a command to open the log on.
+    let error = h.read(cx, |o, _| {
+        o.runner
+            .run(Some(repo.path()), ["rev-parse", "--verify", "nope"])
+            .expect_err("rev-parse of a missing ref fails")
+    });
+    let record = error.record().map(|r| r.id);
+    assert!(record.is_some(), "the error carries its command record");
+    h.act(cx, |_, window, cx| {
+        window.push_notice("Recents cleared", cx);
+        window.push_notice(
+            Notice::error("boom")
+                .title("Could not pull")
+                .command_log(&error),
+            cx,
+        );
+    });
+    h.read(cx, |o, cx| {
+        assert_eq!(
+            o.unread_notices(cx),
+            2,
+            "both count as unread until the panel shows them"
+        );
+        assert!(!o.command_log_visible);
+    });
+    // The error toast stays up and would cover the title bar's bell in this small window.
+    h.act(cx, |_, window, cx| {
+        use gpui_kit::component::WindowExt as _;
+        window.clear_notifications(cx)
+    });
+    assert!(
+        h.bounds(cx, "notifications").is_some(),
+        "the title bar has the bell"
+    );
+
+    // The shortcut opens the panel on the Notifications tab and marks them seen.
+    h.keys(cx, "ctrl-shift-n");
+    h.read(cx, |o, cx| {
+        assert!(o.command_log_visible);
+        assert_eq!(o.bottom_tab, BottomTab::Notifications);
+        assert_eq!(o.unread_notices(cx), 0);
+    });
+    assert!(h.bounds(cx, "notice-row:1").is_some());
+    assert!(h.bounds(cx, "notice-row:2").is_some());
+    assert!(
+        h.bounds(cx, "notice-command-log:1").is_none(),
+        "a plain notice has no command log button"
+    );
+
+    // "View command log" on the error switches to the commands tab, failures only, expanded.
+    h.click(cx, "notice-command-log:2");
+    h.read(cx, |o, _| {
+        assert_eq!(o.bottom_tab, BottomTab::Commands);
+        assert!(o.command_log_failures_only);
+        assert_eq!(o.expanded_command, record);
+    });
+    assert!(
+        h.bounds(cx, &format!("command-row:{}", record.unwrap_or(0)))
+            .is_some()
+    );
+
+    // Back to notifications by its tab button; Clear empties the list.
+    h.click(cx, "panel-notifications");
+    h.read(cx, |o, _| {
+        assert_eq!(o.bottom_tab, BottomTab::Notifications)
+    });
+    h.click(cx, "clear-notices");
+    h.read(cx, |_, cx| assert!(NoticeLog::notices(cx).is_empty()));
+    assert!(h.bounds(cx, "notice-row:1").is_none());
+
+    // The shortcut on its own tab hides the panel; ctrl-` brings it back on commands.
+    h.keys(cx, "ctrl-shift-n");
+    h.read(cx, |o, _| assert!(!o.command_log_visible));
+    h.keys(cx, "ctrl-`");
+    h.read(cx, |o, _| {
+        assert!(o.command_log_visible);
+        assert_eq!(o.bottom_tab, BottomTab::Commands);
+    });
+    // The bell toggles the notifications tab too.
+    h.click(cx, "notifications");
+    h.read(cx, |o, _| {
+        assert_eq!(o.bottom_tab, BottomTab::Notifications)
+    });
+    h.click(cx, "notifications");
+    h.read(cx, |o, _| assert!(!o.command_log_visible));
+}

@@ -7,6 +7,7 @@ mod commit_details;
 mod diff_pane;
 pub(crate) mod files_tab;
 mod log_tab;
+mod notices;
 mod patches_tab;
 mod sidebar;
 mod stashes;

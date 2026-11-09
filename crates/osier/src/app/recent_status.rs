@@ -26,6 +26,7 @@ use osier_config::status_cache::{RepoBadge, StatusCache};
 use osier_git::GitRunner;
 
 use crate::app::Osier;
+use crate::notices::WindowNoticeExt as _;
 
 pub(crate) struct RecentStatus {
     pub mode: RecentStatusMode,
@@ -432,13 +433,12 @@ impl Osier {
 
     /// The "Scan now" button and palette command.
     pub(crate) fn scan_recent_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use gpui_kit::component::WindowExt as _;
         let targets = self.recent_status_targets();
         let n = self.recent_status.scan_now(targets);
         if self.recent_status.mode == RecentStatusMode::Never {
             return;
         }
-        window.push_notification(
+        window.push_notice(
             match n {
                 0 => {
                     "No projects to check: pinned and recent projects that are not open are checked"

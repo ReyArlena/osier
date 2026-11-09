@@ -2,16 +2,15 @@
 //! history and refresh.
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Sizable as _, v_flex};
+use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use osier_config::history::{self, HistoryEntry};
 use osier_git::{GitError, Repository};
 
 use crate::app::Osier;
-use crate::test_ids::TestId as _;
+use crate::notices::{Notice, WindowNoticeExt as _};
 
 /// One line a user can act on, with the stderr detail for failures.
 pub(crate) fn describe(error: &GitError) -> String {
@@ -191,7 +190,7 @@ impl Osier {
                 entry.head_after = head_after;
                 match &result {
                     Ok(_) => {
-                        window.push_notification(Notification::success(summary.clone()), cx);
+                        window.push_notice(Notice::success(summary.clone()), cx);
                     }
                     Err(error) => {
                         let text = describe(error);
@@ -200,19 +199,17 @@ impl Osier {
                         entry.error = Some(text.clone());
                         let handled = on_error.is_some_and(|h| h(this, error, window, cx));
                         if !handled {
-                            window.push_notification(
-                                with_command_log(
-                                    Notification::error(text).title(failure_title(&summary)),
-                                    error,
-                                    cx,
-                                ),
+                            window.push_notice(
+                                Notice::error(text)
+                                    .title(failure_title(&summary))
+                                    .command_log(error),
                                 cx,
                             );
                         }
                     }
                 }
                 if stash_clashed {
-                    window.push_notification(autostash_clash_notice(), cx);
+                    window.push_notice(autostash_clash_notice(), cx);
                 }
                 if let Err(e) = history::append(&this.paths, &entry) {
                     tracing::warn!(error = %e, "could not write history");
@@ -308,8 +305,8 @@ impl Osier {
 }
 
 /// Shown when git could not put stashed changes back cleanly after an operation.
-pub(crate) fn autostash_clash_notice() -> Notification {
-    Notification::warning(
+pub(crate) fn autostash_clash_notice() -> Notice {
+    Notice::warning(
         "Some of your uncommitted changes clash with the new commits. Those files are marked as \
          conflicts in Changes, and a full copy of your changes is saved in the Stashes tab as \
          \"autostash\". Drop that stash once the files look right.",
@@ -372,36 +369,6 @@ pub(crate) fn failure_title(summary: &str) -> String {
         Some((_, verb)) => format!("Could not {verb} {rest}"),
         None => format!("{summary} failed"),
     }
-}
-
-/// Add a "View command log" button that opens the log on the failed command. It sits under
-/// the message (the toast's own action slot goes beside it and squeezes the text), and like
-/// an action it keeps the toast up until dismissed.
-pub(crate) fn with_command_log(
-    notification: Notification,
-    error: &GitError,
-    cx: &mut Context<Osier>,
-) -> Notification {
-    let owner = cx.weak_entity();
-    let id = error.record().map(|r| r.id);
-    notification.autohide(false).content(move |_, _, _| {
-        let owner = owner.clone();
-        div()
-            .mt_1()
-            .flex()
-            .justify_end()
-            .child(
-                Button::new("show-command-log")
-                    .test_id("show-command-log")
-                    .ghost()
-                    .xsmall()
-                    .label("View command log")
-                    .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| this.show_failed_command(id, cx));
-                    }),
-            )
-            .into_any_element()
-    })
 }
 
 #[cfg(test)]

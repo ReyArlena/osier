@@ -1,12 +1,11 @@
 //! Editing in the diff pane: the merge result of a conflicted file, or a working-tree file.
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{EditorState, InputEvent};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use osier_git::ops::integrate;
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::{Area, Selection};
 
 /// What the editor is editing.
@@ -79,7 +78,7 @@ impl Osier {
             ),
         };
         let Some(text) = text else {
-            window.push_notification(Notification::warning("Cannot read the file as text"), cx);
+            window.push_notice(Notice::warning("Cannot read the file as text"), cx);
             return;
         };
         let language = language_for(&path);
@@ -174,8 +173,8 @@ impl Osier {
             return;
         };
         let Some(text) = self.diff.read(cx).resolved_text(&path) else {
-            window.push_notification(
-                Notification::warning("Choose a side for every conflict first"),
+            window.push_notice(
+                Notice::warning("Choose a side for every conflict first"),
                 cx,
             );
             return;

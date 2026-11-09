@@ -355,6 +355,51 @@ impl Osier {
                         .tooltip("Git command log (ctrl-`)")
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_command_log(cx))),
                 )
+                .child({
+                    let unread = self.unread_notices(cx);
+                    let on = self.command_log_visible
+                        && self.bottom_tab == crate::app::BottomTab::Notifications;
+                    div()
+                        .relative()
+                        .child(
+                            Button::new("notifications")
+                                .test_id("notifications")
+                                .ghost()
+                                .small()
+                                .icon(Lucide::Bell)
+                                .toggled(on)
+                                .tooltip(match unread {
+                                    0 => "Notifications".to_string(),
+                                    n => format!("Notifications ({n} new)"),
+                                })
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.toggle_notifications(cx)),
+                                ),
+                        )
+                        .when(unread > 0, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .min_w(px(14.))
+                                    .h(px(14.))
+                                    .px_0p5()
+                                    .rounded_full()
+                                    .bg(cx.theme().primary)
+                                    .text_color(cx.theme().primary_foreground)
+                                    .text_size(px(9.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(if unread > 99 {
+                                        "99+".to_string()
+                                    } else {
+                                        unread.to_string()
+                                    }),
+                            )
+                        })
+                })
                 .child(self.render_theme_menu(cx))
                 .child(
                     Button::new("settings")

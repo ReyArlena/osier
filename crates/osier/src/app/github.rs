@@ -3,12 +3,12 @@
 
 use std::path::Path;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 use osier_git::refs::Remote;
 use osier_git::repo::Repository;
 
 use crate::app::Osier;
+use crate::notices::WindowNoticeExt as _;
 
 /// The GitHub page of the remote a project tracks: the upstream's remote, else `origin`,
 /// else the first remote on GitHub.
@@ -170,7 +170,7 @@ impl Osier {
             });
         match branch {
             Some(branch) => self.open_branch_pulls_on_github(branch, true, window, cx),
-            None => window.push_notification(
+            None => window.push_notice(
                 "This commit does not name a pull request and is not the tip of a remote branch.",
                 cx,
             ),
@@ -199,7 +199,7 @@ impl Osier {
                 .and_then(|b| b.upstream.clone())
         };
         let Some(upstream) = upstream else {
-            return window.push_notification(
+            return window.push_notice(
                 "This branch has no upstream, so GitHub has no pull request for it.",
                 cx,
             );
@@ -214,7 +214,7 @@ impl Osier {
     fn open_github(&mut self, url: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         match url {
             Some(url) => cx.open_url(&url),
-            None => window.push_notification("This project has no GitHub remote.", cx),
+            None => window.push_notice("This project has no GitHub remote.", cx),
         }
     }
 }

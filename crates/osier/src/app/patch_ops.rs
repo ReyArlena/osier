@@ -3,8 +3,6 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use osier_config::history::{self, HistoryEntry};
 use osier_config::patches::{self, StoredPatch};
@@ -13,6 +11,7 @@ use osier_git::ops::patches::{self as git_patches, ApplyOptions, ApplyReport, Pa
 
 use crate::app::ops::describe;
 use crate::app::{Osier, Tab};
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::{Area, Selection};
 
 type After = Rc<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;
@@ -89,13 +88,12 @@ impl Osier {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(text) if text.trim().is_empty() => {
-                    window
-                        .push_notification(Notification::warning("Nothing to put in a patch"), cx);
+                    window.push_notice(Notice::warning("Nothing to put in a patch"), cx);
                 }
                 Ok(text) => then(this, text, window, cx),
                 Err(error) => {
-                    window.push_notification(
-                        Notification::error(describe(&error)).title("Could not create patch"),
+                    window.push_notice(
+                        Notice::error(describe(&error)).title("Could not create patch"),
                         cx,
                     );
                 }
@@ -115,8 +113,8 @@ impl Osier {
             |_, text, window, cx| {
                 let n = count_files(&text);
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
-                window.push_notification(
-                    Notification::success(format!("Copied patch ({n} {})", plural(n, "file"))),
+                window.push_notice(
+                    Notice::success(format!("Copied patch ({n} {})", plural(n, "file"))),
                     cx,
                 );
             },
@@ -182,15 +180,15 @@ impl Osier {
         match patches::save(&self.paths, name, repo_path.as_deref(), files, text) {
             Ok(stored) => {
                 self.reload_patches(cx);
-                window.push_notification(
-                    Notification::success(format!("Saved patch \"{}\"", stored.meta.name)),
+                window.push_notice(
+                    Notice::success(format!("Saved patch \"{}\"", stored.meta.name)),
                     cx,
                 );
                 Some(stored)
             }
             Err(error) => {
-                window.push_notification(
-                    Notification::error(error.to_string()).title("Could not save patch"),
+                window.push_notice(
+                    Notice::error(error.to_string()).title("Could not save patch"),
                     cx,
                 );
                 None
@@ -232,12 +230,12 @@ impl Osier {
             };
             let result = std::fs::write(&path, text);
             let _ = this.update_in(cx, |_, window, cx| match result {
-                Ok(()) => window.push_notification(
-                    Notification::success(format!("Wrote {}", crate::format::tilde(&path))),
+                Ok(()) => window.push_notice(
+                    Notice::success(format!("Wrote {}", crate::format::tilde(&path))),
                     cx,
                 ),
-                Err(e) => window.push_notification(
-                    Notification::error(e.to_string()).title("Could not write patch"),
+                Err(e) => window.push_notice(
+                    Notice::error(e.to_string()).title("Could not write patch"),
                     cx,
                 ),
             });
@@ -317,7 +315,7 @@ impl Osier {
             (t, u)
         };
         if tracked.is_empty() && untracked.is_empty() {
-            window.push_notification(Notification::warning("Nothing to shelve"), cx);
+            window.push_notice(Notice::warning("Nothing to shelve"), cx);
             return;
         }
         let source = PatchSource::Worktree {
@@ -360,10 +358,7 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let Some(project) = self.active_project() else {
-            window.push_notification(
-                Notification::warning("Open a repository to apply a patch"),
-                cx,
-            );
+            window.push_notice(Notice::warning("Open a repository to apply a patch"), cx);
             return;
         };
         let repo = project.repo.clone();
@@ -377,12 +372,12 @@ impl Osier {
                 })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match probe {
-                Err(error) => window.push_notification(
-                    Notification::error(describe(&error)).title("Not a patch git can read"),
+                Err(error) => window.push_notice(
+                    Notice::error(describe(&error)).title("Not a patch git can read"),
                     cx,
                 ),
                 Ok((files, _)) if files.is_empty() => {
-                    window.push_notification(Notification::warning("The patch is empty"), cx)
+                    window.push_notice(Notice::warning("The patch is empty"), cx)
                 }
                 Ok((files, report)) if report.ok => {
                     let list = file_list(files.iter().map(|f| f.path.as_str()));
@@ -413,8 +408,8 @@ impl Osier {
                     // PhpStorm and plain `diff -u` patches carry no blob ids, so git cannot
                     // fall back to a three-way merge. Say so instead of offering it.
                     let rejected = file_list(report.rejected.iter().map(String::as_str));
-                    window.push_notification(
-                        Notification::error(format!(
+                    window.push_notice(
+                        Notice::error(format!(
                                 "Rejected:\n{rejected}\n\n{}\n\nThis patch has no blob ids (PhpStorm or plain diff), so a three-way merge is not possible. Bring the files closer to the patch's base and try again.",
                                 report.message
                             )).title(format!("{label} does not apply cleanly")),
@@ -479,20 +474,18 @@ impl Osier {
                 let mut entry = HistoryEntry::now(&path, summary.clone());
                 let changed = match &result {
                     Ok(ApplyReport { ok: true, .. }) => {
-                        window.push_notification(Notification::success(summary), cx);
+                        window.push_notice(Notice::success(summary), cx);
                         true
                     }
                     Ok(report) if !report.conflicts.is_empty() => {
                         let n = report.conflicts.len();
                         entry.error = Some(format!("conflicts in {n} {}", plural(n, "file")));
-                        window.push_notification(
-                            Notification::warning(file_list(
-                                report.conflicts.iter().map(String::as_str),
-                            ))
-                            .title(format!(
-                                "{summary} with conflicts in {n} {}",
-                                plural(n, "file")
-                            )),
+                        window.push_notice(
+                            Notice::warning(file_list(report.conflicts.iter().map(String::as_str)))
+                                .title(format!(
+                                    "{summary} with conflicts in {n} {}",
+                                    plural(n, "file")
+                                )),
                             cx,
                         );
                         true
@@ -500,8 +493,8 @@ impl Osier {
                     Ok(report) => {
                         entry.ok = false;
                         entry.error = Some(report.message.clone());
-                        window.push_notification(
-                            Notification::error(report.message.clone())
+                        window.push_notice(
+                            Notice::error(report.message.clone())
                                 .title(format!("{label} was not applied")),
                             cx,
                         );
@@ -510,8 +503,8 @@ impl Osier {
                     Err(error) => {
                         entry.ok = false;
                         entry.error = Some(describe(error));
-                        window.push_notification(
-                            Notification::error(describe(error))
+                        window.push_notice(
+                            Notice::error(describe(error))
                                 .title(format!("{label} was not applied")),
                             cx,
                         );
@@ -546,7 +539,7 @@ impl Osier {
             .and_then(|item| item.text())
             .unwrap_or_default();
         if text.trim().is_empty() {
-            window.push_notification(Notification::warning("The clipboard has no text"), cx);
+            window.push_notice(Notice::warning("The clipboard has no text"), cx);
             return;
         }
         self.apply_patch_text(text, "clipboard patch".into(), None, window, cx);
@@ -575,8 +568,8 @@ impl Osier {
                         .unwrap_or_else(|| "patch".into());
                     this.apply_patch_text(text, label, None, window, cx);
                 }
-                Err(e) => window.push_notification(
-                    Notification::error(e.to_string()).title("Could not read patch"),
+                Err(e) => window.push_notice(
+                    Notice::error(e.to_string()).title("Could not read patch"),
                     cx,
                 ),
             });
@@ -605,8 +598,8 @@ impl Osier {
         let text = match patch.text() {
             Ok(t) => t,
             Err(e) => {
-                window.push_notification(
-                    Notification::error(e.to_string()).title("Could not read patch"),
+                window.push_notice(
+                    Notice::error(e.to_string()).title("Could not read patch"),
                     cx,
                 );
                 return;
@@ -667,8 +660,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         if let Err(error) = patches::delete(&self.paths, &id) {
-            window.push_notification(
-                Notification::error(error.to_string()).title("Could not delete patch"),
+            window.push_notice(
+                Notice::error(error.to_string()).title("Could not delete patch"),
                 cx,
             );
             return;
@@ -703,8 +696,8 @@ impl Osier {
                     return;
                 }
                 if let Err(error) = patches::rename(&this.paths, &id, &name) {
-                    window.push_notification(
-                        Notification::error(error.to_string()).title("Could not rename patch"),
+                    window.push_notice(
+                        Notice::error(error.to_string()).title("Could not rename patch"),
                         cx,
                     );
                 }
@@ -723,13 +716,13 @@ impl Osier {
             Ok(text) => {
                 let n = count_files(&text);
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
-                window.push_notification(
-                    Notification::success(format!("Copied patch ({n} {})", plural(n, "file"))),
+                window.push_notice(
+                    Notice::success(format!("Copied patch ({n} {})", plural(n, "file"))),
                     cx,
                 );
             }
-            Err(e) => window.push_notification(
-                Notification::error(e.to_string()).title("Could not read patch"),
+            Err(e) => window.push_notice(
+                Notice::error(e.to_string()).title("Could not read patch"),
                 cx,
             ),
         }
@@ -747,8 +740,8 @@ impl Osier {
         let suggested = format!("{}.patch", patches::slug(&patch.meta.name));
         match patch.text() {
             Ok(text) => self.write_patch_file(text, suggested, window, cx),
-            Err(e) => window.push_notification(
-                Notification::error(e.to_string()).title("Could not read patch"),
+            Err(e) => window.push_notice(
+                Notice::error(e.to_string()).title("Could not read patch"),
                 cx,
             ),
         }

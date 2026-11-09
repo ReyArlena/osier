@@ -8,7 +8,6 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
@@ -22,6 +21,7 @@ use osier_git::{CancelToken, GitError, Progress};
 use crate::app::Osier;
 use crate::app::ops::describe;
 use crate::dialog_hint::{hint, hinted_radio};
+use crate::notices::{Notice, WindowNoticeExt as _};
 
 #[derive(Debug, Clone)]
 pub enum RemoteOp {
@@ -257,8 +257,8 @@ impl Osier {
             return;
         }
         if let Some(job) = &self.remote_job {
-            window.push_notification(
-                Notification::warning(format!("{} is still running", job.label)),
+            window.push_notice(
+                Notice::warning(format!("{} is still running", job.label)),
                 cx,
             );
             return;
@@ -312,7 +312,7 @@ impl Osier {
                 entry.head_before = head_before;
                 entry.head_after = head_after;
                 match &result {
-                    Ok(_) => window.push_notification(Notification::success(label.clone()), cx),
+                    Ok(_) => window.push_notice(Notice::success(label.clone()), cx),
                     Err(e) => {
                         entry.ok = false;
                         entry.error = Some(describe(e));
@@ -325,7 +325,7 @@ impl Osier {
                     this.refresh_project(ix, cx);
                 }
                 if stash_clashed {
-                    window.push_notification(crate::app::ops::autostash_clash_notice(), cx);
+                    window.push_notice(crate::app::ops::autostash_clash_notice(), cx);
                 }
                 if let (RemoteOp::Pull(_) | RemoteOp::Update(_), Ok(_), Some(before), Some(after)) =
                     (&op, &result, &entry.head_before, &entry.head_after)
@@ -462,7 +462,7 @@ impl Osier {
         let label = op.label();
         match (&op, &error) {
             (_, GitError::Cancelled(_)) => {
-                window.push_notification(Notification::info(format!("{label} cancelled")), cx);
+                window.push_notice(Notice::info(format!("{label} cancelled")), cx);
             }
             (RemoteOp::Pull(o), GitError::NonFastForward(_))
                 if o.strategy == PullStrategy::FfOnly =>
@@ -474,8 +474,8 @@ impl Osier {
             }
             (RemoteOp::Push(_), GitError::NonFastForward(_)) => {
                 // Force with lease refused: the remote moved since the last fetch.
-                window.push_notification(
-                    Notification::warning(
+                window.push_notice(
+                    Notice::warning(
                         "Someone pushed to the remote branch since your last fetch, so nothing \
                          was replaced. Fetch to see their commits, then decide again.",
                     )
@@ -528,40 +528,32 @@ impl Osier {
                 } else {
                     "Choose a GitHub account from the Push menu, or add your ssh key to the agent (`ssh-add`)."
                 };
-                window.push_notification(
-                    crate::app::ops::with_command_log(
-                        Notification::error(format!("{text}. {hint}"))
-                            .title(format!("{label} failed: authentication")),
-                        &error,
-                        cx,
-                    ),
+                window.push_notice(
+                    Notice::error(format!("{text}. {hint}"))
+                        .title(format!("{label} failed: authentication"))
+                        .command_log(&error),
                     cx,
                 );
             }
             (_, GitError::Network(_)) => {
-                window.push_notification(
-                    crate::app::ops::with_command_log(
-                        Notification::error(describe(&error))
-                            .title(format!("{label} failed: remote unreachable")),
-                        &error,
-                        cx,
-                    ),
+                window.push_notice(
+                    Notice::error(describe(&error))
+                        .title(format!("{label} failed: remote unreachable"))
+                        .command_log(&error),
                     cx,
                 );
             }
             (_, GitError::Conflict(_)) => {
-                window.push_notification(
-                    Notification::warning("Resolve the conflicted files in Changes, then press Continue or Abort in the bar above the tabs.").title(format!("{label}: conflicts")),
+                window.push_notice(
+                    Notice::warning("Resolve the conflicted files in Changes, then press Continue or Abort in the bar above the tabs.").title(format!("{label}: conflicts")),
                     cx,
                 );
             }
             _ => {
-                window.push_notification(
-                    crate::app::ops::with_command_log(
-                        Notification::error(describe(&error)).title(format!("{label} failed")),
-                        &error,
-                        cx,
-                    ),
+                window.push_notice(
+                    Notice::error(describe(&error))
+                        .title(format!("{label} failed"))
+                        .command_log(&error),
                     cx,
                 );
             }
@@ -778,8 +770,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
-            window.push_notification(
-                Notification::warning("Add a remote first in the Branches tab.")
+            window.push_notice(
+                Notice::warning("Add a remote first in the Branches tab.")
                     .title("No upstream and no remote"),
                 cx,
             );
@@ -829,8 +821,8 @@ impl Osier {
     ) {
         let title = "Branch deleted on the remote";
         let Some(plan) = plan else {
-            window.push_notification(
-                Notification::warning(
+            window.push_notice(
+                Notice::warning(
                     "The branch this one tracks no longer exists on the remote, usually because \
                      it was merged. Switch to another branch, or link this one to another \
                      upstream in the Branches tab.",
@@ -842,8 +834,8 @@ impl Osier {
         };
         let (branch, remote) = (plan.branch.clone(), plan.remote.clone());
         let Some(default) = plan.default.clone() else {
-            window.push_notification(
-                Notification::warning(format!(
+            window.push_notice(
+                Notice::warning(format!(
                     "{remote}/{branch} no longer exists, usually because {branch} was merged \
                      and its branch deleted. Switch to another branch, or link {branch} to \
                      another upstream in the Branches tab."
@@ -914,8 +906,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let Some((branch, remote)) = self.current_branch_and_remote() else {
-            window.push_notification(
-                Notification::warning("Add a remote first in the Branches tab.")
+            window.push_notice(
+                Notice::warning("Add a remote first in the Branches tab.")
                     .title("No upstream and no remote"),
                 cx,
             );
@@ -1071,7 +1063,7 @@ impl Osier {
         self.state.accounts.remove(&key);
         self.session_only_accounts.remove(&key);
         self.save_state();
-        window.push_notification("GitHub account choice cleared for this project", cx);
+        window.push_notice("GitHub account choice cleared for this project", cx);
         cx.notify();
     }
 
@@ -1089,7 +1081,7 @@ impl Osier {
                     _ => None,
                 });
         let Some(host) = host else {
-            window.push_notification(
+            window.push_notice(
                 "No https remote: accounts only apply to https remotes (ssh uses your keys)",
                 cx,
             );
@@ -1102,7 +1094,7 @@ impl Osier {
             .map(|a| a.login.clone())
             .collect();
         if candidates.is_empty() {
-            window.push_notification(
+            window.push_notice(
                 format!("gh has no account for {host}. Run `gh auth login` first."),
                 cx,
             );

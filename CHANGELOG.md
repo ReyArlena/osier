@@ -24,6 +24,12 @@ All notable changes to Osier are documented here. The format follows
   the same entry. Bindable as "Pull requests on GitHub" under Context menus in the keymap.
 - The command log shows when each command started (time of day on the row, the full date
   when expanded, and in "Copy details").
+- A Notifications panel: every toast the app showed this session, newest first, with its
+  time and, for git failures, the same "View command log" button, so a message that slid
+  away can still be read. It shares the bottom panel with the git command log as a second
+  tab. Open it with the bell in the title bar (which counts unseen notifications),
+  `ctrl-shift-n`, or "Toggle notifications" in the command palette. Session only, nothing
+  is saved.
 
 ### Changed
 

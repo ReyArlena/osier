@@ -249,6 +249,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "General",
+            "Toggle notifications",
+            Lucide::Bell,
+            Some("toggle_notifications"),
+            false,
+            |o, _, cx| o.toggle_notifications(cx),
+        ),
+        cmd(
+            "General",
             "Toggle commit details",
             Lucide::PanelBottom,
             Some("toggle_commit_details"),

@@ -3,11 +3,10 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 
 /// Editors we can detect on PATH, with the command template that opens a file at a line.
 pub const KNOWN_EDITORS: &[(&str, &str, &str)] = &[
@@ -87,9 +86,8 @@ impl Osier {
         };
         match spawn(&argv, &root) {
             Ok(()) => {}
-            Err(e) => window.push_notification(
-                Notification::error(format!("{}: {e}", argv.join(" ")))
-                    .title("Could not open editor"),
+            Err(e) => window.push_notice(
+                Notice::error(format!("{}: {e}", argv.join(" "))).title("Could not open editor"),
                 cx,
             ),
         }
@@ -121,16 +119,16 @@ impl Osier {
             },
         };
         if argv.is_empty() {
-            window.push_notification(
-                Notification::warning("Set editor.terminal in config.toml or export TERMINAL.")
+            window.push_notice(
+                Notice::warning("Set editor.terminal in config.toml or export TERMINAL.")
                     .title("No terminal found"),
                 cx,
             );
             return;
         }
         if let Err(e) = spawn(&argv, &root) {
-            window.push_notification(
-                Notification::error(e.to_string()).title("Could not open terminal"),
+            window.push_notice(
+                Notice::error(e.to_string()).title("Could not open terminal"),
                 cx,
             );
         }
@@ -162,8 +160,8 @@ impl Osier {
             target.to_string_lossy().into_owned(),
         ];
         if let Err(e) = spawn(&argv, &root) {
-            window.push_notification(
-                Notification::error(e.to_string()).title("Could not open file manager"),
+            window.push_notice(
+                Notice::error(e.to_string()).title("Could not open file manager"),
                 cx,
             );
         }
@@ -179,10 +177,7 @@ impl Osier {
         let argv = vec!["xdg-open".to_string(), path.to_string_lossy().into_owned()];
         let cwd = path.parent().unwrap_or(path);
         if let Err(e) = spawn(&argv, cwd) {
-            window.push_notification(
-                Notification::error(e.to_string()).title("Could not open"),
-                cx,
-            );
+            window.push_notice(Notice::error(e.to_string()).title("Could not open"), cx);
         }
     }
 

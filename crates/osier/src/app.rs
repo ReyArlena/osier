@@ -57,6 +57,7 @@ gpui_kit::actions!(
         CloseProject,
         ToggleSidebar,
         ToggleCommandLog,
+        ToggleNotifications,
         ToggleCommitDetails,
         ToggleDiffExpanded,
         ToggleTheme,
@@ -103,6 +104,13 @@ fn reopen_error(failures: &[String]) -> String {
         },
         failures.join("; ")
     )
+}
+
+/// What the bottom panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BottomTab {
+    Commands,
+    Notifications,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -170,7 +178,11 @@ pub struct Osier {
     /// Log tab shows the reflog instead of the commit list.
     pub(crate) show_reflog: bool,
     pub(crate) sidebar_visible: bool,
+    /// The bottom panel (git commands or notifications) is shown.
     pub(crate) command_log_visible: bool,
+    pub(crate) bottom_tab: BottomTab,
+    /// Id of the newest notice the user has seen in the panel; the title bar counts the rest.
+    pub(crate) notices_seen: u64,
     pub(crate) expanded_command: Option<u64>,
     /// The command log lists only failed commands.
     pub(crate) command_log_failures_only: bool,
@@ -478,6 +490,8 @@ impl Osier {
             auto_tab: None,
             tab_check_pending: false,
             fresh_open: None,
+            bottom_tab: BottomTab::Commands,
+            notices_seen: 0,
             expanded_command: None,
             command_log_failures_only: false,
             diff,
@@ -549,6 +563,7 @@ impl Osier {
             ],
         };
         this.apply_appearance(cx);
+        crate::notices::NoticeLog::attach(cx.weak_entity(), cx);
         let diff_entity = this.diff.clone();
         this.diff_subscription = Some(Self::subscribe_diff(&diff_entity, cx));
         // Arrow keys move the Files tree's cursor: the viewer follows it.
@@ -825,6 +840,9 @@ impl Render for Osier {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &ToggleCommandLog, _, cx| this.toggle_command_log(cx)))
             .on_action(
+                cx.listener(|this, _: &ToggleNotifications, _, cx| this.toggle_notifications(cx)),
+            )
+            .on_action(
                 cx.listener(|this, _: &ToggleCommitDetails, _, cx| this.toggle_commit_details(cx)),
             )
             .on_action(
@@ -979,7 +997,7 @@ impl Render for Osier {
                                 )
                                 })
                                 .when(self.command_log_visible, |this| {
-                                    this.child(self.render_command_log(cx))
+                                    this.child(self.render_bottom_panel(cx))
                                 }),
                         ),
                 ),

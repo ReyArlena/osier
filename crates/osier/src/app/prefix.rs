@@ -6,12 +6,12 @@
 //! time out silently after about a second and show nothing, and an interceptor sees the next
 //! key wherever focus is, text fields included, before it can type.
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 use std::time::Duration;
 
 use crate::app::Osier;
 use crate::keymap::{Keymap, actions, keystroke_string, pretty_key};
+use crate::notices::WindowNoticeExt as _;
 
 impl Osier {
     /// The prefix key was pressed: wait for the next key.
@@ -59,7 +59,7 @@ impl Osier {
             .map(|(_, id)| *id)
             .collect();
         if ids.is_empty() {
-            window.push_notification(
+            window.push_notice(
                 format!("Nothing is bound to Prefix {}", pretty_key(&keys)),
                 cx,
             );

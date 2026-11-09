@@ -4,6 +4,7 @@
 use gpui_kit::*;
 
 use super::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 
 impl Osier {
     /// Close the popup menu that has the keyboard, if any, before a shortcut acts. gpui-kit's
@@ -56,8 +57,6 @@ impl Osier {
 
     /// `keymap.toml` changed on disk. Our own saves land here too; they change nothing.
     pub(crate) fn reload_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use gpui_kit::component::WindowExt as _;
-        use gpui_kit::component::notification::Notification;
         if osier_config::keymap::KeymapFile::load(&self.paths)
             .ok()
             .as_ref()
@@ -67,10 +66,10 @@ impl Osier {
         }
         let problems = self.load_keymap(cx);
         if problems.is_empty() {
-            window.push_notification("Key bindings reloaded from keymap.toml", cx);
+            window.push_notice("Key bindings reloaded from keymap.toml", cx);
         } else {
-            window.push_notification(
-                Notification::warning(problems.join("\n")).title("keymap.toml has problems"),
+            window.push_notice(
+                Notice::warning(problems.join("\n")).title("keymap.toml has problems"),
                 cx,
             );
         }
@@ -86,13 +85,11 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use gpui_kit::component::WindowExt as _;
-        use gpui_kit::component::notification::Notification;
         let mut file = match osier_config::keymap::KeymapFile::load(&self.paths) {
             Ok(f) => f,
             Err(error) => {
-                window.push_notification(
-                    Notification::error(error.to_string())
+                window.push_notice(
+                    Notice::error(error.to_string())
                         .title("keymap.toml has an error; fix it first"),
                     cx,
                 );
@@ -110,8 +107,8 @@ impl Osier {
             file.bindings.insert(id.to_string(), keys);
         }
         if let Err(error) = file.save(&self.paths) {
-            window.push_notification(
-                Notification::error(error.to_string()).title("Could not save keymap.toml"),
+            window.push_notice(
+                Notice::error(error.to_string()).title("Could not save keymap.toml"),
                 cx,
             );
             return;
@@ -138,12 +135,10 @@ impl Osier {
 
     /// Reset every binding to the defaults (removes `keymap.toml`).
     pub(crate) fn reset_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use gpui_kit::component::WindowExt as _;
         let file = osier_config::keymap::KeymapFile::default();
         if let Err(error) = file.save(&self.paths) {
-            window.push_notification(
-                gpui_kit::component::notification::Notification::error(error.to_string())
-                    .title("Could not reset keymap"),
+            window.push_notice(
+                crate::notices::Notice::error(error.to_string()).title("Could not reset keymap"),
                 cx,
             );
             return;
@@ -197,10 +192,8 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use gpui_kit::component::WindowExt as _;
-        use gpui_kit::component::notification::Notification;
-        window.push_notification(
-            Notification::warning(
+        window.push_notice(
+            Notice::warning(
                 "Context-menu keys and the prefix key cannot share a key with another binding.",
             )
             .title(format!(

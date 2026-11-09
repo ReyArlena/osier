@@ -19,6 +19,7 @@ use osier_git::repo::InProgress;
 
 use crate::app::{Osier, Tab};
 use crate::dialog_hint::hint;
+use crate::notices::WindowNoticeExt as _;
 
 /// A labelled checkbox inside a prompt dialog.
 pub(crate) struct PromptFlag {
@@ -1179,7 +1180,7 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        window.push_notification(format!("Copied {text}"), cx);
+        window.push_notice(format!("Copied {text}"), cx);
     }
 }
 

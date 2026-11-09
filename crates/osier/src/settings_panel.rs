@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::setting::{
     SelectIndex, SettingGroup, SettingItem, SettingPage, Settings as SettingsView,
 };
@@ -15,6 +14,7 @@ use gpui_kit::*;
 use osier_config::Settings;
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::runtime_info::RuntimeInfo;
 use crate::test_ids::TestId as _;
 
@@ -235,14 +235,14 @@ impl Osier {
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
-                window.push_notification("Settings reloaded from config.toml", cx);
+                window.push_notice("Settings reloaded from config.toml", cx);
                 cx.notify();
                 true
             }
             Ok(_) => false,
             Err(error) => {
-                window.push_notification(
-                    Notification::error(error.to_string()).title("config.toml has an error"),
+                window.push_notice(
+                    Notice::error(error.to_string()).title("config.toml has an error"),
                     cx,
                 );
                 false
@@ -322,7 +322,7 @@ impl Osier {
                 let open: Vec<PathBuf> = this.projects.iter().map(|p| p.path.clone()).collect();
                 this.state.recent.retain(|r| open.contains(r));
                 this.save_state();
-                window.push_notification("Recents cleared", cx);
+                window.push_notice("Recents cleared", cx);
                 cx.notify();
             },
             window,
