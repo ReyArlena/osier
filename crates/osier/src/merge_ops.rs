@@ -10,8 +10,10 @@ use osier_git::Repository;
 use osier_git::ops::integrate;
 
 use crate::app::Osier;
-use crate::merge_view::{MergeEvent, MergeHost, MergeInput, MergeView};
+use crate::merge_view::{MergeEvent, MergeHost, MergeInput, MergeOptions, MergeView};
 use crate::project::{Area, Selection};
+use osier_config::settings::DiffWhitespace;
+use osier_git::merge3::Whitespace;
 
 /// Project root and file path.
 pub(crate) type MergeKey = (PathBuf, String);
@@ -70,7 +72,80 @@ impl std::fmt::Debug for Merges {
     }
 }
 
+fn to_merge_whitespace(w: DiffWhitespace) -> Whitespace {
+    match w {
+        DiffWhitespace::None => Whitespace::Exact,
+        DiffWhitespace::Trim => Whitespace::Trim,
+        DiffWhitespace::All => Whitespace::Ignore,
+    }
+}
+
+fn from_merge_whitespace(w: Whitespace) -> DiffWhitespace {
+    match w {
+        Whitespace::Exact => DiffWhitespace::None,
+        Whitespace::Trim => DiffWhitespace::Trim,
+        Whitespace::Ignore => DiffWhitespace::All,
+    }
+}
+
 impl Osier {
+    /// The diff view settings (gear menus, wrap button), shared by every layout.
+    pub(crate) fn diff_options(&self) -> MergeOptions {
+        let d = &self.settings.diff;
+        MergeOptions {
+            sync_scroll: d.sync_scroll,
+            whitespace: to_merge_whitespace(d.whitespace),
+            highlight_words: d.word_highlights,
+            soft_wrap: d.soft_wrap,
+        }
+    }
+
+    /// Change the shared diff view settings: saved, applied to the diff and every merge
+    /// view, and the diff reloaded when the whitespace rule changed.
+    pub(crate) fn set_diff_options(
+        &mut self,
+        o: MergeOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let whitespace = from_merge_whitespace(o.whitespace);
+        let reload = whitespace != self.settings.diff.whitespace;
+        let d = &mut self.settings.diff;
+        d.sync_scroll = o.sync_scroll;
+        d.whitespace = whitespace;
+        d.word_highlights = o.highlight_words;
+        d.soft_wrap = o.soft_wrap;
+        self.save_settings();
+        self.apply_word_highlights(cx);
+        let views: Vec<Entity<MergeView>> =
+            self.merges.views.values().map(|s| s.view.clone()).collect();
+        for view in views {
+            view.update(cx, |v, cx| {
+                if v.options() != o {
+                    v.set_options(o, window, cx)
+                }
+            });
+        }
+        if reload {
+            self.reload_selection(cx);
+        }
+        cx.notify();
+    }
+
+    /// Word highlights in the two-way diff follow the shared setting.
+    pub(crate) fn apply_word_highlights(&mut self, cx: &mut Context<Self>) {
+        let unit = self
+            .settings
+            .diff
+            .word_highlights
+            .then_some(gpui_kit::component::diff::DiffInlineUnit::Word);
+        self.diff.update(cx, |s, cx| {
+            if s.inline_unit() != unit {
+                s.set_inline_unit(unit, cx)
+            }
+        });
+    }
+
     /// The conflicted file the diff pane shows with the merge tool, if it does.
     pub(crate) fn three_way_target(&self) -> Option<MergeKey> {
         if self.settings.diff.conflicts != osier_config::settings::ConflictView::ThreeWay
@@ -126,10 +201,10 @@ impl Osier {
         if !self.merges.views.contains_key(&key) {
             match self.merges.load.take() {
                 Some(MergeLoad::Ready(k, input)) if k == key => {
-                    let wrap = self.settings.diff.soft_wrap;
+                    let options = self.diff_options();
                     let view = cx.new(|cx| {
                         let mut v = MergeView::new(input, MergeHost::App, window, cx);
-                        v.set_soft_wrap(wrap, window, cx);
+                        v.set_options(options, window, cx);
                         v
                     });
                     let event_key = key.clone();
@@ -262,6 +337,7 @@ impl Osier {
                     cx,
                 );
             }
+            MergeEvent::Options(o) => self.set_diff_options(*o, window, cx),
             MergeEvent::PreviousFile => self.step_conflicted_file(-1, cx),
             MergeEvent::NextFile => self.step_conflicted_file(1, cx),
             MergeEvent::Cancel => {}

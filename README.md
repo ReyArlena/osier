@@ -166,11 +166,15 @@ side is the branch you are rebasing onto.
   clash in one go.
 - The result is an ordinary editor: type in it freely, the changes move with your edits.
 - `F7` / `shift-F7` jump to the next / previous change; the gear menu has synchronised
-  scrolling, whitespace handling and word highlighting.
+  scrolling, whitespace handling, word highlighting and wrapping. The panes stay lined up
+  even when one has many more lines above or below: it gets blank space instead.
 - **Accept Left** / **Accept Right** use one side for the whole file. **Save** writes the
   result and leaves the file conflicted; **Apply** (`ctrl-enter` in the result) writes it and
   marks it resolved (it asks first if changes are still undecided).
 - Long lines wrap with the diff pane's wrap button; the panes stay lined up.
+- Unified and Split get the same bar: previous / next change (`F7` / `shift-F7`), the number
+  of changes and the gear menu, whose settings are shared with the merge tool and saved.
+  Hiding whitespace applies to commits and comparisons only, never to changes you can stage.
 - **Expand** at the top right of the diff pane (or `ctrl-shift-m`) hides the sidebar and file
   list for any layout, and stays on while you switch layouts; `Esc` or **Collapse** brings
   them back. While expanded, the merge tool's arrows step through the conflicted files and
@@ -250,6 +254,9 @@ line_numbers = true
 soft_wrap = true
 mode = "unified"              # unified | split
 conflicts = "three-way"       # three-way (merge tool) | inline (conflict blocks)
+whitespace = "none"           # none | trim | all: hide whitespace changes (commits, merges)
+word_highlights = true        # highlight the changed words in changed lines
+sync_scroll = true            # merge tool panes scroll together
 large_file_bytes = 2097152
 
 [git]

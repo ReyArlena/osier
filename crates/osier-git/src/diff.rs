@@ -98,7 +98,10 @@ pub struct DiffOptions {
     /// Limit to these paths. Empty means everything.
     pub paths: Vec<String>,
     pub context_lines: u32,
+    /// `-w`: ignore all whitespace.
     pub ignore_whitespace: bool,
+    /// `-b`: ignore changes in the amount of whitespace (and at line ends).
+    pub ignore_space_change: bool,
     pub detect_renames: bool,
 }
 
@@ -109,6 +112,7 @@ impl DiffOptions {
             paths: Vec::new(),
             context_lines: 3,
             ignore_whitespace: false,
+            ignore_space_change: false,
             detect_renames: true,
         }
     }
@@ -160,6 +164,8 @@ fn args_for(options: &DiffOptions) -> Vec<String> {
     });
     if options.ignore_whitespace {
         args.push("-w".into());
+    } else if options.ignore_space_change {
+        args.push("-b".into());
     }
     args.push("--".into());
     args.extend(options.paths.iter().cloned());

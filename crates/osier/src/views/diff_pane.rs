@@ -361,6 +361,18 @@ impl Osier {
             view.into_any_element()
         };
 
+        let showing_diff = blame.is_none()
+            && !editing
+            && !three_way
+            && !viewing
+            && !self.diff_loading
+            && self.diff_too_large.is_none()
+            && !self.diff_no_markers
+            && self.diff_error.is_none()
+            && selection != Selection::None
+            && self.diff_files > 0;
+        let toolbar = showing_diff.then(|| self.render_diff_toolbar(&selection, cx));
+
         v_flex()
             .size_full()
             .min_w_0()
@@ -653,6 +665,7 @@ impl Osier {
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_diff_expanded(cx))),
                     ),
             )
+            .children(toolbar)
             .child(
                 div()
                     .flex_1()
@@ -661,6 +674,211 @@ impl Osier {
                     .overflow_hidden()
                     .child(body),
             )
+    }
+
+    /// Which file of the list the expanded diff pane is on, and how many there are: the
+    /// Changes list for a changed file, the diff's own files for a commit or comparison.
+    fn diff_file_position(&self, selection: &Selection) -> Option<(usize, usize)> {
+        match selection {
+            Selection::File { path, area } => {
+                let snapshot = self.active_project()?.snapshot.as_ref()?;
+                let items = crate::project::ordered_changes(&snapshot.status);
+                let ix = items.iter().position(|(p, a)| p == path && a == area)?;
+                Some((ix + 1, items.len()))
+            }
+            _ if self.diff_files > 1 => Some((self.diff_file_ix + 1, self.diff_files)),
+            _ => None,
+        }
+    }
+
+    /// The expanded diff pane's file arrows.
+    pub(crate) fn step_diff_file(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let selection = match self.active_project() {
+            Some(p) => p.selection.clone(),
+            None => return,
+        };
+        if let Selection::File { path, area } = &selection {
+            let Some(items) = self
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .map(|s| crate::project::ordered_changes(&s.status))
+            else {
+                return;
+            };
+            if items.is_empty() {
+                return;
+            }
+            let ix = items
+                .iter()
+                .position(|(p, a)| p == path && a == area)
+                .unwrap_or(0);
+            let next = (ix as isize + delta).rem_euclid(items.len() as isize) as usize;
+            let (path, area) = items[next].clone();
+            self.select_file(path, area, cx);
+            return;
+        }
+        let paths: Vec<String> = self
+            .diff
+            .read(cx)
+            .files()
+            .iter()
+            .map(|f| f.path().to_string())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let next = (self.diff_file_ix as isize + delta).rem_euclid(paths.len() as isize) as usize;
+        self.diff_file_ix = next;
+        let path = paths[next].clone();
+        self.diff.update(cx, |s, cx| s.scroll_to_file(&path, cx));
+        cx.notify();
+    }
+
+    /// The bar under the header for unified and split: change and file navigation, a count
+    /// and the shared view settings, laid out like the merge tool's.
+    fn render_diff_toolbar(&self, selection: &Selection, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let split = self.diff.read(cx).mode() == DiffMode::Split;
+        let options = self.diff_options();
+        let whitespace_ok = crate::app::whitespace_applies(selection);
+        let hunks: usize = self.diff_model.iter().map(|f| f.hunks.len()).sum();
+        let position = if self.diff_expanded {
+            self.diff_file_position(selection)
+        } else {
+            None
+        };
+        let weak = cx.entity().downgrade();
+        h_flex()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .items_center()
+            .flex_wrap()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                Button::new("diff-prev")
+                    .test_id("diff-prev")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::ArrowUp)
+                    .tooltip("Previous change (shift-F7)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.diff.update(cx, |s, cx| s.previous_change(cx))
+                    })),
+            )
+            .child(
+                Button::new("diff-next")
+                    .test_id("diff-next")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::ArrowDown)
+                    .tooltip("Next change (F7)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.diff.update(cx, |s, cx| s.next_change(cx))
+                    })),
+            )
+            .child(div().flex_1())
+            .when_some(position, |this, (n, total)| {
+                this.child(
+                    Button::new("diff-prev-file")
+                        .test_id("diff-prev-file")
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::ChevronLeft)
+                        .disabled(total < 2)
+                        .tooltip("Previous file")
+                        .on_click(cx.listener(|this, _, _, cx| this.step_diff_file(-1, cx))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("File {n} of {total}")),
+                )
+                .child(
+                    Button::new("diff-next-file")
+                        .test_id("diff-next-file")
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::ChevronRight)
+                        .disabled(total < 2)
+                        .tooltip("Next file")
+                        .on_click(cx.listener(|this, _, _, cx| this.step_diff_file(1, cx))),
+                )
+                .child(Separator::vertical().h_4())
+            })
+            .when(!self.diff_model.is_empty(), |this| {
+                this.child(
+                    div()
+                        .test_id("diff-counter")
+                        .text_xs()
+                        .child(crate::format::count(hunks, "change")),
+                )
+            })
+            .child(
+                Button::new("diff-settings")
+                    .test_id("diff-settings")
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Settings)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        use osier_git::merge3::Whitespace;
+                        menu = menu.item(
+                            PopupMenuItem::new("Synchronize scrolling")
+                                .checked(split)
+                                .disabled(true),
+                        );
+                        menu = menu.separator().label("Ignore differences");
+                        for (label, value) in [
+                            ("None", Whitespace::Exact),
+                            ("Trim whitespace", Whitespace::Trim),
+                            ("Ignore whitespace", Whitespace::Ignore),
+                        ] {
+                            let w = weak.clone();
+                            let shown = if whitespace_ok {
+                                options.whitespace
+                            } else {
+                                Whitespace::Exact
+                            };
+                            menu = menu.item(
+                                PopupMenuItem::new(label)
+                                    .checked(shown == value)
+                                    .disabled(!whitespace_ok)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = w.update(cx, |this, cx| {
+                                            let mut o = this.diff_options();
+                                            o.whitespace = value;
+                                            this.set_diff_options(o, window, cx)
+                                        });
+                                    }),
+                            );
+                        }
+                        let w = weak.clone();
+                        menu = menu.separator().item(
+                            PopupMenuItem::new("Highlight changed words")
+                                .checked(options.highlight_words)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        let mut o = this.diff_options();
+                                        o.highlight_words = !o.highlight_words;
+                                        this.set_diff_options(o, window, cx)
+                                    });
+                                }),
+                        );
+                        let w = weak.clone();
+                        menu.item(
+                            PopupMenuItem::new("Wrap long lines")
+                                .checked(options.soft_wrap)
+                                .on_click(move |_, window, cx| {
+                                    let _ =
+                                        w.update(cx, |this, cx| this.toggle_soft_wrap(window, cx));
+                                }),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     fn render_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

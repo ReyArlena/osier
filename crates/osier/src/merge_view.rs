@@ -71,9 +71,20 @@ pub enum MergeEvent {
     Save(String),
     /// Close without writing (Window only).
     Cancel,
+    /// The user changed the gear menu settings (the host keeps them for other views).
+    Options(MergeOptions),
     /// The previous or next conflicted file (App, while expanded).
     PreviousFile,
     NextFile,
+}
+
+/// Settings of the merge view's gear menu, shared with the app's other diff layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeOptions {
+    pub sync_scroll: bool,
+    pub whitespace: Whitespace,
+    pub highlight_words: bool,
+    pub soft_wrap: bool,
 }
 
 const PANES: [Pane; 3] = [Pane::Left, Pane::Result, Pane::Right];
@@ -164,6 +175,12 @@ pub struct MergeView {
     /// The pane the user scrolls or types in; the others follow it.
     driver: Rc<Cell<usize>>,
     last_scroll: [Pixels; 3],
+    /// Blank space above a pane's first line, so it can line up with a pane that has more
+    /// lines above (an editor cannot scroll above its first line).
+    shift: [Pixels; 3],
+    /// Extra rows a pane may scroll past its last line (`scroll_beyond_last_line`), so a
+    /// shorter pane can line up at the bottom too.
+    bottom_rows: [Option<usize>; 3],
     sync_scroll: bool,
     highlight_words: bool,
     soft_wrap: bool,
@@ -278,6 +295,8 @@ impl MergeView {
             placed: Geometry::default(),
             driver: Rc::new(Cell::new(1)),
             last_scroll: [px(0.); 3],
+            shift: [px(0.); 3],
+            bottom_rows: [None; 3],
             sync_scroll: true,
             highlight_words: true,
             soft_wrap: false,
@@ -430,9 +449,34 @@ impl MergeView {
         self.changed(cx);
     }
 
-    pub fn toggle_sync_scroll(&mut self, cx: &mut Context<Self>) {
-        self.sync_scroll = !self.sync_scroll;
+    /// The view settings the gear menu changes.
+    pub fn options(&self) -> MergeOptions {
+        MergeOptions {
+            sync_scroll: self.sync_scroll,
+            whitespace: self.merge.whitespace(),
+            highlight_words: self.highlight_words,
+            soft_wrap: self.soft_wrap,
+        }
+    }
+
+    /// Apply view settings (from the host). Whitespace only changes before anything was
+    /// applied or typed, since it recomputes the changes.
+    pub fn set_options(&mut self, o: MergeOptions, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_scroll = o.sync_scroll;
+        if self.highlight_words != o.highlight_words {
+            self.highlight_words = o.highlight_words;
+            self.refresh_words(cx);
+        }
+        self.set_whitespace(o.whitespace, window, cx);
+        self.set_soft_wrap(o.soft_wrap, window, cx);
         cx.notify();
+    }
+
+    /// The user changed a setting in the gear menu: apply it and tell the host, which keeps
+    /// it for the other views.
+    fn user_options(&mut self, o: MergeOptions, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_options(o, window, cx);
+        cx.emit(MergeEvent::Options(self.options()));
     }
 
     #[cfg(test)]
@@ -449,12 +493,6 @@ impl MergeView {
         for editor in &self.editors {
             editor.update(cx, |s, cx| s.set_soft_wrap(wrap, window, cx));
         }
-        cx.notify();
-    }
-
-    pub fn toggle_highlight_words(&mut self, cx: &mut Context<Self>) {
-        self.highlight_words = !self.highlight_words;
-        self.refresh_words(cx);
         cx.notify();
     }
 
@@ -587,13 +625,58 @@ impl MergeView {
         }
         self.last_scroll[i] = offset;
         cx.notify();
-        if self.sync_scroll && self.driver.get() == i {
-            self.follow(i, offset, cx);
+        if self.driver.get() != i {
+            return;
+        }
+        // Scrolling down a pane that has a gap above it: close the gap first.
+        if self.shift[i] > px(0.) && offset < px(0.) {
+            let visual = offset + self.shift[i];
+            let (scroll, shift) = if visual <= px(0.) {
+                (visual, px(0.))
+            } else {
+                (px(0.), visual)
+            };
+            self.shift[i] = shift;
+            self.editors[i].update(cx, |s, cx| {
+                let x = s.scroll_offset().x;
+                s.set_scroll_offset(point(x, scroll), cx);
+            });
+            self.last_scroll[i] = scroll;
+        }
+        if self.sync_scroll {
+            self.follow(i, self.last_scroll[i] + self.shift[i], cx);
         }
     }
 
-    /// Scroll the other panes to match pane `i` scrolled to `offset`: the line in the middle
-    /// of `i` goes to the middle of each other pane.
+    /// Give each pane enough room below its last line to line up with the longest pane.
+    fn update_bottom_room(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rows = [0, 1, 2].map(|i| self.editors[i].read(cx).display_map().display_row_count());
+        let longest = rows.iter().copied().max().unwrap_or(0);
+        let half_view = {
+            let g = self.geometry.borrow();
+            let lh = self.editors[1]
+                .read(cx)
+                .line_height()
+                .map(f32::from)
+                .unwrap_or(20.);
+            g.panes[1]
+                .as_ref()
+                .map(|p| (f32::from(p.bounds.size.height) / lh / 2.) as usize)
+                .unwrap_or(10)
+                .max(3)
+        };
+        for (i, own) in rows.into_iter().enumerate() {
+            let want = Some(half_view + longest.saturating_sub(own));
+            if self.bottom_rows[i] != want {
+                self.bottom_rows[i] = want;
+                self.editors[i].update(cx, |s, cx| s.set_scroll_beyond_last_line(want, window, cx));
+            }
+        }
+    }
+
+    /// Scroll the other panes to match pane `i`, whose content starts `offset` from its top
+    /// (scroll plus gap): the line in the middle of `i` goes to the middle of each other
+    /// pane. A pane that would have to scroll above its first line gets a gap instead.
     fn follow(&mut self, i: usize, offset: Pixels, cx: &mut Context<Self>) {
         let heights: [Pixels; 3] = {
             let g = self.geometry.borrow();
@@ -617,12 +700,19 @@ impl MergeView {
             }
             let line = self.merge.map_line(PANES[i], *pane, middle);
             let row = line_to_row(self.editors[j].read(cx), line);
-            let target = -((row * lh - f64::from(f32::from(heights[j])) / 2.).max(0.)) as f32;
+            let target = px(-(row * lh - f64::from(f32::from(heights[j])) / 2.) as f32);
+            let (scroll, shift) = if target <= px(0.) {
+                (target, px(0.))
+            } else {
+                (px(0.), target)
+            };
+            self.shift[j] = shift;
             self.editors[j].update(cx, |s, cx| {
                 let x = s.scroll_offset().x;
-                s.set_scroll_offset(point(x, px(target)), cx);
+                s.set_scroll_offset(point(x, scroll), cx);
             });
         }
+        cx.notify();
     }
 
     fn scroll_to_chunk(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -636,6 +726,7 @@ impl MergeView {
         let line_height = self.editors[1].read(cx).line_height().unwrap_or(px(20.));
         let row = line_row(self.editors[1].read(cx), range.start) as f32;
         let target = -(f32::from(line_height) * row - f32::from(height) / 4.).max(0.);
+        self.shift[1] = px(0.);
         self.editors[1].update(cx, |s, cx| {
             s.set_cursor_position(
                 gpui_kit::component::input::Position::new(range.start as u32, 0),
@@ -821,7 +912,9 @@ fn paint_dashed_band(
 }
 
 impl Render for MergeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.update_bottom_room(window, cx);
+        let shift = self.shift;
         let theme = cx.theme().clone();
         let muted = theme.muted_foreground;
         let chunks = Rc::new(self.chunk_paints(cx));
@@ -990,8 +1083,12 @@ impl Render for MergeView {
                         menu = menu.item(
                             PopupMenuItem::new("Synchronize scrolling")
                                 .checked(sync)
-                                .on_click(move |_, _, cx| {
-                                    let _ = w.update(cx, |this, cx| this.toggle_sync_scroll(cx));
+                                .on_click(move |_, window, cx| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        let mut o = this.options();
+                                        o.sync_scroll = !o.sync_scroll;
+                                        this.user_options(o, window, cx)
+                                    });
                                 }),
                         );
                         menu = menu.separator().label("Ignore differences");
@@ -1007,7 +1104,9 @@ impl Render for MergeView {
                                     .disabled(modified && whitespace != value)
                                     .on_click(move |_, window, cx| {
                                         let _ = w.update(cx, |this, cx| {
-                                            this.set_whitespace(value, window, cx)
+                                            let mut o = this.options();
+                                            o.whitespace = value;
+                                            this.user_options(o, window, cx)
                                         });
                                     }),
                             );
@@ -1016,9 +1115,12 @@ impl Render for MergeView {
                         menu = menu.separator().item(
                             PopupMenuItem::new("Highlight changed words")
                                 .checked(words)
-                                .on_click(move |_, _, cx| {
-                                    let _ =
-                                        w.update(cx, |this, cx| this.toggle_highlight_words(cx));
+                                .on_click(move |_, window, cx| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        let mut o = this.options();
+                                        o.highlight_words = !o.highlight_words;
+                                        this.user_options(o, window, cx)
+                                    });
                                 }),
                         );
                         let w = weak.clone();
@@ -1027,7 +1129,9 @@ impl Render for MergeView {
                                 .checked(wrap)
                                 .on_click(move |_, window, cx| {
                                     let _ = w.update(cx, |this, cx| {
-                                        this.set_soft_wrap(!this.soft_wrap, window, cx)
+                                        let mut o = this.options();
+                                        o.soft_wrap = !o.soft_wrap;
+                                        this.user_options(o, window, cx)
                                     });
                                 }),
                         )
@@ -1083,10 +1187,12 @@ impl Render for MergeView {
                 .h_full()
                 .overflow_hidden()
                 .child(
-                    Editor::new(&self.editors[i])
-                        .readonly(readonly)
-                        .bordered(false)
-                        .size_full(),
+                    div().size_full().mt(shift[i]).child(
+                        Editor::new(&self.editors[i])
+                            .readonly(readonly)
+                            .bordered(false)
+                            .size_full(),
+                    ),
                 )
                 .child(
                     canvas(

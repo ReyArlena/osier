@@ -18,6 +18,11 @@ All notable changes to Osier are documented here. The format follows
   blocks instead, and the choice is remembered (`diff.conflicts`), separately from the
   unified / split choice for other files. A conflicted file without markers left says so and
   offers 3-way or Mark resolved instead of an empty diff.
+- Unified and Split have the merge tool's bar: previous / next change (`F7`), file arrows
+  while expanded, a change count and a gear menu. Its settings (hide whitespace, word
+  highlights, synchronised scrolling, wrapping) are shared with the merge tool and saved.
+- The merge tool's panes stay lined up when one has many more lines above or below the
+  others: the shorter pane gets blank space instead of stopping at its first or last line.
 - **Expand** in the diff pane header (or `ctrl-shift-m`, `Esc` to go back) hides the sidebar
   and file list in every layout and stays on while switching. In the merge tool it adds
   previous / next conflicted file, and Apply moves on to the next file.
