@@ -171,7 +171,18 @@ impl Osier {
     ) {
         self.settings_target = target;
         self.load_gh_accounts(cx);
-        self.ssh_status = Some(osier_auth::ssh::status());
+        // `ssh-add -l` is a process: in the background, so a slow agent cannot hold up the
+        // dialog. The Accounts page shows the last answer (or "checking…") until it is back.
+        cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_spawn(async { osier_auth::ssh::status() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.ssh_status = Some(status);
+                cx.notify();
+            });
+        })
+        .detach();
         if self.git_version.is_none() {
             self.git_version = osier_git::GitVersion::detect(&self.runner)
                 .ok()

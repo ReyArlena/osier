@@ -123,7 +123,13 @@ pub(super) fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 .item(SettingItem::render(move |_, _, cx| {
                     let o = v3.read(cx);
                     let muted = cx.theme().muted_foreground;
-                    let status = o.ssh_status.clone().unwrap_or_default();
+                    // Read in the background when settings opens (`open_settings_with`).
+                    let Some(status) = o.ssh_status.clone() else {
+                        return v_flex()
+                            .w_full()
+                            .child(kv("Agent", "checking…", cx))
+                            .into_any_element();
+                    };
                     let agent = if status.agent_socket {
                         format!(
                             "running, {} {} loaded",
@@ -157,6 +163,7 @@ pub(super) fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                 "ssh remotes use these directly; the gh accounts above only apply to https remotes.",
                             ),
                         )
+                        .into_any_element()
                 })),
         )
 }

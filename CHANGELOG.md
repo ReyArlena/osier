@@ -64,6 +64,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Settings opens without waiting for `ssh-add -l`: the ssh status loads in the background
+  and the Accounts page shows "checking…" until it is back.
 - The command palette redrew the whole window twice while opening; now once.
 - Frame drops while the settings dialog or the command palette opens. The main window was
   laid out and drawn again on every frame of the dialog's animation although nothing in it
