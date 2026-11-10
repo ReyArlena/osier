@@ -3,32 +3,46 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// "5 min ago", "12h ago", "yesterday", "2024-01-05".
+/// "5 min ago", "12h ago", "yesterday", "2024-01-05"; times ahead of the clock read the
+/// other way: "in 5 min", "in 3h", "tomorrow".
 pub fn relative_time(unix: i64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    relative_to(now, unix)
+    relative_to(now_secs(), unix)
+}
+
+/// Whether [`relative_time`] shows `unix` as ahead of the clock ("in 3h") rather than past
+/// or "just now", e.g. a commit made on a machine whose clock runs fast.
+pub fn is_future(unix: i64) -> bool {
+    unix - now_secs() >= JUST_NOW_SECS
+}
+
+/// Within this many seconds either side of now reads as "just now".
+const JUST_NOW_SECS: i64 = 45;
+
+fn now_secs() -> i64 {
+    unix_secs(SystemTime::now())
 }
 
 fn relative_to(now: i64, unix: i64) -> String {
     let delta = now - unix;
-    if delta < 0 {
-        return "in the future".into();
-    }
+    let future = delta < 0;
+    let delta = delta.abs();
     let minutes = delta / 60;
     let hours = minutes / 60;
     let days = hours / 24;
-    match () {
-        _ if delta < 45 => "just now".into(),
-        _ if minutes < 60 => format!("{} min ago", minutes.max(1)),
-        _ if hours < 24 => format!("{hours}h ago"),
-        _ if days == 1 => "yesterday".into(),
-        _ if days < 14 => format!("{days} days ago"),
-        _ if days < 60 => format!("{} weeks ago", days / 7),
-        _ if days < 365 => format!("{} months ago", days / 30),
-        _ => iso_date(unix),
+    let span = match () {
+        _ if delta < JUST_NOW_SECS => return "just now".into(),
+        _ if minutes < 60 => format!("{} min", minutes.max(1)),
+        _ if hours < 24 => format!("{hours}h"),
+        _ if days == 1 => return if future { "tomorrow" } else { "yesterday" }.into(),
+        _ if days < 14 => format!("{days} days"),
+        _ if days < 60 => format!("{} weeks", days / 7),
+        _ if days < 365 => format!("{} months", days / 30),
+        _ => return iso_date(unix),
+    };
+    if future {
+        format!("in {span}")
+    } else {
+        format!("{span} ago")
     }
 }
 
@@ -206,6 +220,18 @@ mod tests {
         assert_eq!(relative_to(now, now - 5 * 60), "5 min ago");
         assert_eq!(relative_to(now, now - 12 * 3600), "12h ago");
         assert_eq!(relative_to(now, now - 36 * 3600), "yesterday");
+    }
+
+    #[test]
+    fn future_times_read_forwards() {
+        let now = 1_800_000_000;
+        assert_eq!(relative_to(now, now + 10), "just now");
+        assert_eq!(relative_to(now, now + 3 * 60), "in 3 min");
+        assert_eq!(relative_to(now, now + 3 * 3600), "in 3h");
+        assert_eq!(relative_to(now, now + 36 * 3600), "tomorrow");
+        assert_eq!(relative_to(now, now + 5 * 86_400), "in 5 days");
+        assert_eq!(relative_to(now, now + 21 * 86_400), "in 3 weeks");
+        assert_eq!(relative_to(now, now + 90 * 86_400), "in 3 months");
     }
 
     #[test]

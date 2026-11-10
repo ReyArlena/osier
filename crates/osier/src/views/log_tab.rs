@@ -483,7 +483,18 @@ impl Osier {
                                                             )
                                                             .test_id(|| format!("commit-time:{ix}"))
                                                             .text_xs()
-                                                            .text_color(muted)
+                                                            // Ahead of the clock: a commit from a
+                                                            // machine whose clock runs fast. Fades
+                                                            // with the rest of a dimmed row.
+                                                            .text_color(
+                                                                if crate::format::is_future(
+                                                                    commit.committed_at,
+                                                                ) {
+                                                                    cx.theme().warning
+                                                                } else {
+                                                                    muted
+                                                                },
+                                                            )
                                                             .flex_none()
                                                             .w(px(78.))
                                                             .text_right(),
