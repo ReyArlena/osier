@@ -10,7 +10,7 @@ use gpui_kit::*;
 use crate::test_ids::TestId as _;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // Info and Success: part of the component, not used in a dialog yet.
+#[allow(dead_code)] // Success: part of the component, not used yet.
 pub(crate) enum NoticeKind {
     Info,
     Success,
@@ -34,7 +34,6 @@ impl DialogNotice {
         }
     }
 
-    #[allow(dead_code)] // Part of the component; not used in a dialog yet.
     pub(crate) fn info(text: impl Into<SharedString>) -> Self {
         Self::new(NoticeKind::Info, text)
     }

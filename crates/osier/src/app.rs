@@ -253,7 +253,7 @@ pub struct Osier {
     /// Settings, state and cache writes, off the UI thread and in order (`save_queue.rs`).
     pub(crate) saves: crate::save_queue::SaveQueue,
     /// Known editors found on PATH (name, command), once settings asked (`detect_editors`).
-    pub(crate) detected_editors: Option<Vec<(&'static str, &'static str)>>,
+    pub(crate) detected_editors: Option<Vec<(String, String)>>,
     pub(crate) detecting_editors: bool,
     /// The snapshot lists `files_badges` is being built from in the background.
     #[allow(clippy::type_complexity)]

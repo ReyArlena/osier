@@ -15,15 +15,16 @@ pub(super) fn editors_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         vec![("".into(), "System default (xdg-open)".into())];
     // Found on PATH in the background when settings opens (`detect_editors`). Until then the
     // configured editor stays listed, so the dropdown does not jump to "Custom".
-    let detected: Vec<(&str, &str)> = match &o.detected_editors {
+    let detected: Vec<(String, String)> = match &o.detected_editors {
         Some(found) => found.clone(),
         None => {
+            // Named after the known editor whose arguments it ends with.
             let current = o.settings.editor.command.clone().unwrap_or_default();
             crate::app::external::KNOWN_EDITORS
                 .iter()
-                .filter(|(_, _, template)| *template == current)
-                .map(|(_, name, template)| (*name, *template))
-                .collect()
+                .find(|e| !current.is_empty() && current.ends_with(e.args))
+                .map(|e| vec![(e.name.to_string(), current.clone())])
+                .unwrap_or_default()
         }
     };
     for (name, template) in detected {
@@ -31,9 +32,9 @@ pub(super) fn editors_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     }
     options.push(("custom".into(), "Custom command (below)".into()));
     let found_note = if o.detected_editors.is_some() {
-        "Editors found on PATH."
+        "Editors found on this computer."
     } else {
-        "Detecting editors on PATH…"
+        "Looking for editors…"
     };
     SettingPage::new("Editors")
         .description("The editor that opens files and repositories from Osier.")
@@ -46,6 +47,14 @@ pub(super) fn editors_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     "Placeholders: {path} is the repository, {file} the file and {line} the line.",
                 )
                 .items(vec![
+                    SettingItem::render(|_, _, _| {
+                        crate::dialog_notice::DialogNotice::info(
+                            "Only editors Osier can start from the command line are listed: \
+                             commands on PATH, JetBrains Toolbox scripts and Flatpak apps. For \
+                             another editor, choose Custom command and enter how to start it.",
+                        )
+                        .test_id("editors-notice")
+                    }),
                     SettingItem::new(
                         "Editor",
                         SettingField::dropdown(

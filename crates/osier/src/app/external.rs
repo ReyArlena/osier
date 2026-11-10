@@ -8,17 +8,217 @@ use gpui_kit::*;
 use crate::app::Osier;
 use crate::notices::{Notice, WindowNoticeExt as _};
 
-/// Editors we can detect on PATH, with the command template that opens a file at a line.
-pub const KNOWN_EDITORS: &[(&str, &str, &str)] = &[
-    ("zed", "Zed", "zed {file}:{line}"),
-    ("code", "VS Code", "code --goto {file}:{line}"),
-    ("codium", "VSCodium", "codium --goto {file}:{line}"),
-    ("phpstorm", "PhpStorm", "phpstorm --line {line} {file}"),
-    ("idea", "IntelliJ IDEA", "idea --line {line} {file}"),
-    ("subl", "Sublime Text", "subl {file}:{line}"),
-    ("gedit", "gedit", "gedit {file}"),
-    ("kate", "Kate", "kate --line {line} {file}"),
+/// An editor Osier knows how to start at a file and line.
+pub struct KnownEditor {
+    pub name: &'static str,
+    /// Command names it is installed under, most common first (distributions rename them:
+    /// Zed is `zeditor` on Arch).
+    pub bins: &'static [&'static str],
+    /// Flatpak application IDs (`flatpak run <id>`).
+    pub flatpaks: &'static [&'static str],
+    /// JetBrains Toolbox script name (`~/.local/share/JetBrains/Toolbox/scripts/<name>`).
+    pub toolbox: Option<&'static str>,
+    /// Arguments after the program: `{file}`, `{line}`, `{path}`.
+    pub args: &'static str,
+}
+
+const fn editor(
+    name: &'static str,
+    bins: &'static [&'static str],
+    flatpaks: &'static [&'static str],
+    toolbox: Option<&'static str>,
+    args: &'static str,
+) -> KnownEditor {
+    KnownEditor {
+        name,
+        bins,
+        flatpaks,
+        toolbox,
+        args,
+    }
+}
+
+const JETBRAINS_ARGS: &str = "--line {line} {file}";
+
+pub const KNOWN_EDITORS: &[KnownEditor] = &[
+    editor(
+        "Zed",
+        &["zed", "zeditor", "zedit"],
+        &["dev.zed.Zed"],
+        None,
+        "{file}:{line}",
+    ),
+    editor(
+        "VS Code",
+        &["code", "code-oss", "visual-studio-code"],
+        &["com.visualstudio.code"],
+        None,
+        "--goto {file}:{line}",
+    ),
+    editor(
+        "VSCodium",
+        &["codium", "vscodium"],
+        &["com.vscodium.codium"],
+        None,
+        "--goto {file}:{line}",
+    ),
+    editor("Cursor", &["cursor"], &[], None, "--goto {file}:{line}"),
+    editor("Windsurf", &["windsurf"], &[], None, "--goto {file}:{line}"),
+    editor(
+        "Sublime Text",
+        &["subl", "sublime_text"],
+        &["com.sublimetext.three"],
+        None,
+        "{file}:{line}",
+    ),
+    editor(
+        "PhpStorm",
+        &["phpstorm", "phpstorm.sh"],
+        &["com.jetbrains.PhpStorm"],
+        Some("phpstorm"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "IntelliJ IDEA",
+        &[
+            "idea",
+            "idea.sh",
+            "intellij-idea-ultimate-edition",
+            "intellij-idea-community-edition",
+        ],
+        &[
+            "com.jetbrains.IntelliJ-IDEA-Ultimate",
+            "com.jetbrains.IntelliJ-IDEA-Community",
+        ],
+        Some("idea"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "WebStorm",
+        &["webstorm", "webstorm.sh"],
+        &["com.jetbrains.WebStorm"],
+        Some("webstorm"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "PyCharm",
+        &[
+            "pycharm",
+            "pycharm.sh",
+            "pycharm-professional",
+            "pycharm-community",
+        ],
+        &[
+            "com.jetbrains.PyCharm-Professional",
+            "com.jetbrains.PyCharm-Community",
+        ],
+        Some("pycharm"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "RustRover",
+        &["rustrover", "rustrover.sh"],
+        &["com.jetbrains.RustRover"],
+        Some("rustrover"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "GoLand",
+        &["goland", "goland.sh"],
+        &["com.jetbrains.GoLand"],
+        Some("goland"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "CLion",
+        &["clion", "clion.sh"],
+        &["com.jetbrains.CLion"],
+        Some("clion"),
+        JETBRAINS_ARGS,
+    ),
+    editor(
+        "Kate",
+        &["kate"],
+        &["org.kde.kate"],
+        None,
+        "--line {line} {file}",
+    ),
+    editor(
+        "gedit",
+        &["gedit"],
+        &["org.gnome.gedit"],
+        None,
+        "+{line} {file}",
+    ),
+    editor(
+        "GNOME Text Editor",
+        &["gnome-text-editor"],
+        &["org.gnome.TextEditor"],
+        None,
+        "{file}",
+    ),
 ];
+
+/// Where to look besides PATH, so tests can fake an install.
+pub(crate) struct EditorProbe<'a> {
+    pub on_path: &'a dyn Fn(&str) -> bool,
+    /// Whether a Flatpak app with this ID is installed.
+    pub flatpak: &'a dyn Fn(&str) -> bool,
+    /// The JetBrains Toolbox script with this name, if there is one.
+    pub toolbox: &'a dyn Fn(&str) -> Option<std::path::PathBuf>,
+}
+
+/// The known editors that are installed, as (name, command template): a command on PATH
+/// first, then a JetBrains Toolbox script, then a Flatpak app. Blocking (file checks).
+pub(crate) fn find_editors(probe: &EditorProbe) -> Vec<(String, String)> {
+    KNOWN_EDITORS
+        .iter()
+        .filter_map(|e| {
+            let program = e
+                .bins
+                .iter()
+                .find(|b| (probe.on_path)(b))
+                .map(|b| b.to_string())
+                .or_else(|| {
+                    e.toolbox
+                        .and_then(|t| (probe.toolbox)(t))
+                        .map(|p| p.to_string_lossy().into_owned())
+                })
+                .or_else(|| {
+                    e.flatpaks
+                        .iter()
+                        .find(|id| (probe.flatpak)(id))
+                        .map(|id| format!("flatpak run {id}"))
+                })?;
+            Some((e.name.to_string(), format!("{program} {}", e.args)))
+        })
+        .collect()
+}
+
+/// The real places: PATH, the Flatpak exports (system and user), the Toolbox scripts folder.
+fn find_editors_here() -> Vec<(String, String)> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let flatpak_dirs: Vec<std::path::PathBuf> =
+        std::iter::once(std::path::PathBuf::from("/var/lib/flatpak/exports/bin"))
+            .chain(
+                home.iter()
+                    .map(|h| h.join(".local/share/flatpak/exports/bin")),
+            )
+            .collect();
+    let toolbox_dir = home
+        .as_ref()
+        .map(|h| h.join(".local/share/JetBrains/Toolbox/scripts"));
+    find_editors(&EditorProbe {
+        on_path: &on_path,
+        flatpak: &|id| flatpak_dirs.iter().any(|d| d.join(id).is_file()),
+        toolbox: &|name| {
+            toolbox_dir
+                .as_ref()
+                .map(|d| d.join(name))
+                .filter(|p| p.is_file())
+        },
+    })
+}
 
 pub fn on_path(bin: &str) -> bool {
     std::env::var_os("PATH")
@@ -223,9 +423,7 @@ impl Osier {
         }
     }
 
-    /// Editors found on PATH, for the settings panel.
-    #[allow(dead_code)]
-    /// Find the known editors on PATH (a stat per PATH folder and editor), once, in the
+    /// Find the known editors (PATH, Toolbox scripts, Flatpak apps), once, in the
     /// background; settings shows them when they are in (`detected_editors`).
     pub(crate) fn detect_editors(&mut self, cx: &mut Context<Self>) {
         if self.detected_editors.is_some() || self.detecting_editors {
@@ -233,13 +431,7 @@ impl Osier {
         }
         self.detecting_editors = true;
         self.in_background_quiet(
-            || {
-                KNOWN_EDITORS
-                    .iter()
-                    .filter(|(bin, _, _)| on_path(bin))
-                    .map(|(_, name, template)| (*name, *template))
-                    .collect::<Vec<_>>()
-            },
+            find_editors_here,
             |this, found, cx| {
                 this.detecting_editors = false;
                 this.detected_editors = Some(found);
@@ -298,5 +490,40 @@ mod launch_tests {
             ]
         );
         assert!(launch_argv(&[], true).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use super::{EditorProbe, find_editors};
+
+    #[test]
+    fn renamed_toolbox_and_flatpak_installs_are_found() {
+        let found = find_editors(&EditorProbe {
+            // Arch's name for Zed, and VS Code.
+            on_path: &|b| matches!(b, "zeditor" | "code"),
+            flatpak: &|id| id == "org.kde.kate",
+            toolbox: &|name| {
+                (name == "rustrover")
+                    .then(|| "/home/x/.local/share/JetBrains/Toolbox/scripts/rustrover".into())
+            },
+        });
+        let get = |name: &str| {
+            found
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, t)| t.as_str())
+        };
+        assert_eq!(get("Zed"), Some("zeditor {file}:{line}"));
+        assert_eq!(get("VS Code"), Some("code --goto {file}:{line}"));
+        assert_eq!(
+            get("RustRover"),
+            Some("/home/x/.local/share/JetBrains/Toolbox/scripts/rustrover --line {line} {file}")
+        );
+        assert_eq!(
+            get("Kate"),
+            Some("flatpak run org.kde.kate --line {line} {file}")
+        );
+        assert_eq!(get("PhpStorm"), None);
     }
 }
