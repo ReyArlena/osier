@@ -606,15 +606,6 @@ impl Osier {
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.unstage_all(window, cx)),
                             ),
-                    )
-                    .child(
-                        Button::new("refresh-changes")
-                            .test_id("refresh-changes")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::RefreshCw)
-                            .tooltip("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
                     ),
             )
             .child(list)

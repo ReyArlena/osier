@@ -154,15 +154,6 @@ impl Osier {
                                 this.show_reflog = !this.show_reflog;
                                 cx.notify();
                             })),
-                    )
-                    .child(
-                        Button::new("refresh-log")
-                            .test_id("refresh-log")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::RefreshCw)
-                            .tooltip("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
                     ),
             )
             .child(

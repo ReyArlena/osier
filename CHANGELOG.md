@@ -110,6 +110,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Removed
 
+- The Refresh buttons in the title bar and in the Log and Changes headers. Osier already
+  refreshes when files change and after its own git operations; `ctrl-r` and the command
+  palette's Refresh still reload by hand.
 - The `ctrl-q` Quit hint in the status bar. The shortcut is unchanged and listed in the
   command palette and the keymap.
 

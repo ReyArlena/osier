@@ -305,17 +305,6 @@ impl Osier {
                             }),
                         ),
                 )
-                .child(
-                    Button::new("refresh")
-                        .test_id("refresh")
-                        .ghost()
-                        .small()
-                        .icon(Lucide::RefreshCw)
-                        .when(!self.compact, |b| b.label("Refresh"))
-                        .tooltip("Refresh (ctrl-r)")
-                        .disabled(!has_project)
-                        .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
-                )
                 .child(Separator::vertical().h_4().mx_1())
                 .child(
                     Button::new("update-branch")
