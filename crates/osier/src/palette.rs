@@ -597,7 +597,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Expand the diff pane",
             Lucide::Maximize2,
-            None,
+            Some("toggle_diff_expanded"),
             false,
             |o, _, cx| o.toggle_diff_expanded(cx),
         ),

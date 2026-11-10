@@ -143,6 +143,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- "Expand the diff pane" in the command palette shows its shortcut (`ctrl-shift-m`) like
+  the other commands.
 - Log rows hid other local branches on a commit with several refs: only the first three
   badges showed, in git's order, which puts remote branches before local ones. Badges now
   go checked-out branch, other local branches, tags, then remote branches; a remote's `HEAD`
