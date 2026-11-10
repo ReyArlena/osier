@@ -108,6 +108,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The pencil button on a Files tab file did nothing; it now opens the file in the editor.
+  It only shows for text in the working tree, not for a file at a revision, an image or a
+  binary.
 - Code files in the viewer and the editor drew their own border under the pane header,
   which read as one thick line; they now sit flush like rendered Markdown.
 - The clone and create dialogs flashed a red "already exists and is not empty" error just

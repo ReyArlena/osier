@@ -380,3 +380,43 @@ fn files_tab_viewer_picks_markdown_code_and_binary(cx: &mut TestAppContext) {
         assert!(matches!(osier.viewer, Some(Viewer::Missing)))
     });
 }
+
+#[gpui::test]
+fn ui_files_tab_pencil_edits_the_working_tree_file(cx: &mut TestAppContext) {
+    use crate::viewer::Viewer;
+    let repo = TempRepo::new();
+    repo.commit_file("notes.md", "# Notes\n", "docs");
+    repo.write("blob.bin", "ab\0cd");
+    let h = Harness::open(cx, &repo);
+
+    // History and binaries cannot be edited, so they get no pencil.
+    h.act(cx, |osier, _, cx| {
+        osier.select_work_file("notes.md".into(), Some("HEAD".into()), cx)
+    });
+    assert!(h.bounds(cx, "view-edit").is_none());
+    h.act(cx, |osier, _, cx| {
+        osier.select_work_file("blob.bin".into(), None, cx)
+    });
+    assert!(h.bounds(cx, "view-edit").is_none());
+
+    h.act(cx, |osier, _, cx| {
+        osier.select_work_file("notes.md".into(), None, cx)
+    });
+    h.click(cx, "view-edit");
+    assert!(h.read(cx, |osier, _| osier.editor.is_some()));
+    // The Rendered / Code switch belongs to the viewer, not the editor.
+    assert!(h.bounds(cx, "md-rendered").is_none());
+    h.act(cx, |osier, window, cx| {
+        let state = osier.editor.as_ref().unwrap().state.clone();
+        state.update(cx, |s, cx| s.set_value("# Notes\n\nedited\n", window, cx));
+    });
+    h.click(cx, "editor-save");
+    assert_eq!(repo.read("notes.md"), "# Notes\n\nedited\n");
+    h.read(cx, |osier, _| {
+        assert!(osier.editor.is_none());
+        assert!(matches!(
+            &osier.viewer,
+            Some(Viewer::Markdown { text, .. }) if text.contains("edited")
+        ));
+    });
+}

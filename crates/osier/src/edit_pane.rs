@@ -59,12 +59,8 @@ impl Osier {
     /// file is read in the background (no size limit here, so it can be large) and the editor
     /// opens once it is in.
     pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((path, area)) = self.diff_area() else {
+        let Some((path, kind)) = self.edit_target() else {
             return;
-        };
-        let kind = match area {
-            Area::Conflicted => EditKind::MergeResult,
-            _ => EditKind::File,
         };
         if kind == EditKind::MergeResult
             && let Some(text) = self.diff.read(cx).resolved_text(&path)
@@ -85,6 +81,22 @@ impl Osier {
             window,
             cx,
         );
+    }
+
+    /// What the editor would open for the selection: a Changes file (its merge result when
+    /// conflicted) or a Files tab file in the working tree. A file at a revision is history
+    /// and cannot be edited.
+    fn edit_target(&self) -> Option<(String, EditKind)> {
+        match &self.active_project()?.selection {
+            Selection::File {
+                path,
+                area: Area::Conflicted,
+            } => Some((path.clone(), EditKind::MergeResult)),
+            Selection::File { path, .. } | Selection::WorkFile { path, rev: None } => {
+                Some((path.clone(), EditKind::File))
+            }
+            _ => None,
+        }
     }
 
     fn install_editor(

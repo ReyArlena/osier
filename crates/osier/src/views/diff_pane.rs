@@ -415,7 +415,9 @@ impl Osier {
                     })
                     .child(div().flex_1())
                     .when(
-                        matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing,
+                        matches!(&self.viewer, Some(Viewer::Markdown { .. }))
+                            && viewing
+                            && !editing,
                         |this| {
                             this.child(
                                 Button::new("md-rendered")
@@ -466,19 +468,22 @@ impl Osier {
                             this.child(self.blame_history_buttons(path, rev, cx))
                         })
                     })
-                    .when(viewing && !editing, |this| {
-                        this.child(
-                            Button::new("view-edit")
-                                .test_id("view-edit")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Pencil)
-                                .tooltip("Edit this file in place")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
-                                ),
-                        )
-                    })
+                    .when(
+                        viewing && !editing && self.viewer_is_editable(&selection),
+                        |this| {
+                            this.child(
+                                Button::new("view-edit")
+                                    .test_id("view-edit")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Lucide::Pencil)
+                                    .tooltip("Edit this file in place")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_editor(window, cx)
+                                    })),
+                            )
+                        },
+                    )
                     .when(editing, |this| {
                         let (save_label, save_tip) = self.save_button_text(cx);
                         this.child(
@@ -884,6 +889,16 @@ impl Osier {
                     }),
             )
             .into_any_element()
+    }
+
+    /// Whether the Files tab viewer shows something the editor can open: text in the working
+    /// tree, not a file at a revision, an image or a binary.
+    fn viewer_is_editable(&self, selection: &Selection) -> bool {
+        matches!(selection, Selection::WorkFile { rev: None, .. })
+            && matches!(
+                &self.viewer,
+                Some(Viewer::Code { .. } | Viewer::Markdown { .. })
+            )
     }
 
     fn render_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
