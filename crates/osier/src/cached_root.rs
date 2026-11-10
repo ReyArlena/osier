@@ -11,6 +11,9 @@
 //! call `cx.refresh_windows()`. gpui does not track globals, so without it the main view
 //! would keep its old frame until something else redraws it. gpui-kit's `Theme::update`
 //! already refreshes, so theme changes are covered.
+//!
+//! The cache is off while assistive technology is connected (see `render`): a cached view
+//! drops out of gpui's accessibility tree on every frame that reuses it.
 
 use gpui_kit::*;
 
@@ -20,10 +23,18 @@ struct CachedRoot<V: Render> {
 }
 
 impl<V: Render> Render for CachedRoot<V> {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // gpui builds the accessibility tree while it prepaints, and a view served from the
+        // cache is not prepainted again: on every frame that reuses it, all of its nodes are
+        // missing from the tree sent to assistive technology (the whole window goes blank for
+        // a screen reader while a toast fades). So no cache while accessibility is active;
+        // gpui redraws when that changes, which brings us back here.
+        if window.is_a11y_active() {
+            return self.inner.clone().into_any_element();
+        }
         let mut style = StyleRefinement::default();
         style = style.size_full();
-        self.inner.clone().cached(style)
+        self.inner.clone().cached(style).into_any_element()
     }
 }
 

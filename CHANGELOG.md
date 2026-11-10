@@ -159,6 +159,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- With a screen reader (or any assistive technology) connected, the whole window dropped
+  out of the accessibility tree whenever only an overlay redrew, eg while a notification
+  faded out, and came back on the next change. The main view is no longer served from its
+  cache while assistive technology is active.
 - "Stage lines", "Unstage lines" and "Discard lines" did nothing when clicked: pressing the
   button cleared the line selection before the click arrived. The buttons now keep the
   selected lines from press to release.
