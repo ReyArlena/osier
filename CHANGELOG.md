@@ -75,6 +75,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Settings > Keymap names actions exactly as the command palette does, keeping the "…" on
+  those that open a dialog or a further choice (Switch project…, Settings…, New branch…).
 - Command palette rows: a submenu row's description sits under its name instead of beside
   it, shortcuts show in a quiet outlined key badge, and the category next to each command
   is hidden unless Show categories is on.

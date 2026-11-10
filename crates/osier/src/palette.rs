@@ -1415,17 +1415,20 @@ mod tests {
             let id = c
                 .action
                 .unwrap_or_else(|| panic!("{:?} has no keymap action", c.label));
-            assert!(
-                specs.iter().any(|s| s.id == id),
-                "palette points at unknown action {id}"
-            );
+            let spec = specs
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("palette points at unknown action {id}"));
+            // Same name in Settings > Keymap, "…" included: it says a dialog or a choice
+            // follows.
+            assert_eq!(spec.name, c.label, "keymap name of {id}");
         }
         // Each palette-only action belongs to exactly one command, under the same name.
         for spec in crate::keymap::palette_specs() {
             let owners: Vec<&super::PaletteCommand> =
                 all.iter().filter(|c| c.action == Some(spec.id)).collect();
             assert_eq!(owners.len(), 1, "{} is used by one command", spec.id);
-            assert_eq!(owners[0].label.trim_end_matches('…'), spec.name);
+            assert_eq!(owners[0].label, spec.name);
             assert!(matches!(
                 (spec.make)().as_any().downcast_ref::<super::PaletteAction>(),
                 Some(a) if a.id == spec.id

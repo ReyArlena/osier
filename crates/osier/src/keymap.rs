@@ -117,7 +117,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "open_repository",
-            "Open repository",
+            "Open repository…",
             "General",
             ["ctrl-shift-o"],
             App,
@@ -125,7 +125,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "clone_repository",
-            "Clone repository",
+            "Clone repository…",
             "General",
             [],
             App,
@@ -133,7 +133,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "create_repository",
-            "Create new repository",
+            "Create new repository…",
             "General",
             [],
             App,
@@ -157,7 +157,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "switch_project",
-            "Switch project",
+            "Switch project…",
             "General",
             ["ctrl-o"],
             App,
@@ -165,7 +165,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "switch_branch",
-            "Switch branch",
+            "Switch branch…",
             "General",
             ["ctrl-shift-b"],
             App,
@@ -173,7 +173,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "open_settings",
-            "Settings",
+            "Settings…",
             "General",
             ["ctrl-,"],
             App,
@@ -428,7 +428,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "force_push",
-            "Force push with lease",
+            "Force push with lease…",
             "Remote",
             [],
             App,
@@ -441,7 +441,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
 }
 
 /// Palette commands with no action of their own, bindable through `PaletteAction`. Unbound
-/// by default; the name is the palette label without its "…".
+/// by default; the name is the palette label, "…" included (it opens a dialog or a choice).
 pub(crate) fn palette_specs() -> Vec<ActionSpec> {
     macro_rules! palette {
         ($(($id:literal, $name:literal, $cat:literal)),* $(,)?) => {
@@ -463,11 +463,11 @@ pub(crate) fn palette_specs() -> Vec<ActionSpec> {
         ("commit_and_push", "Commit and push", "Changes"),
         ("stage_all", "Stage all", "Changes"),
         ("unstage_all", "Unstage all", "Changes"),
-        ("stash_changes", "Stash changes", "Changes"),
-        ("shelve_all_changes", "Shelve all changes", "Changes"),
+        ("stash_changes", "Stash changes…", "Changes"),
+        ("shelve_all_changes", "Shelve all changes…", "Changes"),
         (
             "choose_github_account",
-            "Choose GitHub account for this project",
+            "Choose GitHub account for this project…",
             "Remote"
         ),
         (
@@ -475,13 +475,13 @@ pub(crate) fn palette_specs() -> Vec<ActionSpec> {
             "Forget GitHub account choice for this project",
             "Remote"
         ),
-        ("new_branch", "New branch", "Branches"),
+        ("new_branch", "New branch…", "Branches"),
         (
             "apply_patch_from_clipboard",
-            "Apply patch from clipboard",
+            "Apply patch from clipboard…",
             "Patches"
         ),
-        ("apply_patch_from_file", "Apply patch from file", "Patches"),
+        ("apply_patch_from_file", "Apply patch from file…", "Patches"),
         (
             "copy_all_changes_as_patch",
             "Copy all changes as patch",

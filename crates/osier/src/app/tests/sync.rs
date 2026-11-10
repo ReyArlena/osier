@@ -686,6 +686,18 @@ fn ui_remote_shortcuts_open_their_submenus_and_rows_can_be_bound(cx: &mut TestAp
         );
     }
 
+    // Each row's keymap action carries the row's own name, "…" included.
+    let specs = crate::keymap::actions();
+    h.read(cx, |o, _| {
+        for mode in crate::palette::PaletteMode::REMOTE {
+            for row in o.remote_choices(mode) {
+                let id = row.action.expect("every remote row is bindable");
+                let spec = specs.iter().find(|s| s.id == id).expect("in the keymap");
+                assert_eq!(spec.name, row.label.as_ref(), "keymap name of {id}");
+            }
+        }
+    });
+
     // Bind a row: its key runs it straight away, and the row shows the key.
     h.act(cx, |o, _, cx| {
         o.start_key_recording("push_set_upstream", cx)
