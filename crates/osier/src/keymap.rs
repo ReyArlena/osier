@@ -435,8 +435,71 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ForcePush
         ),
     ];
+    all.extend(palette_specs());
     all.extend(crate::app::row_actions::specs());
     all
+}
+
+/// Palette commands with no action of their own, bindable through `PaletteAction`. Unbound
+/// by default; the name is the palette label without its "…".
+pub(crate) fn palette_specs() -> Vec<ActionSpec> {
+    macro_rules! palette {
+        ($(($id:literal, $name:literal, $cat:literal)),* $(,)?) => {
+            vec![$(ActionSpec {
+                id: $id,
+                name: $name,
+                category: $cat,
+                defaults: &[],
+                scope: Scope::App,
+                detail: "",
+                make: || Box::new(crate::palette::PaletteAction { id: $id }),
+            }),*]
+        };
+    }
+    palette![
+        ("open_themes_folder", "Open themes folder", "General"),
+        ("rescan_projects", "Rescan project directories", "General"),
+        ("scan_project_status", "Scan project status now", "General"),
+        ("commit_and_push", "Commit and push", "Changes"),
+        ("stage_all", "Stage all", "Changes"),
+        ("unstage_all", "Unstage all", "Changes"),
+        ("stash_changes", "Stash changes", "Changes"),
+        ("shelve_all_changes", "Shelve all changes", "Changes"),
+        (
+            "choose_github_account",
+            "Choose GitHub account for this project",
+            "Remote"
+        ),
+        (
+            "forget_github_account",
+            "Forget GitHub account choice for this project",
+            "Remote"
+        ),
+        ("new_branch", "New branch", "Branches"),
+        (
+            "apply_patch_from_clipboard",
+            "Apply patch from clipboard",
+            "Patches"
+        ),
+        ("apply_patch_from_file", "Apply patch from file", "Patches"),
+        (
+            "copy_all_changes_as_patch",
+            "Copy all changes as patch",
+            "Patches"
+        ),
+        ("diff_unified", "Unified layout", "Diff"),
+        ("diff_split", "Split layout", "Diff"),
+        (
+            "conflicts_three_way",
+            "Conflicts in the 3-way merge tool",
+            "Diff"
+        ),
+        ("conflicts_inline", "Conflicts inline", "Diff"),
+        ("toggle_soft_wrap", "Toggle soft wrap", "Diff"),
+        ("open_in_editor", "Open project in editor", "Open"),
+        ("open_terminal", "Open terminal here", "Open"),
+        ("open_in_file_manager", "Open in file manager", "Open"),
+    ]
 }
 
 /// A keystroke that cannot type into a text field: a modifier chord or a function key.
@@ -873,8 +936,10 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len());
-        // Context-menu actions, the prefix key, clone and create, and the rows of the
-        // palette's remote submenus start unbound; everything else has keys.
+        // Context-menu actions, the prefix key, clone and create, the rows of the palette's
+        // remote submenus and the palette-only commands start unbound; everything else has
+        // keys.
+        let palette_only: Vec<&str> = super::palette_specs().iter().map(|s| s.id).collect();
         let unbound = [
             super::PREFIX_KEY,
             "clone_repository",
@@ -895,7 +960,11 @@ mod tests {
         ];
         assert!(
             all.iter()
-                .filter(|a| a.scope != Scope::Row && !unbound.contains(&a.id))
+                .filter(|a| {
+                    a.scope != Scope::Row
+                        && !unbound.contains(&a.id)
+                        && !palette_only.contains(&a.id)
+                })
                 .all(|a| !a.defaults.is_empty())
         );
         assert!(

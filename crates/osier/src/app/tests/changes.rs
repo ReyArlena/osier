@@ -672,3 +672,17 @@ fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
         assert_eq!(added, ["TEN"], "only the second hunk is staged");
     });
 }
+
+#[gpui::test]
+fn ui_palette_only_commands_can_be_bound(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.write("a.txt", "two\n");
+    repo.write("b.txt", "new\n");
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |o, _, cx| o.start_key_recording("stage_all", cx));
+    h.keys(cx, "ctrl-alt-a");
+    h.keys(cx, "ctrl-alt-a");
+    let staged = repo.git(["diff", "--cached", "--name-only"]);
+    assert_eq!(staged.lines().collect::<Vec<_>>(), ["a.txt", "b.txt"]);
+}

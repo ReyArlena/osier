@@ -1097,6 +1097,11 @@ impl Render for Osier {
                     this.run_row_action(a.kind, window, cx)
                 }),
             )
+            .on_action(
+                cx.listener(|this, a: &crate::palette::PaletteAction, window, cx| {
+                    this.run_palette_command(a.id, window, cx)
+                }),
+            )
             // Any click cancels a waiting prefix key.
             .capture_any_mouse_down(cx.listener(|this, _, _, cx| this.cancel_prefix(cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))

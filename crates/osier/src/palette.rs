@@ -175,6 +175,15 @@ fn label_matches(label: &str, query: &str) -> bool {
     q.is_empty() || label.to_lowercase().contains(&q)
 }
 
+/// The key-bindable form of a palette command that has no action of its own (Stage all,
+/// Split layout…): runs that command's closure, so the palette and the key do the same.
+/// The ids and keymap names are listed in `keymap::palette_specs`.
+#[derive(Debug, Clone, PartialEq, Action)]
+#[action(namespace = osier, no_json)]
+pub(crate) struct PaletteAction {
+    pub id: &'static str,
+}
+
 /// What choosing a command does.
 pub(crate) enum Target {
     Run(Run),
@@ -353,7 +362,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Open themes folder",
             Lucide::Palette,
-            None,
+            Some("open_themes_folder"),
             false,
             |o, w, cx| o.open_themes_dir(w, cx),
         ),
@@ -361,7 +370,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Rescan project directories",
             Lucide::FolderSearch,
-            None,
+            Some("rescan_projects"),
             false,
             |o, _, cx| o.rescan_projects(cx),
         ),
@@ -369,7 +378,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Scan project status now",
             Lucide::RefreshCw,
-            None,
+            Some("scan_project_status"),
             false,
             |o, w, cx| o.scan_recent_now(w, cx),
         ),
@@ -441,7 +450,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Commit and push",
             Lucide::ArrowUp,
-            None,
+            Some("commit_and_push"),
             true,
             |o, w, cx| o.commit_and_push(w, cx),
         ),
@@ -449,7 +458,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Stage all",
             Lucide::ListChecks,
-            None,
+            Some("stage_all"),
             true,
             |o, w, cx| o.stage_all(w, cx),
         ),
@@ -457,7 +466,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Unstage all",
             Lucide::ListX,
-            None,
+            Some("unstage_all"),
             true,
             |o, w, cx| o.unstage_all(w, cx),
         ),
@@ -465,7 +474,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Stash changes…",
             Lucide::Archive,
-            None,
+            Some("stash_changes"),
             true,
             |o, w, cx| o.prompt_stash(w, cx),
         ),
@@ -473,7 +482,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Shelve all changes…",
             Lucide::Package,
-            None,
+            Some("shelve_all_changes"),
             true,
             |o, w, cx| o.shelve_prompt(Vec::new(), w, cx),
         ),
@@ -513,7 +522,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Choose GitHub account for this project…",
             Lucide::Github,
-            None,
+            Some("choose_github_account"),
             true,
             |o, w, cx| o.choose_account(w, cx),
         ),
@@ -521,7 +530,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Forget GitHub account choice for this project",
             Lucide::Github,
-            None,
+            Some("forget_github_account"),
             true,
             |o, w, cx| o.clear_project_account(w, cx),
         ),
@@ -529,7 +538,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Branches",
             "New branch…",
             Lucide::GitBranch,
-            None,
+            Some("new_branch"),
             true,
             |o, w, cx| o.prompt_new_branch(None, w, cx),
         ),
@@ -537,7 +546,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Apply patch from clipboard…",
             Lucide::ClipboardPaste,
-            None,
+            Some("apply_patch_from_clipboard"),
             true,
             |o, w, cx| o.apply_patch_from_clipboard(w, cx),
         ),
@@ -545,7 +554,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Apply patch from file…",
             Lucide::FileInput,
-            None,
+            Some("apply_patch_from_file"),
             true,
             |o, w, cx| o.apply_patch_from_file(w, cx),
         ),
@@ -553,7 +562,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Copy all changes as patch",
             Lucide::ClipboardCopy,
-            None,
+            Some("copy_all_changes_as_patch"),
             true,
             |o, w, cx| {
                 if let Some(s) = o.all_changes_source() {
@@ -565,7 +574,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Unified layout",
             Lucide::FileDiff,
-            None,
+            Some("diff_unified"),
             false,
             |o, _, cx| o.set_diff_mode(DiffMode::Unified, cx),
         ),
@@ -573,7 +582,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Split layout",
             Lucide::Columns2,
-            None,
+            Some("diff_split"),
             false,
             |o, _, cx| o.set_diff_mode(DiffMode::Split, cx),
         ),
@@ -581,7 +590,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Conflicts in the 3-way merge tool",
             Lucide::Columns3,
-            None,
+            Some("conflicts_three_way"),
             false,
             |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::ThreeWay, cx),
         ),
@@ -589,7 +598,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Conflicts inline",
             Lucide::FileDiff,
-            None,
+            Some("conflicts_inline"),
             false,
             |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::Inline, cx),
         ),
@@ -605,7 +614,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Toggle soft wrap",
             Lucide::FileDiff,
-            None,
+            Some("toggle_soft_wrap"),
             false,
             |o, window, cx| o.toggle_soft_wrap(window, cx),
         ),
@@ -613,7 +622,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open project in editor",
             Lucide::SquareArrowOutUpRight,
-            None,
+            Some("open_in_editor"),
             true,
             |o, w, cx| o.open_in_editor(None, w, cx),
         ),
@@ -621,7 +630,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open terminal here",
             Lucide::Terminal,
-            None,
+            Some("open_terminal"),
             true,
             |o, w, cx| o.open_terminal(w, cx),
         ),
@@ -629,7 +638,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open in file manager",
             Lucide::FolderOpen,
-            None,
+            Some("open_in_file_manager"),
             true,
             |o, w, cx| o.reveal_in_file_manager(None, w, cx),
         ),
@@ -637,6 +646,25 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
 }
 
 impl Osier {
+    /// Run the palette command whose keymap action is `id`, as choosing it would.
+    pub(crate) fn run_palette_command(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(command) = commands().into_iter().find(|c| c.action == Some(id)) else {
+            return;
+        };
+        if command.needs_project && self.active_project().is_none() {
+            return;
+        }
+        match command.target {
+            Target::Run(run) => run(self, window, cx),
+            Target::Submenu(mode) => self.open_palette_in(mode, window, cx),
+        }
+    }
+
     pub(crate) fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_palette_in(PaletteMode::Root, window, cx);
     }
@@ -1381,13 +1409,27 @@ mod tests {
         for c in &all {
             assert!(!c.group.is_empty() && !c.label.is_empty());
         }
-        let keyed = all.iter().filter(|c| c.action.is_some()).count();
-        let ids: Vec<&str> = crate::keymap::actions().iter().map(|a| a.id).collect();
+        let specs = crate::keymap::actions();
         for c in &all {
-            if let Some(id) = c.action {
-                assert!(ids.contains(&id), "palette points at unknown action {id}");
-            }
+            // Every command can be given a key: its own action, or a `PaletteAction`.
+            let id = c
+                .action
+                .unwrap_or_else(|| panic!("{:?} has no keymap action", c.label));
+            assert!(
+                specs.iter().any(|s| s.id == id),
+                "palette points at unknown action {id}"
+            );
         }
-        assert!(keyed >= 15, "{keyed} commands carry a shortcut hint");
+        // Each palette-only action belongs to exactly one command, under the same name.
+        for spec in crate::keymap::palette_specs() {
+            let owners: Vec<&super::PaletteCommand> =
+                all.iter().filter(|c| c.action == Some(spec.id)).collect();
+            assert_eq!(owners.len(), 1, "{} is used by one command", spec.id);
+            assert_eq!(owners[0].label.trim_end_matches('…'), spec.name);
+            assert!(matches!(
+                (spec.make)().as_any().downcast_ref::<super::PaletteAction>(),
+                Some(a) if a.id == spec.id
+            ));
+        }
     }
 }

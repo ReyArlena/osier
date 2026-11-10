@@ -8,6 +8,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Every command palette command can now be given a key in Settings > Keymap: Stage all,
+  Commit and push, Split layout, Open terminal here and the rest that had none, each
+  unbound until you bind it.
 - "Switch branch…" in the command palette (`ctrl-shift-b`): local branches, newest first, then
   remote branches not checked out yet, with when each last changed and its subject. The
   current branch is left out, so `ctrl-shift-b` then Enter goes back to the branch you were
