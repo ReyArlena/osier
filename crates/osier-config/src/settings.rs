@@ -18,9 +18,28 @@ pub struct Settings {
     pub viewer: Viewer,
     pub keys: Keys,
     pub updates: Updates,
+    pub github: GitHub,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// GitHub lists Osier keeps ready (repositories to clone, organisations, templates,
+/// `.gitignore` and licence lists).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitHub {
+    /// Refresh the lists in the background this often, in minutes; 0 only when a screen
+    /// that shows them opens.
+    pub list_refresh_minutes: u32,
+}
+
+impl Default for GitHub {
+    fn default() -> Self {
+        Self {
+            list_refresh_minutes: 30,
+        }
+    }
 }
 
 /// Checking GitHub for a newer Osier release.
@@ -481,6 +500,13 @@ mod tests {
         assert_eq!(Settings::default().appearance.animation_ms, 180);
         let s: Settings = toml::from_str("[appearance]\nanimation_ms = 120\n").unwrap();
         assert_eq!(s.appearance.animation_ms, 120);
+    }
+
+    #[test]
+    fn github_lists_refresh_every_half_hour_by_default() {
+        assert_eq!(Settings::default().github.list_refresh_minutes, 30);
+        let s: Settings = toml::from_str("[github]\nlist_refresh_minutes = 0\n").unwrap();
+        assert_eq!(s.github.list_refresh_minutes, 0);
     }
 
     #[test]

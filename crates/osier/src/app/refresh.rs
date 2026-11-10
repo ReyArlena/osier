@@ -275,6 +275,7 @@ impl Osier {
                     }
                     this.pump_recent_status(cx);
                     this.check_missing_projects(cx);
+                    this.refresh_lists_on_timer(cx);
                     if this.keymap_watch.as_ref().is_some_and(|w| w.take_dirty()) {
                         this.reload_keymap(window, cx);
                     }

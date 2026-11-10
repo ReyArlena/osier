@@ -444,3 +444,61 @@ fn ui_clone_waits_for_the_target_check_and_refuses_a_full_folder(cx: &mut TestAp
     h.click(cx, "dialog-ok");
     assert!(other.path().join("hello/hello.txt").exists(), "cloned");
 }
+
+#[gpui::test]
+fn github_lists_are_kept_on_disk_and_shown_from_there(cx: &mut TestAppContext) {
+    use crate::cached_list::Freshness;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    with_hub(
+        &h,
+        cx,
+        Arc::new(FakeHub {
+            repos: vec![crate::new_repo::tests::repo("alice", "hello")],
+            ..Default::default()
+        }),
+    );
+    let alice = gh_account("alice");
+    let names = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |o, _| {
+            o.gh_lists
+                .repos
+                .get(&crate::new_repo::account_key(&gh_account("alice")))
+                .and_then(|e| e.data.clone())
+                .map(|d| d.iter().map(|r| r.name.clone()).collect::<Vec<_>>())
+        })
+    };
+    let a = alice.clone();
+    h.act(cx, move |o, _, cx| {
+        o.use_gh_repos(&a, Freshness::CheckNow, cx)
+    });
+    assert_eq!(names(&h, cx), Some(vec!["hello".to_string()]));
+    let dir = h.read(cx, |o, _| o.paths.cache_dir().join("lists/github-repos"));
+    assert_eq!(
+        std::fs::read_dir(&dir).expect("cache dir").count(),
+        1,
+        "saved"
+    );
+
+    // A new session: nothing in memory, and GitHub now lists nothing. A fresh enough disk
+    // copy is shown without asking GitHub.
+    h.act(cx, |o, _, _| {
+        o.gh_lists = Default::default();
+        o.hub = Arc::new(FakeHub::default());
+    });
+    let a = alice.clone();
+    h.act(cx, move |o, _, cx| {
+        o.use_gh_repos(
+            &a,
+            Freshness::OlderThan(std::time::Duration::from_secs(3600)),
+            cx,
+        )
+    });
+    assert_eq!(names(&h, cx), Some(vec!["hello".to_string()]), "from disk");
+    // Checking now replaces it with what GitHub says.
+    h.act(cx, move |o, _, cx| {
+        o.use_gh_repos(&alice, Freshness::CheckNow, cx)
+    });
+    assert_eq!(names(&h, cx), Some(Vec::new()));
+}

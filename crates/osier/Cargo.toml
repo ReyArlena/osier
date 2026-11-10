@@ -42,6 +42,7 @@ reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
 osier-git.workspace = true
 osier-config.workspace = true
 osier-theme.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 osier-auth.workspace = true
 # Local time zone for the full date and time in time tooltips. Already in the graph via gpui.

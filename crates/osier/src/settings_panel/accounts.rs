@@ -4,7 +4,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -166,4 +166,62 @@ pub(super) fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                         .into_any_element()
                 })),
         )
+        .group(github_lists_group(view))
+}
+
+/// Accounts > GitHub lists: how often the cached GitHub lists are refreshed.
+fn github_lists_group(view: &Entity<Osier>) -> SettingGroup {
+    let v4 = view.clone();
+    SettingGroup::new()
+        .title("GitHub lists")
+        .description(
+            "Repositories to clone, organisations, templates, .gitignore and licence lists \
+                 are kept on disk so the clone and create screens show them at once, and are \
+                 checked for new ones in the background.",
+        )
+        .item(
+            SettingItem::new(
+                "Update in the background",
+                SettingField::dropdown(
+                    vec![
+                        ("0".into(), "Off".into()),
+                        ("15".into(), "Every 15 minutes".into()),
+                        ("30".into(), "Every 30 minutes".into()),
+                        ("60".into(), "Every hour".into()),
+                        ("120".into(), "Every 2 hours".into()),
+                    ],
+                    get(view, |o| {
+                        o.settings.github.list_refresh_minutes.to_string().into()
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.github.list_refresh_minutes = v.parse().unwrap_or(30)
+                    }),
+                )
+                .default_value("30".to_string()),
+            )
+            .description(
+                "Off: only when a clone or create screen opens (they always check for new \
+                     ones then).",
+            ),
+        )
+        .item(SettingItem::render(move |options, _, cx| {
+            let v = v4.clone();
+            let refreshing = v.read(cx).gh_lists_refreshing();
+            h_flex().w_full().justify_end().child(
+                Button::new("refresh-gh-lists")
+                    .test_id("refresh-gh-lists")
+                    .outline()
+                    .with_size(options.size())
+                    .icon(Lucide::RefreshCw)
+                    .label(if refreshing {
+                        "Refreshing…"
+                    } else {
+                        "Refresh now"
+                    })
+                    .disabled(refreshing)
+                    .on_click(move |_, _, cx| {
+                        v.update(cx, |o, cx| o.refresh_gh_lists_now(cx));
+                    }),
+            )
+        }))
 }

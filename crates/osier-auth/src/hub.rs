@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AuthError, Result};
 
 /// A repository the account can reach.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 pub struct GhRepo {
     pub full_name: String,
     pub name: String,
@@ -36,7 +36,7 @@ pub struct GhRepo {
     pub fork: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 pub struct License {
     pub key: String,
     pub name: String,

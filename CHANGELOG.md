@@ -8,6 +8,14 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- GitHub lists are kept ready:
+  - Covered: repositories to clone, organisations, templates, `.gitignore` and licence lists.
+  - The clone list and the Create dialog show the last known lists at once (saved in the
+    cache folder), then check GitHub for new ones in the background. The palette says
+    "Checking for new repositories…" while it does, and new ones appear when they are in.
+  - The lists are also refreshed in the background every 30 minutes, one at a time.
+    Settings > Accounts > GitHub lists sets how often, or Off (`github.list_refresh_minutes`);
+    "Refresh now" checks at once.
 - In the Files tab, moving with the arrow keys opens each file in the viewer, as clicking
   does. Folder rows leave the viewer on the last file.
 - With "Ignored" on, the Files tab dims ignored files and shows where the rule comes from

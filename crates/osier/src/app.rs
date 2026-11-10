@@ -279,14 +279,14 @@ pub struct Osier {
     pub(crate) gh_accounts_loaded: bool,
     /// GitHub API access for clone and create (`new_repo.rs`); a fake in tests.
     pub(crate) hub: std::sync::Arc<dyn crate::new_repo::Hub>,
-    /// Repository lists per account (`login@host`), for the clone submenu and templates.
-    pub(crate) hub_repos: std::collections::HashMap<String, Vec<osier_auth::hub::GhRepo>>,
+    /// GitHub lists kept ready for the clone and create flows (`cached_list.rs`).
+    pub(crate) gh_lists: crate::new_repo::GhLists,
+    /// When Osier started (timed background work waits a little after launch).
+    pub(crate) started: std::time::Instant,
     /// Counted background work for the status bar (`background.rs`).
     pub(crate) background: crate::background::Background,
     /// `background` version last drawn.
     background_seen: u64,
-    /// Accounts whose list `prefetch_hub_repos` is fetching.
-    pub(crate) hub_repos_loading: std::collections::HashSet<String>,
     /// Repositories found under the configured scan directories.
     pub(crate) scanned: Vec<PathBuf>,
     /// Sidebar filter box.
@@ -568,8 +568,8 @@ impl Osier {
             gh_accounts: Vec::new(),
             gh_accounts_loaded: false,
             hub: crate::new_repo::default_hub(sink.clone()),
-            hub_repos: std::collections::HashMap::new(),
-            hub_repos_loading: std::collections::HashSet::new(),
+            gh_lists: Default::default(),
+            started: std::time::Instant::now(),
             background: Default::default(),
             background_seen: 0,
             scanned: Vec::new(),

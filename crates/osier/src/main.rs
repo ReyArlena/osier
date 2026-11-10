@@ -7,6 +7,7 @@ mod app_dialog;
 mod askpass;
 mod background;
 mod blame_view;
+mod cached_list;
 mod cached_root;
 mod cli;
 mod command_log;

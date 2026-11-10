@@ -270,6 +270,9 @@ log_unpushed = "dim"          # graph marking for commits not on a remote: dim |
 offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 config_tab = false            # show the Git config panel as a tab (always in the sidebar menu)
 
+[github]
+list_refresh_minutes = 30     # refresh the cached GitHub lists (repositories, templates); 0 = off
+
 [auth]
 askpass = true                # route ssh/git prompts to Osier's own window
 [auth.default_accounts]

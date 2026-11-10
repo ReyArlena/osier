@@ -570,7 +570,7 @@ impl Osier {
                 .collect(),
         );
         if matches!(mode, PaletteMode::CloneAccount | PaletteMode::CreateAccount) {
-            self.prefetch_hub_repos(cx);
+            self.warm_gh_repos(cx);
         }
         let owner = cx.weak_entity();
         // Read here: the palette cannot read this view while it is being updated.
@@ -651,6 +651,12 @@ pub(crate) struct Palette {
     /// Shown instead of the rows while they load, or when there are none.
     status: Option<SharedString>,
     _load: Option<Task<()>>,
+    /// Watches the cached repository list while "Clone from" shows it.
+    _repos_watch: Option<Subscription>,
+    /// The cached list's revision shown in the rows.
+    repos_seen: u64,
+    /// "Checking for new repositories…" under the search field.
+    note: Option<SharedString>,
     /// A row to highlight once the new list has been drawn (see `rebuild_list`).
     pending_select: Option<IndexPath>,
     _subscription: Subscription,
@@ -695,6 +701,9 @@ impl Palette {
             account: None,
             status: None,
             _load: None,
+            _repos_watch: None,
+            repos_seen: 0,
+            note: None,
             pending_select: None,
             _subscription,
         };
@@ -710,62 +719,81 @@ impl Palette {
             return;
         };
         if matches!(mode, PaletteMode::CloneAccount | PaletteMode::CreateAccount) {
-            owner.update(cx, |o, cx| o.prefetch_hub_repos(cx));
+            owner.update(cx, |o, cx| o.warm_gh_repos(cx));
         }
         self.projects = owner.read(cx).entries_for(mode);
         self.choices = Rc::new(owner.read(cx).choices_for(mode));
         if Self::lists_accounts(mode) && !owner.read(cx).gh_accounts_loaded {
             self.wait_for_accounts(window, cx);
         }
+        self._repos_watch = None;
+        self.note = None;
         if mode != PaletteMode::CloneRepo {
             return;
         }
         let Some(account) = self.account.clone() else {
             return;
         };
-        let (hub, cached) = {
-            let o = owner.read(cx);
-            (
-                o.hub.clone(),
-                o.hub_repos
-                    .get(&crate::new_repo::account_key(&account))
-                    .cloned(),
-            )
-        };
-        match cached {
-            Some(repos) => self.choices = Rc::new(crate::new_repo::repo_choices(&account, &repos)),
-            None => self.status = Some("Loading repositories…".into()),
-        }
-        // Always refresh: the cached list shows at once, the new one replaces it.
-        let busy = owner.read(cx).background.begin(crate::background::GH_REPOS);
-        self._load = Some(cx.spawn_in(window, async move |this, cx| {
-            let _busy = busy;
-            let acc = account.clone();
-            let result = cx.background_spawn(async move { hub.repos(&acc) }).await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                if this.mode != PaletteMode::CloneRepo || this.account.as_ref() != Some(&account) {
-                    return;
-                }
-                match result {
-                    Ok(repos) => {
-                        let _ = this.owner.update(cx, |o, _| {
-                            o.hub_repos
-                                .insert(crate::new_repo::account_key(&account), repos.clone());
-                        });
-                        let rows = crate::new_repo::repo_choices(&account, &repos);
-                        this.status = rows
-                            .is_empty()
-                            .then(|| format!("{} has no repositories.", account.login).into());
-                        this.choices = Rc::new(rows);
-                    }
-                    Err(e) if this.choices.is_empty() => {
-                        this.status = Some(format!("Could not list repositories: {e}").into());
-                    }
-                    Err(e) => tracing::info!(error = %e, "repository list refresh failed"),
-                }
-                this.rebuild_list(window, cx);
-            });
+        // The cached list shows at once (from disk on the first open of a session); a
+        // check for new repositories runs in the background, and its result replaces the
+        // rows when it lands.
+        self.repos_seen = 0;
+        owner.update(cx, |o, cx| {
+            o.use_gh_repos(&account, crate::cached_list::Freshness::CheckNow, cx)
+        });
+        self._repos_watch = Some(cx.observe_in(&owner, window, |this, _, window, cx| {
+            this.sync_repos(window, cx)
         }));
+        self.sync_repos(window, cx);
+    }
+
+    /// Show the cached repository list of the account being cloned from: rows when its
+    /// revision moved, the note while a refresh runs, a status when there is nothing to show.
+    fn sync_repos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode != PaletteMode::CloneRepo {
+            return;
+        }
+        let (Some(account), Some(owner)) = (self.account.clone(), self.owner.upgrade()) else {
+            return;
+        };
+        let (revision, data, checking, error) = {
+            let o = owner.read(cx);
+            match o
+                .gh_lists
+                .repos
+                .get(&crate::new_repo::account_key(&account))
+            {
+                Some(e) => (e.revision, e.data.clone(), e.refreshing, e.error.clone()),
+                // Its disk copy is still being read.
+                None => (0, None, true, None),
+            }
+        };
+        let status: Option<SharedString> = match &data {
+            None if checking => Some("Loading repositories…".into()),
+            None => error.map(|e| format!("Could not list repositories: {e}").into()),
+            Some(repos) if repos.is_empty() && !checking => {
+                Some(format!("{} has no repositories.", account.login).into())
+            }
+            Some(_) => None,
+        };
+        let note: Option<SharedString> =
+            (checking && data.is_some()).then(|| "Checking for new repositories…".into());
+        let rows_changed = revision != self.repos_seen;
+        if !rows_changed && status == self.status && note == self.note {
+            return;
+        }
+        self.status = status;
+        self.note = note;
+        if rows_changed {
+            self.repos_seen = revision;
+            self.choices = Rc::new(
+                data.map(|repos| crate::new_repo::repo_choices(&account, &repos))
+                    .unwrap_or_default(),
+            );
+            self.rebuild_list(window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn lists_accounts(mode: PaletteMode) -> bool {
@@ -794,7 +822,7 @@ impl Palette {
                         }
                         this.status = None;
                         this.choices = Rc::new(owner.read(cx).choices_for(mode));
-                        owner.update(cx, |o, cx| o.prefetch_hub_repos(cx));
+                        owner.update(cx, |o, cx| o.warm_gh_repos(cx));
                         this.rebuild_list(window, cx);
                         true
                     })
@@ -1049,6 +1077,7 @@ impl Palette {
 /// (its `header` slot) on each of its renders, so it holds no state of its own.
 fn render_query(
     badge: Option<SharedString>,
+    note: Option<SharedString>,
     query: &Entity<InputState>,
     palette: &WeakEntity<Palette>,
     cx: &App,
@@ -1091,6 +1120,20 @@ fn render_query(
             None => cx.propagate(),
         })
         .child(Input::new(query).prefix(prefix).appearance(false).p_0())
+        // While a cached list is checked for new entries ("Checking for new repositories…").
+        .when_some(note, |this, note| {
+            this.child(
+                h_flex()
+                    .test_id("palette-note")
+                    .pb_2()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(gpui_kit::component::spinner::Spinner::new().xsmall())
+                    .child(note),
+            )
+        })
         .into_any_element()
 }
 
@@ -1153,8 +1196,11 @@ impl Render for Palette {
         };
         let this = cx.weak_entity();
         let (badge, query, header_owner) = (self.badge(), self.query.clone(), this.clone());
+        let note = self.note.clone();
         command
-            .header(move |_, _, cx| render_query(badge.clone(), &query, &header_owner, cx))
+            .header(move |_, _, cx| {
+                render_query(badge.clone(), note.clone(), &query, &header_owner, cx)
+            })
             .on_confirm(move |ix: IndexPath, window, cx| {
                 let Some(pick) = picks.get(ix.section).and_then(|s| s.get(ix.row)).copied() else {
                     return;
