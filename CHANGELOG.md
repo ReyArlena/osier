@@ -110,6 +110,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Removed
 
+- The "Open project in editor" button in the title bar. Right-click the project in the
+  sidebar, or use "Open project in editor" in the command palette.
 - The Refresh buttons in the title bar and in the Log and Changes headers. Osier already
   refreshes when files change and after its own git operations; `ctrl-r` and the command
   palette's Refresh still reload by hand.

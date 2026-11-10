@@ -292,21 +292,6 @@ impl Osier {
                 })
                 .child(div().flex_1())
                 .child(
-                    Button::new("open-editor")
-                        .test_id("open-editor")
-                        .ghost()
-                        .small()
-                        .icon(Lucide::SquareArrowOutUpRight)
-                        .tooltip("Open project in editor")
-                        .disabled(!has_project)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.open_in_editor(None, window, cx)
-                            }),
-                        ),
-                )
-                .child(Separator::vertical().h_4().mx_1())
-                .child(
                     Button::new("update-branch")
                         .test_id("update-branch")
                         .ghost()
