@@ -1,4 +1,4 @@
-//! Fetch, pull and push, update project, stash prompts and the offers that follow a fetch.
+//! Fetch, pull and push, update branch, stash prompts and the offers that follow a fetch.
 
 use super::*;
 
@@ -224,12 +224,12 @@ fn diverged_with_local_edit() -> (TempRepo, TempRepo) {
 }
 
 #[gpui::test]
-fn ui_update_project_asks_then_remembers(cx: &mut TestAppContext) {
+fn ui_update_branch_asks_then_remembers(cx: &mut TestAppContext) {
     let (repo, other) = diverged_with_local_edit();
     let h = Harness::open(cx, &repo);
     let key = repo.path().to_string_lossy().into_owned();
 
-    h.click(cx, "update-project");
+    h.click(cx, "update-branch");
     assert!(
         h.bounds(cx, "update-dialog").is_some(),
         "asks the first time"
@@ -249,18 +249,18 @@ fn ui_update_project_asks_then_remembers(cx: &mut TestAppContext) {
     // Remembered: the next update runs straight away.
     other.commit_file("more.txt", "m\n", "more remote work");
     other.git(["push", "-q", "origin", "main"]);
-    h.click(cx, "update-project");
+    h.click(cx, "update-branch");
     assert!(h.bounds(cx, "update-dialog").is_none(), "no dialog");
     assert!(repo.path().join("more.txt").exists());
 }
 
 #[gpui::test]
-fn ui_update_project_preselects_and_does_not_remember_by_default(cx: &mut TestAppContext) {
+fn ui_update_branch_preselects_and_does_not_remember_by_default(cx: &mut TestAppContext) {
     let (repo, _other) = diverged_with_local_edit();
     repo.git(["config", "pull.rebase", "true"]);
     let h = Harness::open(cx, &repo);
     let key = repo.path().to_string_lossy().into_owned();
-    h.click(cx, "update-project");
+    h.click(cx, "update-branch");
     // Preselected from pull.rebase; OK without touching anything rebases.
     h.click(cx, "dialog-ok");
     assert_eq!(
@@ -280,7 +280,7 @@ fn ui_update_project_preselects_and_does_not_remember_by_default(cx: &mut TestAp
     // ctrl-t, listed on the Keymap page like the other shortcuts.
     let spec = crate::keymap::actions()
         .into_iter()
-        .find(|s| s.id == "update_project")
+        .find(|s| s.id == "update_branch")
         .expect("in the keymap");
     assert_eq!(spec.defaults, ["ctrl-t"]);
 

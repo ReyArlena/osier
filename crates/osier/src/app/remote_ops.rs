@@ -28,7 +28,7 @@ pub enum RemoteOp {
     Fetch(FetchOptions),
     Pull(PullOptions),
     Push(PushOptions),
-    /// "Update project": a pull with a merge or rebase picked up front and autostash, so it
+    /// "Update branch": a pull with a merge or rebase picked up front and autostash, so it
     /// only stops for real conflicts.
     Update(PullOptions),
 }
@@ -70,8 +70,8 @@ impl RemoteOp {
                 o.remote.as_deref().unwrap_or("origin")
             ),
             RemoteOp::Update(o) => match o.strategy {
-                PullStrategy::Rebase => "Update project (rebase)".into(),
-                _ => "Update project (merge)".into(),
+                PullStrategy::Rebase => "Update branch (rebase)".into(),
+                _ => "Update branch (merge)".into(),
             },
             RemoteOp::Push(o) => match (o.set_upstream, o.force_with_lease) {
                 (_, true) => "Force push with lease".into(),

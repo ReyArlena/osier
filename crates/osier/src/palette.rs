@@ -409,11 +409,11 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "Remote",
-            "Update project",
+            "Update branch",
             Lucide::FolderSync,
-            Some("update_project"),
+            Some("update_branch"),
             true,
-            |o, w, cx| o.update_project(w, cx),
+            |o, w, cx| o.update_branch(w, cx),
         ),
         cmd(
             "Remote",

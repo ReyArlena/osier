@@ -318,12 +318,12 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             SelectPrev
         ),
         spec!(
-            "update_project",
-            "Update project",
+            "update_branch",
+            "Update branch",
             "Remote",
             ["ctrl-t"],
             App,
-            UpdateProject
+            UpdateBranch
         ),
         spec!("fetch", "Fetch", "Remote", ["ctrl-shift-f"], App, Fetch),
         spec!("pull", "Pull", "Remote", ["ctrl-shift-l"], App, Pull),

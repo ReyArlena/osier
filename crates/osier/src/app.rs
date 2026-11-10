@@ -41,7 +41,7 @@ mod selection;
 mod sidebar;
 mod squash_ui;
 pub(crate) mod switch_project;
-mod update_project;
+mod update_branch;
 pub(crate) mod update_ui;
 
 pub(crate) use selection::{first_change, kit_mode, whitespace_applies};
@@ -78,7 +78,7 @@ gpui_kit::actions!(
         FocusFileSearch,
         FocusSettingsSearch,
         CommitStaged,
-        UpdateProject,
+        UpdateBranch,
         Fetch,
         Pull,
         Push,
@@ -1007,7 +1007,7 @@ impl Render for Osier {
             }))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
             .on_action(
-                cx.listener(|this, _: &UpdateProject, window, cx| this.update_project(window, cx)),
+                cx.listener(|this, _: &UpdateBranch, window, cx| this.update_branch(window, cx)),
             )
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
                 this.start_remote(crate::app::remote_ops::RemoteOp::fetch_all(), window, cx)

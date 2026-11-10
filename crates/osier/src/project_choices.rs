@@ -1,5 +1,5 @@
 //! Settings > Projects > Per-project choices: what Osier remembers per repository (the GitHub
-//! account, the diverged-pull method and the Update project method), as pills with an X that
+//! account, the diverged-pull method and the Update branch method), as pills with an X that
 //! forgets one, so Osier asks again next time.
 
 use std::collections::BTreeSet;
@@ -80,7 +80,7 @@ pub(crate) fn choices(o: &Osier) -> Vec<(String, Vec<Pill>)> {
             if let Some(c) = s.update_strategies.get(repo) {
                 pills.push(Pill {
                     kind: Choice::Update,
-                    label: "Update project",
+                    label: "Update branch",
                     value: method(&c.strategy),
                     note: Some(if c.remember {
                         "remembered"
@@ -162,7 +162,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
     .title("Per-project choices")
     .description(
         "What Osier remembers for each project: the GitHub account to use, how to pull when \
-         the branch has diverged, and how Update project joins commits. Forget one with its X \
+         the branch has diverged, and how Update branch joins commits. Forget one with its X \
          and Osier asks again next time.",
     )
     .item(SettingItem::render(move |options, _, cx| {
@@ -173,7 +173,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
         if rows.is_empty() {
             return col.child(div().text_sm().text_color(theme.muted_foreground).child(
                 "Nothing remembered yet. Choices appear here when you pick an account, a \
-                     pull method or an Update project method for a project.",
+                     pull method or an Update branch method for a project.",
             ));
         }
         for (ix, (repo, pills)) in rows.iter().enumerate() {

@@ -56,6 +56,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- "Update project" is now "Update branch", since it only pulls into the current branch. The
+  keymap action is now `update_branch` (still `ctrl-t`); rebind it under that name if you
+  had changed `update_project`. Remembered choices carry over.
 - Commit details list both dates whenever the author and committer dates differ at all
   (amended, rebased or cherry-picked commits), as "Authored" and "Committed" with seconds.
   A commit whose dates match still shows one "Date". Before, the committer date only showed

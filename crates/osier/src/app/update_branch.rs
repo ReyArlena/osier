@@ -1,6 +1,6 @@
-//! "Update project" (title bar, left of Fetch): fetch and join the remote's commits with
+//! "Update branch" (title bar, left of Fetch): fetch and join the remote's commits with
 //! yours by merge or rebase, with uncommitted changes set aside and put back (autostash), so it
-//! only stops for real conflicts. Like PhpStorm's Update Project.
+//! only stops for real conflicts. Like PhpStorm's Update Project, for the current branch.
 //!
 //! The method is asked for each time, preselecting the last choice for the repository,
 //! unless "Remember my choice for this repository" was ticked. That choice is kept apart from
@@ -41,7 +41,7 @@ fn parse_strategy(s: &str) -> PullStrategy {
 }
 
 /// What the repository's git config asks pulls to do on `branch` (`branch.<name>.rebase`,
-/// else `pull.rebase`): the first-time preselection of the Update project dialog. Runs git.
+/// else `pull.rebase`): the first-time preselection of the Update branch dialog. Runs git.
 fn git_config_strategy(repo: &osier_git::Repository, branch: Option<String>) -> PullStrategy {
     let read = |key: &str| osier_git::config::get(repo, key).ok().flatten();
     let value = branch
@@ -63,8 +63,8 @@ fn update_op(strategy: PullStrategy) -> RemoteOp {
 }
 
 impl Osier {
-    /// The title bar's Update project button.
-    pub(crate) fn update_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The title bar's Update branch button.
+    pub(crate) fn update_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(project) = self.active_project() else {
             return;
         };
@@ -114,7 +114,7 @@ impl Osier {
                 (choice.clone(), remember.clone(), weak.clone(), key.clone());
             let (c2, r2) = (choice.clone(), remember.clone());
             dialog
-                .title("Update project")
+                .title("Update branch")
                 .child(
                     v_flex()
                         .test_id("update-dialog")
@@ -158,7 +158,7 @@ impl Osier {
                                     window.refresh();
                                 })
                                 .child(hint(
-                                    "Update project then runs straight away, without asking.",
+                                    "Update branch then runs straight away, without asking.",
                                     cx,
                                 )),
                         )
@@ -214,7 +214,7 @@ impl Osier {
         cx.notify();
     }
 
-    /// Settings > Projects > Per-project choices: forget the Update project choice, so the
+    /// Settings > Projects > Per-project choices: forget the Update branch choice, so the
     /// dialog asks again.
     pub(crate) fn clear_update_strategy(&mut self, repo: &str, cx: &mut Context<Self>) {
         self.state.update_strategies.remove(repo);

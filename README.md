@@ -23,9 +23,9 @@ none of the IDE.
   create/rename/delete/checkout actions and confirmations where data could be lost.
 - **Fetch, pull, push** with progress and cancel, upstream prompts, pull strategy memory per
   repository, `--force-with-lease` only (never plain `--force`).
-- **Update project**, like PhpStorm's: fetch, then merge or rebase (asked, or remembered per
-  repository), with uncommitted changes set aside and put back, stopping only for real
-  conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
+- **Update branch**, like PhpStorm's Update Project: fetch, then merge or rebase (asked, or
+  remembered per repository), with uncommitted changes set aside and put back, stopping only
+  for real conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
 - **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
 - **Three-way merge tool**, like PhpStorm's: yours, the result and theirs side by side, with

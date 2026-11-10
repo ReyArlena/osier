@@ -25,7 +25,7 @@ pub struct State {
     /// Pull strategy last chosen per repository path (`merge` or `rebase`), preselected the
     /// next time the diverged-branch dialog opens.
     pub pull_strategies: std::collections::BTreeMap<String, String>,
-    /// Update project's method per repository path: the last one chosen (preselected in its
+    /// Update branch's method per repository path: the last one chosen (preselected in its
     /// dialog), and whether to skip the dialog and use it straight away. Kept apart from
     /// `pull_strategies`.
     pub update_strategies: std::collections::BTreeMap<String, UpdateChoice>,
@@ -35,7 +35,7 @@ pub struct State {
     pub extra: toml::Table,
 }
 
-/// One repository's Update project choice.
+/// One repository's Update branch choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct UpdateChoice {

@@ -318,16 +318,16 @@ impl Osier {
                 )
                 .child(Separator::vertical().h_4().mx_1())
                 .child(
-                    Button::new("update-project")
-                        .test_id("update-project")
+                    Button::new("update-branch")
+                        .test_id("update-branch")
                         .ghost()
                         .small()
                         .icon(Lucide::FolderSync)
-                        .when(!self.compact, |b| b.label("Update project"))
-                        .tooltip("Update project: fetch, then merge or rebase (ctrl-t)")
+                        .when(!self.compact, |b| b.label("Update branch"))
+                        .tooltip("Update branch: fetch, then merge or rebase (ctrl-t)")
                         .disabled(busy)
                         .on_click(
-                            cx.listener(|this, _, window, cx| this.update_project(window, cx)),
+                            cx.listener(|this, _, window, cx| this.update_branch(window, cx)),
                         ),
                 )
                 .child(self.remote_menu_button("fetch", Lucide::CloudDownload, "Fetch", busy, cx))
