@@ -1,7 +1,7 @@
 //! Running mutating git operations from the UI: background execution, notifications,
 //! history and refresh.
 
-use gpui_kit::component::WindowExt as _;
+use crate::app_dialog::AppDialogExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::v_flex;
@@ -260,7 +260,7 @@ impl Osier {
         let ok_label = ok_label.into();
         let weak = cx.entity().downgrade();
         let on_ok = std::rc::Rc::new(on_ok);
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let on_ok = on_ok.clone();
             // pb_1: the dialog clips at the body's bottom edge, where a last checkbox's focus

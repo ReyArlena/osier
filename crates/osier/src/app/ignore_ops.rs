@@ -5,6 +5,7 @@
 //! (`git rm --cached`, on by default) and untracking offers to ignore it (on by default), so
 //! the file is not added back by the next `git add .`.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -13,7 +14,7 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::ops::ignore::{self, IgnoreFile};
@@ -259,7 +260,7 @@ impl Osier {
             _ => IgnoreFile::Gitignore,
         };
         let is_untrack = matches!(mode, Mode::Untrack(_));
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let c1 = checked.clone();
             let c2 = checked.clone();
             let weak = weak.clone();
@@ -439,7 +440,7 @@ impl Osier {
         };
         let weak = cx.entity().downgrade();
         let files = Rc::new(files);
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let files = files.clone();
             let before = before.clone();

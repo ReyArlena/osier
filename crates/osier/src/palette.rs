@@ -13,6 +13,7 @@
 //! filters the items itself. The header sits inside the `Command` key context, so Up, Down
 //! and Enter still reach the list.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -582,7 +583,7 @@ impl Osier {
             palette.update(cx, |p, cx| p.wait_for_accounts(window, cx));
         }
         let focus_on_mount = Rc::new(Cell::new(true));
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, _| {
             let palette = palette.clone();
             let focus_on_mount = focus_on_mount.clone();
             dialog

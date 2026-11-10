@@ -7,6 +7,7 @@
 //! the diverged-pull dialog's (`State::pull_strategies`); both, and the account choice, are
 //! listed and cleared in Settings > Projects > Per-project choices.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -14,7 +15,7 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::radio::RadioGroup;
-use gpui_kit::component::{Sizable as _, WindowExt as _, v_flex};
+use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
 use osier_config::state::UpdateChoice;
 use osier_git::ops::remote::{PullOptions, PullStrategy};
@@ -101,7 +102,7 @@ impl Osier {
         let choice = Rc::new(Cell::new(usize::from(preselect == PullStrategy::Rebase)));
         let remember = Rc::new(Cell::new(false));
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (choice, remember, weak, key) =
                 (choice.clone(), remember.clone(), weak.clone(), key.clone());
             let (c2, r2) = (choice.clone(), remember.clone());

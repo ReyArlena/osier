@@ -9,11 +9,11 @@
 //! account is remembered for the project. GitHub calls go through [`Hub`] so tests never reach
 //! gh or the network.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
@@ -605,7 +605,7 @@ impl Osier {
         let form = cx.new(|cx| CloneForm::new(source, &parent, window, cx));
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, _| {
             let (form, weak) = (form.clone(), weak.clone());
             dialog
                 .title(title.clone())
@@ -1244,7 +1244,7 @@ impl Osier {
         });
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, _| {
             let (form, weak) = (form.clone(), weak.clone());
             dialog
                 .title(title.clone())

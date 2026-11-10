@@ -21,7 +21,7 @@ fn motion_description(system_reduced_motion: Option<bool>) -> String {
         None => "Your desktop does not say, so following it means on.",
     };
     format!(
-        "Dialogs, menus and toasts slide and fade in, and spinners turn. Off shows them at \
+        "Dialogs, menus and toasts animate in, and spinners turn. Off shows them at \
          once and keeps spinners still, which also helps on a slow machine. {desktop}"
     )
 }

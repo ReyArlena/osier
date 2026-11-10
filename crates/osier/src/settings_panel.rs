@@ -2,6 +2,7 @@
 //! to `Osier::settings` through the entity; every write saves `config.toml` and re-applies.
 //! One child module per page; this file holds the sheet, the shared helpers and `SettingsTarget`.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -181,7 +182,7 @@ impl Osier {
         let view = cx.entity();
         let focus = self.settings_focus.clone();
         let root_focus = self.focus_handle.clone();
-        window.open_dialog(cx, move |dialog, window, _| {
+        window.open_app_dialog(cx, move |dialog, window, _| {
             // Sized from the window each time the layer is built, so it follows resizes.
             let viewport = window.viewport_size();
             let width = (viewport.width * 0.9).min(px(1100.));

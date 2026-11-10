@@ -3,9 +3,9 @@
 //! plans off the UI thread, asks for the message in a dialog that says what will happen, and
 //! selects the new commit afterwards.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::sync::{Arc, Mutex};
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -110,7 +110,7 @@ impl Osier {
         );
         let plan = Arc::new(plan);
         let focus = message.clone();
-        window.open_dialog(cx, move |dialog, window, cx| {
+        window.open_app_dialog(cx, move |dialog, window, cx| {
             let (message, weak, plan, stash) =
                 (message.clone(), weak.clone(), plan.clone(), stash.clone());
             let muted = cx.theme().muted_foreground;

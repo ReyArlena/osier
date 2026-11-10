@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod app;
+mod app_dialog;
 mod askpass;
 mod background;
 mod blame_view;

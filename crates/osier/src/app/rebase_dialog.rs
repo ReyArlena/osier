@@ -1,10 +1,10 @@
 //! Interactive rebase: a dialog listing the commits above `base`, with per-row actions and
 //! reordering. Runs `ops::rebase_interactive::run` with the resulting todo list.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -62,7 +62,7 @@ impl Osier {
         let short = base[..base.len().min(7)].to_string();
         let (flags, autostash) = self.autostash_flags();
         let flags = Rc::new(flags);
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let autostash = autostash.clone();
             let items = items.clone();
             let weak = weak.clone();

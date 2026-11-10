@@ -91,7 +91,7 @@ pub struct Appearance {
     /// (refreshes, project scans, GitHub lists, diff and branch lookups). Fetch, pull, push,
     /// clone and create always show.
     pub show_background_tasks: bool,
-    /// Dialogs, menus and toasts sliding and fading in, and spinners turning: `system`
+    /// Dialogs, menus and toasts animating in, and spinners turning: `system`
     /// follows the desktop's reduced-motion setting, `on` and `off` override it.
     pub animations: Animations,
 }

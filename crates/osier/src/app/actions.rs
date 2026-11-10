@@ -1,9 +1,9 @@
 //! Branch, stash, tag and history actions, plus small input dialogs.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
@@ -104,7 +104,7 @@ impl Osier {
         let weak = cx.entity().downgrade();
         let on_ok = Rc::new(on_ok);
         let focus = input.clone();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let input = input.clone();
             let flags = flags.clone();
             let weak = weak.clone();

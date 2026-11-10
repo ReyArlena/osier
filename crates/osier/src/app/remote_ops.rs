@@ -1,10 +1,10 @@
 //! Fetch, pull and push from the UI: account resolution, progress, cancellation and the
 //! dialogs for the cases that must stop and ask.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
@@ -580,7 +580,7 @@ impl Osier {
         let (flags, autostash) = self.autostash_flags();
         let flags = std::rc::Rc::new(flags);
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (choice, weak, options, repo_path, autostash) = (
                 choice.clone(),
                 weak.clone(),
@@ -683,7 +683,7 @@ impl Osier {
     ) {
         let choice = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (choice, weak, options) = (choice.clone(), weak.clone(), options.clone());
             let c2 = choice.clone();
             dialog
@@ -976,7 +976,7 @@ impl Osier {
         let weak = cx.entity().downgrade();
         let host = needed.host.clone();
         let candidates = needed.candidates.clone();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (choice, always, weak, op, repo_path, candidates, host) = (
                 choice.clone(),
                 always.clone(),

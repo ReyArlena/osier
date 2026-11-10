@@ -42,6 +42,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Dialogs fade in where they sit instead of sliding down from the top, and finish sooner
+  (180ms instead of 250ms).
 - Error toasts put their "View command log" button under the message instead of beside it,
   so the message gets the full width.
 - Settings has a cleaner layout: each group sits on its own card, every page has a short
