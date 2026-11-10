@@ -56,6 +56,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- The sidebar lists the projects found in the scan directories at once, from the last scan
+  (kept on disk); the fresh scan replaces them when it is done.
 - Osier no longer waits on git, file reads or other programs while you use it. These run in
   the background, with the status bar's background-tasks label while they do:
   - opening a project

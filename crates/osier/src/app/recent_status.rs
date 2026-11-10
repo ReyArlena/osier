@@ -386,7 +386,7 @@ impl Osier {
             .pinned
             .iter()
             .chain(self.state.recent.iter())
-            .chain(self.scanned.iter())
+            .chain(self.scanned().iter())
         {
             if !open(p) && !out.contains(p) {
                 out.push(p.clone());

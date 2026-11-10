@@ -726,7 +726,7 @@ fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
     });
     h.read(cx, |osier, cx| {
         assert_eq!(
-            osier.scanned.len(),
+            osier.scanned().len(),
             2,
             "alpha and beta found, plain skipped"
         );

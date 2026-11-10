@@ -11,26 +11,38 @@ use crate::project::Project;
 use crate::sidebar_query::{self, Query, RowStatus};
 
 impl Osier {
-    /// Scan the configured directories for repositories, off the UI thread.
+    /// Scan the configured directories for repositories, off the UI thread. The last result
+    /// for these directories (kept on disk, `cached_list.rs`) shows at once, so the sidebar
+    /// is filled at startup before the scan is back; the fresh result replaces it.
     pub(crate) fn rescan_projects(&mut self, cx: &mut Context<Self>) {
+        use std::hash::{Hash, Hasher};
         let dirs = self.settings.projects.scan_dirs.clone();
         if dirs.is_empty() {
-            self.scanned.clear();
+            self.scan_key = None;
             return;
         }
         let depth = self.settings.projects.scan_depth.unwrap_or(1);
-        let busy = self.background.begin(crate::background::SCAN_DIRS);
-        cx.spawn(async move |this, cx| {
-            let _busy = busy;
-            let found = cx
-                .background_spawn(async move { osier_config::scan::scan(&dirs, depth) })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                this.scanned = found;
-                cx.notify();
-            });
-        })
-        .detach();
+        // Other directories or depth are another list.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (&dirs, depth).hash(&mut hasher);
+        let key = format!("{:016x}", hasher.finish());
+        self.scan_key = Some(key.clone());
+        self.use_list(
+            |o| &mut o.scan_cache,
+            &key,
+            crate::cached_list::Freshness::CheckNow,
+            std::sync::Arc::new(move || Ok(osier_config::scan::scan(&dirs, depth))),
+            cx,
+        );
+    }
+
+    /// Repositories found in the scan directories (the last scan, or its saved copy).
+    pub(crate) fn scanned(&self) -> &[PathBuf] {
+        self.scan_key
+            .as_ref()
+            .and_then(|key| self.scan_cache.get(key))
+            .and_then(|entry| entry.data.as_deref())
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Lower-case filter text from the sidebar box.
@@ -98,7 +110,7 @@ impl Osier {
                 out.push((p.clone(), provider));
             }
         }
-        for p in &self.scanned {
+        for p in self.scanned() {
             if !self.state.open_projects.contains(p)
                 && !self.state.is_pinned(p)
                 && !out.iter().any(|(q, _)| q == p)
