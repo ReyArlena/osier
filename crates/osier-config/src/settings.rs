@@ -346,7 +346,8 @@ pub struct Git {
     pub config_tab: bool,
 }
 
-/// `dim` fades unpushed commits in the graph, `colour` draws them in another colour.
+/// `dim` fades unpushed commits in the graph (and their row's text a little), `colour` draws
+/// them in another colour, `off` draws them like any other commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UnpushedStyle {
@@ -354,6 +355,7 @@ pub enum UnpushedStyle {
     Dim,
     #[serde(alias = "color")]
     Colour,
+    Off,
 }
 
 /// `left` puts ref badges before the commit subject, `right` at the end of the line.
@@ -552,6 +554,10 @@ mod tests {
         for v in ["colour", "color"] {
             let s: Settings = toml::from_str(&format!("[git]\nlog_unpushed = \"{v}\"\n")).unwrap();
             assert_eq!(s.git.log_unpushed, UnpushedStyle::Colour);
+        }
+        {
+            let s: Settings = toml::from_str("[git]\nlog_unpushed = \"off\"\n").unwrap();
+            assert_eq!(s.git.log_unpushed, UnpushedStyle::Off);
         }
     }
 

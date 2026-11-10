@@ -73,26 +73,30 @@ pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
                     vec![
                         ("dim".into(), "Dim".into()),
                         ("colour".into(), "Change colour".into()),
+                        ("off".into(), "Off".into()),
                     ],
                     get(view, |o| {
                         match o.settings.git.log_unpushed {
                             osier_config::settings::UnpushedStyle::Dim => "dim",
                             osier_config::settings::UnpushedStyle::Colour => "colour",
+                            osier_config::settings::UnpushedStyle::Off => "off",
                         }
                         .into()
                     }),
                     set(view, |o, v: SharedString, _| {
-                        o.settings.git.log_unpushed = if v.as_ref() == "colour" {
-                            osier_config::settings::UnpushedStyle::Colour
-                        } else {
-                            osier_config::settings::UnpushedStyle::Dim
+                        o.settings.git.log_unpushed = match v.as_ref() {
+                            "colour" => osier_config::settings::UnpushedStyle::Colour,
+                            "off" => osier_config::settings::UnpushedStyle::Off,
+                            _ => osier_config::settings::UnpushedStyle::Dim,
                         }
                     }),
                 )
                 .default_value("dim".to_string()),
             )
             .description(
-                "How the Log graph shows commits that are on a local branch but no remote yet.",
+                "How the Log shows commits that are on a local branch but no remote yet. Dim \
+                 fades their graph line and, a little, the rest of their row; Off draws them \
+                 like any other commit.",
             ),
         ]))
         .group(SettingGroup::new().title("Pull").items(vec![

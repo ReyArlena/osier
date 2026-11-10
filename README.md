@@ -271,7 +271,7 @@ large_file_bytes = 2097152
 log_page_size = 500
 show_command_log = false
 log_badges = "left"           # Log branch/tag badges: left (before the subject) | right
-log_unpushed = "dim"          # graph marking for commits not on a remote: dim | colour
+log_unpushed = "dim"          # commits not on a remote: dim (graph and, a little, the row) | colour | off
 offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 config_tab = false            # show the Git config panel as a tab (always in the sidebar menu)
 

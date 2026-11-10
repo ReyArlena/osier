@@ -68,7 +68,9 @@ impl Osier {
             osier_config::settings::UnpushedStyle::Colour => {
                 crate::graph::UnpushedPaint::Colour(cx.theme().warning)
             }
+            osier_config::settings::UnpushedStyle::Off => crate::graph::UnpushedPaint::Off,
         };
+        let dim_unpushed_text = matches!(unpushed_paint, crate::graph::UnpushedPaint::Dim(_));
         // Picked commits (click, shift-click range, ctrl-click), highlighted and squashable.
         let picked_rows = Arc::new(project.picked_rows());
         let picked_count = project.picked.len();
@@ -169,9 +171,11 @@ impl Osier {
                                     } else {
                                         Vec::new()
                                     };
+                                    let is_unpushed = unpushed.contains(&commit.hash);
+                                    let dim_text = dim_unpushed_text && is_unpushed;
                                     let marks = crate::graph::UnpushedMarks {
                                         paint: unpushed_paint,
-                                        this: unpushed.contains(&commit.hash),
+                                        this: is_unpushed,
                                         outgoing: unpushed_edges
                                             .get(ix)
                                             .cloned()
@@ -438,43 +442,62 @@ impl Osier {
                                                     commit.is_merge(),
                                                     marks,
                                                 ))
-                                                .child(subject_with_refs(
-                                                    ix,
-                                                    subject,
-                                                    refs,
-                                                    badges_right,
-                                                    (fade_base, fade_hover),
-                                                    cx,
-                                                ))
+                                                // Subject, badges, author, time and hash:
+                                                // faded a little for an unpushed commit when
+                                                // its graph node is dimmed.
                                                 .child(
-                                                    div()
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .flex_none()
-                                                        .max_w(px(110.))
-                                                        .truncate()
-                                                        .child(commit.author_name.clone()),
-                                                )
-                                                .child(
-                                                    super::relative_time_label(
-                                                        ("commit-time", ix),
-                                                        commit.committed_at,
-                                                        cx,
-                                                    )
-                                                    .test_id(|| format!("commit-time:{ix}"))
-                                                    .text_xs()
-                                                    .text_color(muted)
-                                                    .flex_none()
-                                                    .w(px(78.))
-                                                    .text_right(),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .font_family(mono.clone())
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .flex_none()
-                                                        .child(commit.short_hash().to_string()),
+                                                    h_flex()
+                                                        .test_id(|| format!("log-text:{ix}"))
+                                                        .flex_1()
+                                                        .min_w_0()
+                                                        .h_full()
+                                                        .gap_2()
+                                                        .items_center()
+                                                        .when(dim_text, |this| {
+                                                            this.opacity(
+                                                                crate::graph::UNPUSHED_TEXT_OPACITY,
+                                                            )
+                                                        })
+                                                        .child(subject_with_refs(
+                                                            ix,
+                                                            subject,
+                                                            refs,
+                                                            badges_right,
+                                                            (fade_base, fade_hover),
+                                                            cx,
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(muted)
+                                                                .flex_none()
+                                                                .max_w(px(110.))
+                                                                .truncate()
+                                                                .child(commit.author_name.clone()),
+                                                        )
+                                                        .child(
+                                                            super::relative_time_label(
+                                                                ("commit-time", ix),
+                                                                commit.committed_at,
+                                                                cx,
+                                                            )
+                                                            .test_id(|| format!("commit-time:{ix}"))
+                                                            .text_xs()
+                                                            .text_color(muted)
+                                                            .flex_none()
+                                                            .w(px(78.))
+                                                            .text_right(),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .font_family(mono.clone())
+                                                                .text_xs()
+                                                                .text_color(muted)
+                                                                .flex_none()
+                                                                .child(
+                                                                    commit.short_hash().to_string(),
+                                                                ),
+                                                        ),
                                                 )
                                                 .child(
                                                     Button::new(("commit-menu", ix))

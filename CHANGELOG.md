@@ -8,6 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- "Off" for Settings > Git > Log > Commits not pushed yet (`git.log_unpushed = "off"`): the
+  Log draws them like any other commit. Dim stays the default.
 - Every command palette command can now be given a key in Settings > Keymap: Stage all,
   Commit and push, Split layout, Open terminal here and the rest that had none, each
   unbound until you bind it.
@@ -75,6 +77,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- With Commits not pushed yet set to Dim, the rest of an unpushed commit's row (subject,
+  badges, author, time and hash) is faded a little too, not only its graph line.
 - Settings > Keymap names actions exactly as the command palette does, keeping the "…" on
   those that open a dialog or a further choice (Switch project…, Settings…, New branch…).
 - Command palette rows: a submenu row's description sits under its name instead of beside
