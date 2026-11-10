@@ -33,24 +33,21 @@ impl Osier {
             return;
         };
         self.commit_branches_loading = Some(hash.to_string());
-        let busy = self.background.begin(crate::background::BRANCHES);
         let hash = hash.to_string();
-        cx.spawn(async move |this, cx| {
-            let _busy = busy;
-            let h = hash.clone();
-            let found = cx
-                .background_spawn(async move { osier_git::refs::branches_containing(&repo, &h) })
-                .await
-                .unwrap_or_default();
-            let _ = this.update(cx, |this, cx| {
+        let h = hash.clone();
+        // Selected by the user, who waits for it: named in the status bar if it is slow.
+        self.in_background_user_cx(
+            crate::background::BRANCHES,
+            move || osier_git::refs::branches_containing(&repo, &h).unwrap_or_default(),
+            move |this, found, cx| {
                 if this.commit_branches_loading.as_deref() == Some(hash.as_str()) {
                     this.commit_branches_loading = None;
                 }
                 this.commit_branches.insert(hash, found);
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+            cx,
+        );
     }
 
     /// The panel's content for the selected commit.
