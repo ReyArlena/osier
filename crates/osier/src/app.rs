@@ -203,6 +203,8 @@ pub struct Osier {
     pub(crate) diff_error: Option<String>,
     pub(crate) diff_revision: u64,
     pub(crate) log_scroll: UniformListScrollHandle,
+    /// The Changes list (virtualised).
+    pub(crate) changes_scroll: UniformListScrollHandle,
     pub(crate) global_error: Option<String>,
     /// Command log version last rendered, so the panel only re-renders on new records.
     log_version_seen: u64,
@@ -529,6 +531,7 @@ impl Osier {
             diff_error: None,
             diff_revision: 0,
             log_scroll: UniformListScrollHandle::new(),
+            changes_scroll: UniformListScrollHandle::new(),
             global_error: startup_error,
             log_version_seen: 0,
             diff_too_large: None,
