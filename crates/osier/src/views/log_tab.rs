@@ -56,10 +56,11 @@ impl Osier {
         if self.show_reflog {
             return self.render_reflog(cx).into_any_element();
         }
-        let commits = Arc::new(snapshot.commits.clone());
-        let graph = Arc::new(snapshot.graph.clone());
-        let unpushed = Arc::new(snapshot.unpushed.clone());
-        let unpushed_edges = Arc::new(snapshot.unpushed_edges.clone());
+        // Shared with the snapshot: no copy of the page per frame.
+        let commits = snapshot.commits.clone();
+        let graph = snapshot.graph.clone();
+        let unpushed = snapshot.unpushed.clone();
+        let unpushed_edges = snapshot.unpushed_edges.clone();
         let unpushed_paint = match self.settings.git.log_unpushed {
             osier_config::settings::UnpushedStyle::Dim => {
                 crate::graph::UnpushedPaint::Dim(cx.theme().background)

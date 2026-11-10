@@ -15,17 +15,20 @@ use osier_git::status::{RepoStatus, StatusOptions};
 use osier_git::{GitRunner, Repository};
 
 /// Everything read from the repository in one refresh.
+///
+/// The large lists are shared (`Arc`): views take them by pointer instead of copying them on
+/// every frame, and caches can tell a new snapshot's list from the one they were built from.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    pub status: RepoStatus,
+    pub status: std::sync::Arc<RepoStatus>,
     /// Commits on local branches that no remote branch has yet (Log graph marking).
-    pub unpushed: std::collections::HashSet<String>,
+    pub unpushed: std::sync::Arc<std::collections::HashSet<String>>,
     pub branches: Vec<Branch>,
     pub tags: Vec<osier_git::refs::Tag>,
-    pub commits: Vec<Commit>,
-    pub graph: Vec<GraphRow>,
+    pub commits: std::sync::Arc<Vec<Commit>>,
+    pub graph: std::sync::Arc<Vec<GraphRow>>,
     /// Per graph row, which of its edges are links from unpushed commits (drawn marked).
-    pub unpushed_edges: Vec<Vec<bool>>,
+    pub unpushed_edges: std::sync::Arc<Vec<Vec<bool>>>,
     pub stashes: Vec<StashEntry>,
     pub remotes: Vec<Remote>,
     pub reflog: Vec<ReflogEntry>,
@@ -546,12 +549,12 @@ pub fn load_snapshot(
         .map(|e| e.path.clone())
         .collect();
     Ok(Snapshot {
-        status,
+        status: std::sync::Arc::new(status),
         branches,
         tags,
-        commits,
-        graph,
-        unpushed_edges,
+        commits: std::sync::Arc::new(commits),
+        graph: std::sync::Arc::new(graph),
+        unpushed_edges: std::sync::Arc::new(unpushed_edges),
         stashes,
         remotes,
         reflog,
@@ -560,7 +563,7 @@ pub fn load_snapshot(
         worktrees,
         submodules,
         recent_messages,
-        unpushed,
+        unpushed: std::sync::Arc::new(unpushed),
         identity,
         in_progress: repo.in_progress(),
         conflict_markers,
