@@ -1,9 +1,11 @@
 //! Whether the interface animates: `appearance.animations`, and for `system` the desktop's
 //! reduced-motion preference.
 //!
-//! The portal's own key (`org.freedesktop.appearance` `reduced-motion`) is fairly new, so
-//! portals that lack it are asked for GNOME's `enable-animations`, which the GTK and GNOME
-//! portals pass through. With neither, the interface animates.
+//! gpui-base follows the portal's own key (`org.freedesktop.appearance` `reduced-motion`) by
+//! itself, and stops once the app sets the value, which Osier always does: the setting can
+//! override the desktop, and portals that lack that fairly new key are asked for GNOME's
+//! `enable-animations` instead (the GTK and GNOME portals pass it through). With neither,
+//! the interface animates.
 
 use osier_config::settings::Animations;
 

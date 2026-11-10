@@ -7,9 +7,10 @@
 //! is refreshed.
 //!
 //! The rule that follows: change what the main view shows through `cx.notify()` on the view
-//! (or an entity it reads), and when a *global* it reads changes (theme, keymap, tooltip
-//! delay), call `cx.refresh_windows()`. gpui does not track globals, so without it the main
-//! view would keep its old frame until something else redraws it.
+//! (or an entity it reads), and when a *global* it reads changes (keymap, tooltip delay),
+//! call `cx.refresh_windows()`. gpui does not track globals, so without it the main view
+//! would keep its old frame until something else redraws it. gpui-kit's `Theme::update`
+//! already refreshes, so theme changes are covered.
 
 use gpui_kit::*;
 

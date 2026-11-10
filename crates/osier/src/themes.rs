@@ -316,9 +316,8 @@ pub fn apply(name: &str, appearance: &Appearance, cx: &mut App) -> bool {
             syntax_contrast(theme);
         }
     });
-    // The theme is a global: views do not hear about it, and the main view is cached
-    // (`cached_root.rs`), so redraw every window in full.
-    cx.refresh_windows();
+    // No redraw needed here for the cached main view (`cached_root.rs`): `Theme::update`
+    // ends with `cx.refresh_windows()`. `HighContrast` is set in the same step.
     true
 }
 
