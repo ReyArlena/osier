@@ -92,6 +92,14 @@ All notable changes to Osier are documented here. The format follows
   description, the header is a separate bar and the sidebar runs to the dialog's edges.
   Theme cards fill the width in an even grid, and Appearance is split into Theme, Dark
   theme, Light theme, Contrast and Status bar.
+- The install script shows what it is doing:
+  - In a terminal, each step gets a line and a tick (a cross and the reason when it fails),
+    followed by the commands to start with and where to leave a star or feedback.
+  - Missing runtime libraries are named with the install command for just those packages.
+  - Installing over an existing Osier says "Updating Osier" and recommends restarting an
+    Osier that is running. `osier --update` leaves that message to the installer.
+  - Output that is not a terminal (the in-app updater, a log file) stays as plain lines,
+    without colour. `NO_COLOR` turns colour off in a terminal too.
 
 ### Removed
 
