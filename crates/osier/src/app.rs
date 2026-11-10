@@ -289,6 +289,12 @@ pub struct Osier {
     pub(crate) updates: crate::app::update_ui::Updates,
     /// Focus target inside the settings sheet so Escape and its close button reach it.
     pub(crate) settings_focus: FocusHandle,
+    /// Read by the settings dialog and notified when something only settings shows has
+    /// changed (ssh status, install route), so the dialog redraws while the cached main view
+    /// keeps its frame (`redraw_settings`).
+    pub(crate) settings_redraw: Entity<()>,
+    /// The install route is being looked up in the background (`detect_install_route`).
+    pub(crate) install_route_pending: bool,
     /// Waiting for the key after the prefix key (see `prefix.rs`).
     pub(crate) prefix_pending: Option<Subscription>,
     /// The desktop's light/dark preference, for System mode (`system_scheme.rs`).
@@ -550,6 +556,8 @@ impl Osier {
             updates: Default::default(),
             // A tab stop, so moving to the next stop from here lands on the settings search.
             settings_focus: cx.focus_handle().tab_stop(true),
+            settings_redraw: cx.new(|_| ()),
+            install_route_pending: false,
             prefix_pending: None,
             system_scheme: Default::default(),
             system_reduced_motion: None,

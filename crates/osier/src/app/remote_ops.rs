@@ -139,12 +139,22 @@ impl Osier {
                 .background_spawn(async move { osier_auth::gh::accounts() })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                // The title bar shows them, so a change redraws the main view; the same list
+                // again (every settings open reloads it) only redraws settings.
+                let changed = !this.gh_accounts_loaded
+                    || accounts
+                        .as_ref()
+                        .is_ok_and(|list| *list != this.gh_accounts);
                 this.gh_accounts_loaded = true;
                 match accounts {
                     Ok(list) => this.gh_accounts = list,
                     Err(e) => tracing::info!(error = %e, "gh accounts unavailable"),
                 }
-                cx.notify();
+                if changed {
+                    cx.notify();
+                } else {
+                    this.redraw_settings(cx);
+                }
             });
         })
         .detach();

@@ -179,7 +179,7 @@ impl Osier {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.ssh_status = Some(status);
-                cx.notify();
+                this.redraw_settings(cx);
             });
         })
         .detach();
@@ -188,9 +188,9 @@ impl Osier {
                 .ok()
                 .map(|v| v.to_string());
         }
-        // Asks the package managers who owns the binary; once per run is enough.
-        let _ = self.install_route();
+        self.detect_install_route(cx);
         let view = cx.entity();
+        let redraw = self.settings_redraw.clone();
         let focus = self.settings_focus.clone();
         let root_focus = self.focus_handle.clone();
         window.open_app_dialog(cx, move |dialog, window, _| {
@@ -198,7 +198,7 @@ impl Osier {
             let viewport = window.viewport_size();
             let width = (viewport.width * 0.9).min(px(1100.));
             let height = (viewport.height * 0.8).min(px(820.));
-            let (view, focus) = (view.clone(), focus.clone());
+            let (view, focus, redraw) = (view.clone(), focus.clone(), redraw.clone());
             let close_focus = root_focus.clone();
             let root_focus = root_focus.clone();
             dialog
@@ -212,6 +212,8 @@ impl Osier {
                 // Put focus back on the app so shortcuts keep working after closing.
                 .on_close(move |_, window, cx| root_focus.focus(window, cx))
                 .content(move |content, window, cx| {
+                    // Registers the read, so `redraw_settings` reaches this dialog.
+                    redraw.read(cx);
                     let pages = pages(&view, window, cx);
                     // Inside the dialog's 1px border, so one pixel less than its radius.
                     let radius = (cx.theme().radius_lg - px(1.)).max(px(0.));
@@ -271,6 +273,34 @@ impl Osier {
         // it, so move focus in once the layer exists.
         let focus = self.settings_focus.clone();
         window.defer(cx, move |window, cx| focus.focus(window, cx));
+    }
+
+    /// Redraw the settings dialog without invalidating the cached main view: for values only
+    /// settings shows. The dialog reads `settings_redraw` while it renders, so notifying that
+    /// entity redraws the window, and the main view (which never read it) keeps its frame.
+    pub(crate) fn redraw_settings(&self, cx: &mut App) {
+        self.settings_redraw.update(cx, |_, cx| cx.notify());
+    }
+
+    /// Ask the package managers who owns the binary, once per run, in the background: a
+    /// `pacman -Qqo` takes 0.2-0.7s, which on the UI thread stalled the first settings open.
+    /// The About page shows "checking…" until it is known.
+    fn detect_install_route(&mut self, cx: &mut Context<Self>) {
+        if self.updates.route.is_some() || self.install_route_pending {
+            return;
+        }
+        self.install_route_pending = true;
+        cx.spawn(async move |this, cx| {
+            let route = cx
+                .background_spawn(async { crate::install_route::InstallRoute::detect() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.install_route_pending = false;
+                this.updates.route.get_or_insert(route);
+                this.redraw_settings(cx);
+            });
+        })
+        .detach();
     }
 
     /// Save and re-apply after any settings change (panel, config reload).
@@ -432,7 +462,11 @@ impl Osier {
         RuntimeInfo::collect(
             Some(&self.paths),
             self.git_version.clone(),
-            self.updates.route.as_ref().map(|r| r.label()),
+            match &self.updates.route {
+                Some(route) => Some(route.label()),
+                None if self.install_route_pending => Some("checking…".into()),
+                None => None,
+            },
         )
     }
 }

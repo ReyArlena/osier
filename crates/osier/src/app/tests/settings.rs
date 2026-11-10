@@ -75,6 +75,19 @@ fn ssh_status_loads_in_the_background_when_settings_opens(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn install_route_is_looked_up_in_the_background_when_settings_opens(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    assert!(h.read(cx, |o, _| o.updates.route.is_none()));
+    h.keys(cx, "ctrl-,");
+    h.read(cx, |o, _| {
+        assert!(o.updates.route.is_some(), "known once the lookup is back");
+        assert!(!o.install_route_pending);
+    });
+}
+
+#[gpui::test]
 fn higher_contrast_strengthens_selections_and_switches_back_cleanly(cx: &mut TestAppContext) {
     use gpui_kit::component::ActiveTheme as _;
     let repo = TempRepo::new();
