@@ -161,6 +161,9 @@ All notable changes to Osier are documented here. The format follows
 - Unstaging or discarding only some of the changed lines of a hunk failed with "patch does
   not apply" (so did staging some lines of a deleted file): the patch for the selected lines
   was always built for staging. It is now built for the direction it is applied in.
+- In a narrow Changes pane the "Commit" button dropped to its own line while "Commit and
+  Push" stayed next to the checkboxes. The two now stay together and drop to the next line
+  as a pair.
 - "Expand the diff pane" in the command palette shows its shortcut (`ctrl-shift-m`) like
   the other commands.
 - Log rows hid other local branches on a commit with several refs: only the first three

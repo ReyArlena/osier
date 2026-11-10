@@ -676,6 +676,7 @@ impl Osier {
                             .flex_wrap()
                             .child(
                                 Checkbox::new("amend")
+                                    .test_id("amend")
                                     .small()
                                     .label("Amend")
                                     .checked(self.amend)
@@ -692,30 +693,40 @@ impl Osier {
                                         cx.listener(|this, _, _, cx| this.toggle_signoff(cx)),
                                     ),
                             )
-                            .child(div().flex_1())
+                            // Both buttons as one group, pushed to the right: when the
+                            // pane is too narrow they drop to the next line together.
                             .child(
-                                Button::new("commit-push")
-                                    .test_id("commit-push")
-                                    .outline()
-                                    .small()
-                                    .label("Commit and Push")
-                                    .disabled(!can_commit || self.remote_job.is_some())
-                                    .tooltip("Commit, then push the current branch")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.commit_and_push(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("commit")
-                                    .test_id("commit")
-                                    .primary()
-                                    .small()
-                                    .icon(Lucide::GitCommitHorizontal)
-                                    .label(commit_label)
-                                    .disabled(!can_commit)
-                                    .tooltip("Commit (ctrl-enter)")
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.commit(window, cx)),
+                                h_flex()
+                                    .ml_auto()
+                                    .gap_3()
+                                    .gap_y_2()
+                                    .items_center()
+                                    .justify_end()
+                                    .flex_wrap()
+                                    .child(
+                                        Button::new("commit-push")
+                                            .test_id("commit-push")
+                                            .outline()
+                                            .small()
+                                            .label("Commit and Push")
+                                            .disabled(!can_commit || self.remote_job.is_some())
+                                            .tooltip("Commit, then push the current branch")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.commit_and_push(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("commit")
+                                            .test_id("commit")
+                                            .primary()
+                                            .small()
+                                            .icon(Lucide::GitCommitHorizontal)
+                                            .label(commit_label)
+                                            .disabled(!can_commit)
+                                            .tooltip("Commit (ctrl-enter)")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.commit(window, cx)
+                                            })),
                                     ),
                             ),
                     ),

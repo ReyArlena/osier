@@ -673,6 +673,40 @@ fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+fn ui_commit_buttons_wrap_together_in_a_narrow_pane(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.write("a.txt", "two\n");
+    // (centre pane width, whether the buttons fit next to the checkboxes)
+    // The last one is the narrowest the pane goes, too narrow for both buttons side by side.
+    for (center, fits) in [(700., true), (440., false), (260., false)] {
+        let mut state = State::default();
+        state.layout.center_width = Some(center);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        let amend = h.bounds(cx, "amend").expect("amend checkbox");
+        let push = h.bounds(cx, "commit-push").expect("commit and push");
+        let commit = h.bounds(cx, "commit").expect("commit");
+        let pane = h.bounds(cx, "center-pane").expect("center pane");
+        let below = push.origin.y > amend.origin.y + amend.size.height / 2.;
+        assert_eq!(below, !fits, "at {center}: buttons under the checkboxes");
+        if center >= 440. {
+            assert_eq!(
+                push.origin.y, commit.origin.y,
+                "at {center}: both buttons on one line"
+            );
+            assert!(push.origin.x < commit.origin.x, "at {center}: order kept");
+        }
+        for b in [push, commit] {
+            assert!(
+                b.origin.x >= pane.origin.x
+                    && b.origin.x + b.size.width <= pane.origin.x + pane.size.width,
+                "at {center}: nothing runs past the pane"
+            );
+        }
+    }
+}
+
 /// Select lines `start..=end` of the new side of `path` in the diff pane, as dragging over
 /// them does.
 fn select_new_lines(h: &Harness, cx: &mut TestAppContext, path: &'static str, start: usize) {
