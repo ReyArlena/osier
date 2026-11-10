@@ -21,7 +21,7 @@ use crate::test_ids::TestId as _;
 pub(crate) mod actions;
 mod appearance;
 mod changes_ops;
-mod external;
+pub(crate) mod external;
 pub(crate) mod github;
 pub(crate) mod hunk_ops;
 pub(crate) mod ignore_ops;
@@ -252,6 +252,9 @@ pub struct Osier {
     pub(crate) missing_check_running: bool,
     /// Settings, state and cache writes, off the UI thread and in order (`save_queue.rs`).
     pub(crate) saves: crate::save_queue::SaveQueue,
+    /// Known editors found on PATH (name, command), once settings asked (`detect_editors`).
+    pub(crate) detected_editors: Option<Vec<(&'static str, &'static str)>>,
+    pub(crate) detecting_editors: bool,
     /// The snapshot lists `files_badges` is being built from in the background.
     #[allow(clippy::type_complexity)]
     pub(crate) files_badges_pending: Option<(
@@ -512,6 +515,8 @@ impl Osier {
             missing_checked_at: None,
             missing_check_running: false,
             saves: crate::save_queue::SaveQueue::new(),
+            detected_editors: None,
+            detecting_editors: false,
             files_badges_pending: None,
             files_tree_root: None,
             files_tree_folders: std::collections::HashMap::new(),

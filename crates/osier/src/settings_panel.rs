@@ -189,6 +189,7 @@ impl Osier {
                 .map(|v| v.to_string());
         }
         self.detect_install_route(cx);
+        self.detect_editors(cx);
         let view = cx.entity();
         let redraw = self.settings_redraw.clone();
         let focus = self.settings_focus.clone();
@@ -604,7 +605,7 @@ fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<Se
         appearance::appearance_page(view, cx),
         diff::diff_page(view),
         git::git_page(view),
-        editors::editors_page(view),
+        editors::editors_page(view, cx),
         accounts::accounts_page(view, cx),
         projects::projects_page(view, cx),
         keymap::keymap_page(view),

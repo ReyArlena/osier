@@ -9,13 +9,32 @@ use crate::app::Osier;
 
 use super::{get, opt_string, set};
 
-pub(super) fn editors_page(view: &Entity<Osier>) -> SettingPage {
+pub(super) fn editors_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
+    let o = view.read(cx);
     let mut options: Vec<(SharedString, SharedString)> =
         vec![("".into(), "System default (xdg-open)".into())];
-    for (name, template) in Osier::detected_editors() {
+    // Found on PATH in the background when settings opens (`detect_editors`). Until then the
+    // configured editor stays listed, so the dropdown does not jump to "Custom".
+    let detected: Vec<(&str, &str)> = match &o.detected_editors {
+        Some(found) => found.clone(),
+        None => {
+            let current = o.settings.editor.command.clone().unwrap_or_default();
+            crate::app::external::KNOWN_EDITORS
+                .iter()
+                .filter(|(_, _, template)| *template == current)
+                .map(|(_, name, template)| (*name, *template))
+                .collect()
+        }
+    };
+    for (name, template) in detected {
         options.push((template.into(), name.into()));
     }
     options.push(("custom".into(), "Custom command (below)".into()));
+    let found_note = if o.detected_editors.is_some() {
+        "Editors found on PATH."
+    } else {
+        "Detecting editors on PATH…"
+    };
     SettingPage::new("Editors")
         .description("The editor that opens files and repositories from Osier.")
         .icon(Icon::new(Lucide::SquarePen))
@@ -51,7 +70,7 @@ pub(super) fn editors_page(view: &Entity<Osier>) -> SettingPage {
                         )
                         .default_value(""),
                     )
-                    .description("Editors found on PATH."),
+                    .description(found_note),
                     SettingItem::new(
                         "Editor command",
                         SettingField::input(

@@ -60,6 +60,8 @@ All notable changes to Osier are documented here. The format follows
   (kept on disk); the fresh scan replaces them when it is done.
 - Finding the branches that contain a commit (commit details) is named in the status bar
   when it takes a moment.
+- Settings > Editors finds the editors on PATH in the background (it looked on every redraw)
+  and fills the list in once they are found.
 - Osier no longer waits on git, file reads or other programs while you use it. These run in
   the background, with the status bar's background-tasks label while they do:
   - opening a project

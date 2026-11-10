@@ -225,12 +225,28 @@ impl Osier {
 
     /// Editors found on PATH, for the settings panel.
     #[allow(dead_code)]
-    pub(crate) fn detected_editors() -> Vec<(&'static str, &'static str)> {
-        KNOWN_EDITORS
-            .iter()
-            .filter(|(bin, _, _)| on_path(bin))
-            .map(|(_, name, template)| (*name, *template))
-            .collect()
+    /// Find the known editors on PATH (a stat per PATH folder and editor), once, in the
+    /// background; settings shows them when they are in (`detected_editors`).
+    pub(crate) fn detect_editors(&mut self, cx: &mut Context<Self>) {
+        if self.detected_editors.is_some() || self.detecting_editors {
+            return;
+        }
+        self.detecting_editors = true;
+        self.in_background_quiet(
+            || {
+                KNOWN_EDITORS
+                    .iter()
+                    .filter(|(bin, _, _)| on_path(bin))
+                    .map(|(_, name, template)| (*name, *template))
+                    .collect::<Vec<_>>()
+            },
+            |this, found, cx| {
+                this.detecting_editors = false;
+                this.detected_editors = Some(found);
+                this.redraw_settings(cx);
+            },
+            cx,
+        );
     }
 }
 
