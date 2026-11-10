@@ -151,6 +151,24 @@ impl Choice {
     }
 }
 
+/// A row's shortcut as a quiet `<kbd>`-like pill: outlined, muted, monospace.
+fn key_pill(keys: String, cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex_none()
+        .px_1p5()
+        .rounded(theme.radius.half())
+        .border_1()
+        // Faded text colour, not the border token: that one matches the highlighted row's
+        // background and the pill vanished there.
+        .border_color(theme.muted_foreground.opacity(0.35))
+        .text_color(theme.muted_foreground)
+        .font_family(theme.mono_font_family.clone())
+        .text_xs()
+        .line_height(relative(1.5))
+        .child(keys)
+}
+
 /// Case-insensitive substring match on a row's name; an empty query matches everything.
 fn label_matches(label: &str, query: &str) -> bool {
     let q = query.trim().to_lowercase();
@@ -1101,38 +1119,31 @@ impl Palette {
     fn choice_item(&self, ix: usize, cx: &App) -> CommandItem {
         let c = self.choices[ix].clone();
         let muted = cx.theme().muted_foreground;
-        let mono = cx.theme().mono_font_family.clone();
         let keys = c.action.and_then(|id| crate::keymap::hint(id, cx));
         let id = format!("palette-choice:{}", c.label);
         CommandItem::new()
             .label(c.label.clone())
             .icon(c.icon)
-            .child(move |_, _| {
+            .child(move |_, cx| {
                 h_flex()
                     .test_id(|| id.clone())
                     .w_full()
                     .gap_3()
                     .items_center()
-                    .child(Icon::new(c.icon).xsmall())
-                    .child(div().flex_none().child(c.label.clone()))
+                    .child(Icon::new(c.icon).xsmall().flex_none())
+                    // The name, with what it does or where it is underneath.
                     .child(
-                        div()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(muted)
-                            .children(c.detail.clone()),
+                            .child(div().truncate().child(c.label.clone()))
+                            .when_some(c.detail.clone(), |this, detail| {
+                                this.child(
+                                    div().text_xs().text_color(muted).truncate().child(detail),
+                                )
+                            }),
                     )
-                    .when_some(keys.clone(), |this, k| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .font_family(mono.clone())
-                                .child(k),
-                        )
-                    })
+                    .when_some(keys.clone(), |this, k| this.child(key_pill(k, cx)))
                     .when(matches!(c.pick, ChoicePick::CloneAccount(_)), |this| {
                         this.child(Icon::new(Lucide::ChevronRight).xsmall().text_color(muted))
                     })
@@ -1153,14 +1164,17 @@ impl Palette {
     fn command_item(&self, ix: usize, cx: &App) -> CommandItem {
         let c = &self.commands[ix];
         let muted = cx.theme().muted_foreground;
-        let mono = cx.theme().mono_font_family.clone();
         let keys = c.action.and_then(|id| crate::keymap::hint(id, cx));
         let (label, icon, group) = (c.label, c.icon, c.group);
         let submenu = matches!(c.target, Target::Submenu(_));
+        let show_group = self
+            .owner
+            .upgrade()
+            .is_some_and(|o| o.read(cx).settings.palette.show_categories);
         CommandItem::new()
             .label(label)
             .icon(icon)
-            .child(move |_, _| {
+            .child(move |_, cx| {
                 h_flex()
                     .test_id(|| format!("palette-command:{label}"))
                     .w_full()
@@ -1168,16 +1182,16 @@ impl Palette {
                     .items_center()
                     .child(Icon::new(icon).xsmall())
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    .child(div().text_xs().text_color(muted).child(group))
-                    .when_some(keys.clone(), |this, k| {
+                    .when(show_group, |this| {
                         this.child(
                             div()
+                                .test_id(|| format!("palette-category:{label}"))
                                 .text_xs()
                                 .text_color(muted)
-                                .font_family(mono.clone())
-                                .child(k),
+                                .child(group),
                         )
                     })
+                    .when_some(keys.clone(), |this, k| this.child(key_pill(k, cx)))
                     .when(submenu, |this| {
                         this.child(Icon::new(Lucide::ChevronRight).xsmall().text_color(muted))
                     })

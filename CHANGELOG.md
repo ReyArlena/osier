@@ -21,6 +21,8 @@ All notable changes to Osier are documented here. The format follows
 - Settings > Appearance > Command palette > Search inside submenus (`palette.search_submenus`,
   off by default): typing in the command palette also finds projects, branches and the
   Fetch, Update branch, Pull and Push choices, listed after the matching commands.
+- Settings > Appearance > Command palette > Show categories (`palette.show_categories`, off
+  by default): each command's category (General, Remote, Tabs…) next to its shortcut.
 - "Forget GitHub account choice for this project" in the command palette.
 - GitHub lists are kept ready:
   - Covered: repositories to clone, organisations, templates, `.gitignore` and licence lists.
@@ -70,6 +72,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Command palette rows: a submenu row's description sits under its name instead of beside
+  it, shortcuts show in a quiet outlined key badge, and the category next to each command
+  is hidden unless Show categories is on.
 - "Update project" is now "Update branch", since it only pulls into the current branch. The
   keymap action is now `update_branch` (still `ctrl-t`); rebind it under that name if you
   had changed `update_project`. Remembered choices carry over.

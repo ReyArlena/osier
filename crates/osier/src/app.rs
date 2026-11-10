@@ -819,12 +819,16 @@ impl Osier {
         window.defer(cx, move |window, cx| root_focus.focus(window, cx));
         // Dev aid for screenshots: OSIER_OPEN_SETTINGS=1 opens the settings sheet at startup.
         // The sheet needs gpui-kit's root, which exists only after this view is installed.
-        // OSIER_OPEN_PALETTE=root|switch_project|switch_branch|clone|create opens the command
-        // palette on that mode.
+        // OSIER_OPEN_PALETTE=root|switch_project|switch_branch|update_branch|fetch|pull|push|
+        // clone|create opens the command palette on that mode.
         let palette = match std::env::var("OSIER_OPEN_PALETTE").as_deref() {
             Ok("root") => Some(crate::palette::PaletteMode::Root),
             Ok("switch_project") => Some(crate::palette::PaletteMode::SwitchProject),
             Ok("switch_branch") => Some(crate::palette::PaletteMode::SwitchBranch),
+            Ok("update_branch") => Some(crate::palette::PaletteMode::UpdateBranch),
+            Ok("fetch") => Some(crate::palette::PaletteMode::Fetch),
+            Ok("pull") => Some(crate::palette::PaletteMode::Pull),
+            Ok("push") => Some(crate::palette::PaletteMode::Push),
             Ok("clone") => Some(crate::palette::PaletteMode::CloneAccount),
             Ok("create") => Some(crate::palette::PaletteMode::CreateAccount),
             _ => None,

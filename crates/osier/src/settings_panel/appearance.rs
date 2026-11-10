@@ -352,6 +352,19 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         .group(
             SettingGroup::new().title("Command palette").item(
                 SettingItem::new(
+                    "Show categories",
+                    SettingField::switch(
+                        get(view, |o| o.settings.palette.show_categories),
+                        set(view, |o, v: bool, _| o.settings.palette.show_categories = v),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "Show each command's category (General, Remote, Tabs…) next to its \
+                     shortcut.",
+                ),
+            ).item(
+                SettingItem::new(
                     "Search inside submenus",
                     SettingField::switch(
                         get(view, |o| o.settings.palette.search_submenus),

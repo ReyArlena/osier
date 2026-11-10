@@ -32,6 +32,8 @@ pub struct Palette {
     /// Searching the commands also lists matching rows of their submenus (Fetch, Push, Switch
     /// branch, Switch project…), after the commands themselves.
     pub search_submenus: bool,
+    /// Each command's category (General, Remote, Tabs…) beside its shortcut.
+    pub show_categories: bool,
 }
 
 /// GitHub lists Osier keeps ready (repositories to clone, organisations, templates,

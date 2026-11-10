@@ -492,3 +492,22 @@ fn ui_notifications_panel_keeps_every_toast(cx: &mut TestAppContext) {
     h.click(cx, "notifications");
     h.read(cx, |o, _| assert!(!o.command_log_visible));
 }
+
+#[gpui::test]
+fn ui_palette_categories_show_only_when_asked(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "Log tab");
+    assert!(h.bounds(cx, "palette-command:Log tab").is_some());
+    assert!(
+        h.bounds(cx, "palette-category:Log tab").is_none(),
+        "hidden by default"
+    );
+    h.keys(cx, "escape escape");
+    h.act(cx, |o, _, _| o.settings.palette.show_categories = true);
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "Log tab");
+    assert!(h.bounds(cx, "palette-category:Log tab").is_some());
+}

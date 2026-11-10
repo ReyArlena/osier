@@ -238,6 +238,7 @@ animation_ms = 180            # how long a dialog fades in (60 to 400); switches
 
 [palette]
 search_submenus = false       # typing in the palette also finds projects, branches and remote choices
+show_categories = false       # each command's category (General, Remote...) next to its shortcut
 
 [keys]
 prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key
