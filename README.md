@@ -113,7 +113,7 @@ Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directori
 (Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
 projects in the command palette. `ctrl-shift-b` does the same for branches. In the palette,
 Fetch…, Pull…, Push… and Update branch… offer the same choices as the title bar's menus. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
-`ctrl-t` updates the branch, `ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-p` or
+`ctrl-t` and `ctrl-shift-f/l/p` open the update branch/fetch/pull/push choices (Enter runs the first), `` ctrl-` `` shows the git command log, `ctrl-p` or
 `F1` opens the command palette, `ctrl-,` opens settings (each closes again when pressed a
 second time), `/` searches projects, `?` searches files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
 text field.
@@ -235,6 +235,9 @@ row_menu_buttons = false      # show a ... menu button on list rows (right-click
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
 animations = "system"         # system | on | off: dialogs, menus and toasts animate in, spinners turn
 animation_ms = 180            # how long a dialog fades in (60 to 400); switches and tabs scale with it
+
+[palette]
+search_submenus = false       # typing in the palette also finds projects, branches and remote choices
 
 [keys]
 prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key

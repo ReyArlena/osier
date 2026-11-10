@@ -350,6 +350,23 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
             ),
         )
         .group(
+            SettingGroup::new().title("Command palette").item(
+                SettingItem::new(
+                    "Search inside submenus",
+                    SettingField::switch(
+                        get(view, |o| o.settings.palette.search_submenus),
+                        set(view, |o, v: bool, _| o.settings.palette.search_submenus = v),
+                    )
+                    .default_value(false),
+                )
+                .description(
+                    "Typing in the command palette also finds the rows of its submenus: \
+                     projects, branches, and the Fetch, Update branch, Pull and Push choices. \
+                     They are listed after the matching commands.",
+                ),
+            ),
+        )
+        .group(
             SettingGroup::new()
                 .title("Fonts")
                 .description("Leave empty to use the theme's fonts.")

@@ -327,15 +327,113 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "update_branch",
-            "Update branch",
+            "Update branch…",
             "Remote",
             ["ctrl-t"],
             App,
             UpdateBranch
         ),
-        spec!("fetch", "Fetch", "Remote", ["ctrl-shift-f"], App, Fetch),
-        spec!("pull", "Pull", "Remote", ["ctrl-shift-l"], App, Pull),
-        spec!("push", "Push", "Remote", ["ctrl-shift-p"], App, Push),
+        spec!("fetch", "Fetch…", "Remote", ["ctrl-shift-f"], App, Fetch),
+        spec!("pull", "Pull…", "Remote", ["ctrl-shift-l"], App, Pull),
+        spec!("push", "Push…", "Remote", ["ctrl-shift-p"], App, Push),
+        // The rows of those submenus, unbound until you bind them.
+        spec!(
+            "update_branch_now",
+            "Update branch",
+            "Remote",
+            [],
+            App,
+            UpdateBranchNow
+        ),
+        spec!(
+            "update_branch_merge",
+            "Update branch with merge",
+            "Remote",
+            [],
+            App,
+            UpdateBranchMerge
+        ),
+        spec!(
+            "update_branch_rebase",
+            "Update branch with rebase",
+            "Remote",
+            [],
+            App,
+            UpdateBranchRebase
+        ),
+        spec!(
+            "forget_update_method",
+            "Forget the update method for this project",
+            "Remote",
+            [],
+            App,
+            ForgetUpdateMethod
+        ),
+        spec!(
+            "fetch_all",
+            "Fetch all remotes",
+            "Remote",
+            [],
+            App,
+            FetchAll
+        ),
+        spec!(
+            "fetch_prune",
+            "Fetch all and prune deleted branches",
+            "Remote",
+            [],
+            App,
+            FetchPrune
+        ),
+        spec!(
+            "fetch_origin",
+            "Fetch origin",
+            "Remote",
+            [],
+            App,
+            FetchOrigin
+        ),
+        spec!(
+            "pull_ff_only",
+            "Pull (fast-forward only)",
+            "Remote",
+            [],
+            App,
+            PullFfOnly
+        ),
+        spec!(
+            "pull_rebase",
+            "Pull with rebase",
+            "Remote",
+            [],
+            App,
+            PullRebase
+        ),
+        spec!(
+            "pull_merge",
+            "Pull with merge",
+            "Remote",
+            [],
+            App,
+            PullMerge
+        ),
+        spec!("push_branch", "Push", "Remote", [], App, PushBranch),
+        spec!(
+            "push_set_upstream",
+            "Push and set upstream (origin)",
+            "Remote",
+            [],
+            App,
+            PushSetUpstream
+        ),
+        spec!(
+            "force_push",
+            "Force push with lease",
+            "Remote",
+            [],
+            App,
+            ForcePush
+        ),
     ];
     all.extend(crate::app::row_actions::specs());
     all
@@ -775,9 +873,26 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len());
-        // Context-menu actions, the prefix key, clone and create start unbound; everything
-        // else has keys.
-        let unbound = [super::PREFIX_KEY, "clone_repository", "create_repository"];
+        // Context-menu actions, the prefix key, clone and create, and the rows of the
+        // palette's remote submenus start unbound; everything else has keys.
+        let unbound = [
+            super::PREFIX_KEY,
+            "clone_repository",
+            "create_repository",
+            "update_branch_now",
+            "update_branch_merge",
+            "update_branch_rebase",
+            "forget_update_method",
+            "fetch_all",
+            "fetch_prune",
+            "fetch_origin",
+            "pull_ff_only",
+            "pull_rebase",
+            "pull_merge",
+            "push_branch",
+            "push_set_upstream",
+            "force_push",
+        ];
         assert!(
             all.iter()
                 .filter(|a| a.scope != Scope::Row && !unbound.contains(&a.id))

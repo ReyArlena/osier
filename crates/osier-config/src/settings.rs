@@ -19,9 +19,19 @@ pub struct Settings {
     pub keys: Keys,
     pub updates: Updates,
     pub github: GitHub,
+    pub palette: Palette,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// The command palette.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Palette {
+    /// Searching the commands also lists matching rows of their submenus (Fetch, Push, Switch
+    /// branch, Switch project…), after the commands themselves.
+    pub search_submenus: bool,
 }
 
 /// GitHub lists Osier keeps ready (repositories to clone, organisations, templates,

@@ -298,7 +298,10 @@ impl Osier {
                         .small()
                         .icon(Lucide::FolderSync)
                         .when(!self.compact, |b| b.label("Update branch"))
-                        .tooltip("Update branch: fetch, then merge or rebase (ctrl-t)")
+                        .tooltip(match crate::keymap::hint("update_branch_now", cx) {
+                            Some(k) => format!("Update branch: fetch, then merge or rebase ({k})"),
+                            None => "Update branch: fetch, then merge or rebase".to_string(),
+                        })
                         .disabled(busy)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.update_branch(window, cx)),

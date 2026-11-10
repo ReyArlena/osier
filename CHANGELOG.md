@@ -15,8 +15,12 @@ All notable changes to Osier are documented here. The format follows
 - In the command palette, Fetch…, Pull…, Push… and Update branch… open submenus with the
   same choices as the title bar's dropdowns (fetch and prune, pull with rebase, push and set
   upstream, force push with lease and so on). Update branch… can also merge or rebase just
-  this once, or forget the method remembered for the project. The row a shortcut runs shows
-  its key.
+  this once, or forget the method remembered for the project. Each row is also an action in
+  Settings > Keymap (`fetch_prune`, `push_set_upstream`, `update_branch_rebase`…), unbound
+  until you give it a key, and shows its key in the palette once bound.
+- Settings > Appearance > Command palette > Search inside submenus (`palette.search_submenus`,
+  off by default): typing in the command palette also finds projects, branches and the
+  Fetch, Update branch, Pull and Push choices, listed after the matching commands.
 - "Forget GitHub account choice for this project" in the command palette.
 - GitHub lists are kept ready:
   - Covered: repositories to clone, organisations, templates, `.gitignore` and licence lists.
@@ -69,6 +73,10 @@ All notable changes to Osier are documented here. The format follows
 - "Update project" is now "Update branch", since it only pulls into the current branch. The
   keymap action is now `update_branch` (still `ctrl-t`); rebind it under that name if you
   had changed `update_project`. Remembered choices carry over.
+- `ctrl-shift-f`, `ctrl-shift-l`, `ctrl-shift-p` and `ctrl-t` open the command palette's
+  Fetch, Pull, Push and Update branch submenus instead of running straight away; Enter runs
+  the first row, which does what the key did before. Bind a row's own action in Settings >
+  Keymap to skip the submenu. The title bar buttons are unchanged.
 - Commit details list both dates whenever the author and committer dates differ at all
   (amended, rebased or cherry-picked commits), as "Authored" and "Committed" with seconds.
   A commit whose dates match still shows one "Date". Before, the committer date only showed

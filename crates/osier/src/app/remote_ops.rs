@@ -38,6 +38,7 @@ impl RemoteOp {
         RemoteOp::Fetch(FetchOptions::default())
     }
 
+    #[cfg(test)]
     pub fn pull_default() -> Self {
         RemoteOp::Pull(PullOptions::default())
     }

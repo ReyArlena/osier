@@ -277,22 +277,28 @@ fn ui_update_branch_preselects_and_does_not_remember_by_default(cx: &mut TestApp
         assert_eq!(choice.strategy, "rebase");
         assert!(!choice.remember, "unticked by default");
     });
-    // ctrl-t, listed on the Keymap page like the other shortcuts.
-    let spec = crate::keymap::actions()
-        .into_iter()
-        .find(|s| s.id == "update_branch")
-        .expect("in the keymap");
-    assert_eq!(spec.defaults, ["ctrl-t"]);
+    // ctrl-t opens the Update branch submenu; its first row updates as the button does.
+    // The rows are keymap actions of their own, unbound by default.
+    let specs = crate::keymap::actions();
+    let defaults = |id: &str| {
+        specs
+            .iter()
+            .find(|s| s.id == id)
+            .expect("in the keymap")
+            .defaults
+    };
+    assert_eq!(defaults("update_branch"), ["ctrl-t"]);
+    assert!(defaults("update_branch_now").is_empty());
 
-    h.keys(cx, "ctrl-t");
+    h.keys(cx, "ctrl-t enter");
     assert!(h.bounds(cx, "update-dialog").is_some(), "still asks");
     // Shortcuts keep working after a dialog closes, by Escape or by its button.
     h.keys(cx, "escape");
     assert!(h.bounds(cx, "update-dialog").is_none());
-    h.keys(cx, "ctrl-t");
+    h.keys(cx, "ctrl-t enter");
     assert!(h.bounds(cx, "update-dialog").is_some(), "after Escape");
     h.click(cx, "dialog-cancel");
-    h.keys(cx, "ctrl-t");
+    h.keys(cx, "ctrl-t enter");
     assert!(h.bounds(cx, "update-dialog").is_some(), "after Cancel");
 }
 
@@ -642,5 +648,101 @@ fn ui_switch_branch_lists_other_branches_and_flips(cx: &mut TestAppContext) {
         repo.git(["rev-parse", "--abbrev-ref", "away@{upstream}"])
             .trim(),
         "origin/away"
+    );
+}
+
+#[gpui::test]
+fn ui_remote_shortcuts_open_their_submenus_and_rows_can_be_bound(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let _bare = repo.add_bare_origin();
+    let h = Harness::open(cx, &repo);
+    let open = |h: &Harness, cx: &mut TestAppContext| h.has_settings(cx);
+
+    h.keys(cx, "ctrl-shift-p");
+    assert!(
+        h.bounds(cx, "palette-choice:Push").is_some(),
+        "Push submenu"
+    );
+    h.keys(cx, "ctrl-shift-f");
+    assert!(
+        h.bounds(cx, "palette-choice:Fetch all remotes").is_some(),
+        "another remote key switches submenu"
+    );
+    h.keys(cx, "ctrl-shift-f");
+    assert!(!open(&h, cx), "its own key closes it");
+    for id in [
+        "fetch_all",
+        "pull_ff_only",
+        "push_branch",
+        "push_set_upstream",
+    ] {
+        assert!(
+            crate::keymap::actions()
+                .iter()
+                .find(|s| s.id == id)
+                .is_some_and(|s| s.defaults.is_empty()),
+            "{id} is unbound by default"
+        );
+    }
+
+    // Bind a row: its key runs it straight away, and the row shows the key.
+    h.act(cx, |o, _, cx| {
+        o.start_key_recording("push_set_upstream", cx)
+    });
+    h.keys(cx, "ctrl-alt-u");
+    h.keys(cx, "ctrl-shift-p");
+    let row = h
+        .bounds(cx, "palette-choice:Push and set upstream (origin)")
+        .expect("row");
+    assert!(row.size.width > gpui::px(0.));
+    h.keys(cx, "escape escape");
+    h.keys(cx, "ctrl-alt-u");
+    assert!(!open(&h, cx));
+    assert_eq!(
+        repo.git(["rev-parse", "--abbrev-ref", "main@{upstream}"])
+            .trim(),
+        "origin/main",
+        "pushed and set upstream"
+    );
+}
+
+#[gpui::test]
+fn ui_palette_search_reaches_submenu_rows_only_when_asked(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.checkout_new("pushy-feature");
+    repo.commit_file("b.txt", "b\n", "work");
+    repo.checkout("main");
+    let h = Harness::open(cx, &repo);
+
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "push");
+    assert!(h.bounds(cx, "palette-command:Push…").is_some());
+    assert!(
+        h.bounds(cx, "palette-choice:Push and set upstream (origin)")
+            .is_none(),
+        "off by default"
+    );
+    h.keys(cx, "escape escape");
+
+    h.act(cx, |o, _, _| o.settings.palette.search_submenus = true);
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "push");
+    let y = |h: &Harness, cx: &mut TestAppContext, id: &str| {
+        h.bounds(cx, id)
+            .unwrap_or_else(|| panic!("{id} listed"))
+            .origin
+            .y
+    };
+    let command = y(&h, cx, "palette-command:Push…");
+    let branch = y(&h, cx, "palette-choice:pushy-feature");
+    let row = y(&h, cx, "palette-choice:Push and set upstream (origin)");
+    assert!(command < branch && command < row, "commands come first");
+    // Enter on a submenu row runs it like the submenu would.
+    h.click(cx, "palette-choice:pushy-feature");
+    assert_eq!(
+        repo.git(["branch", "--show-current"]).trim(),
+        "pushy-feature"
     );
 }

@@ -83,6 +83,19 @@ gpui_kit::actions!(
         Fetch,
         Pull,
         Push,
+        UpdateBranchNow,
+        UpdateBranchMerge,
+        UpdateBranchRebase,
+        ForgetUpdateMethod,
+        FetchAll,
+        FetchPrune,
+        FetchOrigin,
+        PullFfOnly,
+        PullRebase,
+        PullMerge,
+        PushBranch,
+        PushSetUpstream,
+        ForcePush,
         PrefixKey,
     ]
 );
@@ -993,9 +1006,7 @@ impl Render for Osier {
                 this.open_command_palette(window, cx)
             }))
             .on_action(cx.listener(|this, _: &SwitchBranch, window, cx| {
-                if this.active_project().is_some() {
-                    this.open_palette_in(crate::palette::PaletteMode::SwitchBranch, window, cx)
-                }
+                this.open_palette_in(crate::palette::PaletteMode::SwitchBranch, window, cx)
             }))
             .on_action(cx.listener(|this, _: &SwitchProject, window, cx| {
                 this.open_palette_in(crate::palette::PaletteMode::SwitchProject, window, cx)
@@ -1013,18 +1024,63 @@ impl Render for Osier {
                 this.focus_file_search(window, cx)
             }))
             .on_action(cx.listener(|this, _: &CommitStaged, window, cx| this.commit(window, cx)))
-            .on_action(
-                cx.listener(|this, _: &UpdateBranch, window, cx| this.update_branch(window, cx)),
-            )
+            .on_action(cx.listener(|this, _: &UpdateBranch, window, cx| {
+                this.open_palette_in(crate::palette::PaletteMode::UpdateBranch, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &Fetch, window, cx| {
-                this.start_remote(crate::app::remote_ops::RemoteOp::fetch_all(), window, cx)
+                this.open_palette_in(crate::palette::PaletteMode::Fetch, window, cx)
             }))
             .on_action(cx.listener(|this, _: &Pull, window, cx| {
-                this.start_remote(crate::app::remote_ops::RemoteOp::pull_default(), window, cx)
+                this.open_palette_in(crate::palette::PaletteMode::Pull, window, cx)
             }))
             .on_action(cx.listener(|this, _: &Push, window, cx| {
-                this.start_remote(crate::app::remote_ops::RemoteOp::push_default(), window, cx)
+                this.open_palette_in(crate::palette::PaletteMode::Push, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &UpdateBranchNow, w, cx| {
+                this.run_menu_action("update_branch_now", w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &UpdateBranchMerge, w, cx| {
+                this.run_menu_action("update_branch_merge", w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &UpdateBranchRebase, w, cx| {
+                this.run_menu_action("update_branch_rebase", w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ForgetUpdateMethod, w, cx| {
+                this.run_menu_action("forget_update_method", w, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &FetchAll, w, cx| this.run_menu_action("fetch_all", w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &FetchPrune, w, cx| {
+                    this.run_menu_action("fetch_prune", w, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &FetchOrigin, w, cx| {
+                this.run_menu_action("fetch_origin", w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PullFfOnly, w, cx| {
+                this.run_menu_action("pull_ff_only", w, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &PullRebase, w, cx| {
+                    this.run_menu_action("pull_rebase", w, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &PullMerge, w, cx| this.run_menu_action("pull_merge", w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &PushBranch, w, cx| {
+                    this.run_menu_action("push_branch", w, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &PushSetUpstream, w, cx| {
+                this.run_menu_action("push_set_upstream", w, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &ForcePush, w, cx| this.run_menu_action("force_push", w, cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleStageSelected, window, cx| {
                 this.toggle_stage_selected(window, cx)
             }))

@@ -55,8 +55,21 @@ pub(crate) enum PaletteMode {
 }
 
 impl PaletteMode {
+    /// The remote submenus, in the order the commands list them.
+    pub(crate) const REMOTE: [PaletteMode; 4] = [
+        PaletteMode::Fetch,
+        PaletteMode::UpdateBranch,
+        PaletteMode::Pull,
+        PaletteMode::Push,
+    ];
+
+    /// Submenus about the open project: nothing to list without one.
+    fn needs_project(self) -> bool {
+        matches!(self, PaletteMode::SwitchBranch) || Self::REMOTE.contains(&self)
+    }
+
     /// The badge in the query field; `None` for the commands themselves.
-    fn badge(self) -> Option<&'static str> {
+    pub(crate) fn badge(self) -> Option<&'static str> {
         match self {
             PaletteMode::Root => None,
             PaletteMode::SwitchProject => Some("Switch project"),
@@ -136,6 +149,12 @@ impl Choice {
                 .as_ref()
                 .is_some_and(|d| d.to_lowercase().contains(&q))
     }
+}
+
+/// Case-insensitive substring match on a row's name; an empty query matches everything.
+fn label_matches(label: &str, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty() || label.to_lowercase().contains(&q)
 }
 
 /// What choosing a command does.
@@ -444,7 +463,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Fetch…",
             Lucide::CloudDownload,
-            None,
+            Some("fetch"),
             true,
             PaletteMode::Fetch,
         ),
@@ -452,7 +471,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Update branch…",
             Lucide::FolderSync,
-            None,
+            Some("update_branch"),
             true,
             PaletteMode::UpdateBranch,
         ),
@@ -460,7 +479,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Pull…",
             Lucide::ArrowDown,
-            None,
+            Some("pull"),
             true,
             PaletteMode::Pull,
         ),
@@ -468,7 +487,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Remote",
             "Push…",
             Lucide::ArrowUp,
-            None,
+            Some("push"),
             true,
             PaletteMode::Push,
         ),
@@ -612,6 +631,9 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let has_project = self.active_project().is_some();
+        if mode.needs_project() && !has_project {
+            return;
+        }
         let commands: Rc<Vec<PaletteCommand>> = Rc::new(
             commands()
                 .into_iter()
@@ -641,6 +663,12 @@ impl Osier {
                     // the app view, so they never reach the app's handlers. The key for the
                     // mode on screen closes the palette, the other one switches to its mode.
                     let (p1, p2, p3) = (palette.clone(), palette.clone(), palette.clone());
+                    let (p4, p5, p6, p7) = (
+                        palette.clone(),
+                        palette.clone(),
+                        palette.clone(),
+                        palette.clone(),
+                    );
                     content.child(
                         v_flex()
                             .w_full()
@@ -655,6 +683,20 @@ impl Osier {
                             .on_action(move |_: &crate::app::SwitchBranch, window, cx| {
                                 p3.update(cx, |p, cx| {
                                     p.toggle(PaletteMode::SwitchBranch, window, cx)
+                                })
+                            })
+                            .on_action(move |_: &crate::app::Fetch, window, cx| {
+                                p4.update(cx, |p, cx| p.toggle(PaletteMode::Fetch, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::Pull, window, cx| {
+                                p5.update(cx, |p, cx| p.toggle(PaletteMode::Pull, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::Push, window, cx| {
+                                p6.update(cx, |p, cx| p.toggle(PaletteMode::Push, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::UpdateBranch, window, cx| {
+                                p7.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::UpdateBranch, window, cx)
                                 })
                             })
                             .child(palette.clone()),
@@ -672,6 +714,9 @@ impl Osier {
     /// The rows a submenu lists, read when it is entered.
     fn entries_for(&self, mode: PaletteMode) -> Rc<Vec<ProjectEntry>> {
         Rc::new(match mode {
+            PaletteMode::Root if self.settings.palette.search_submenus => {
+                self.switch_project_entries()
+            }
             PaletteMode::Root => Vec::new(),
             PaletteMode::SwitchProject => self.switch_project_entries(),
             _ => Vec::new(),
@@ -685,6 +730,7 @@ impl Osier {
                 crate::new_repo::account_choices(self, mode == PaletteMode::CloneAccount)
             }
             PaletteMode::SwitchBranch => self.branch_choices(),
+            PaletteMode::Root => self.searchable_sub_choices(),
             _ => self.remote_choices(mode),
         }
     }
@@ -901,9 +947,17 @@ impl Palette {
     /// Matching choices grouped by section, in their listed order.
     fn choice_sections(&self, cx: &App) -> Vec<(SharedString, Vec<usize>)> {
         let query = self.query_text(cx);
+        let root = self.mode == PaletteMode::Root;
         let mut out: Vec<(SharedString, Vec<usize>)> = Vec::new();
         for (ix, c) in self.choices.iter().enumerate() {
-            if !c.matches(&query) {
+            // From the commands list only the row's own name counts: a branch's last commit
+            // or a submenu's name would bring in rows nobody searched for.
+            let hit = if root {
+                label_matches(&c.label, &query)
+            } else {
+                c.matches(&query)
+            };
+            if !hit {
                 continue;
             }
             match out.iter_mut().find(|(s, _)| *s == c.section) {
@@ -921,6 +975,13 @@ impl Palette {
     /// The shortcut for `mode` pressed while the palette is open: close it when it already
     /// shows `mode`, else switch to it.
     fn toggle(&mut self, mode: PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        let has_project = self
+            .owner
+            .upgrade()
+            .is_some_and(|o| o.read(cx).active_project().is_some());
+        if mode.needs_project() && !has_project {
+            return;
+        }
         if self.mode == mode {
             window.close_dialog(cx);
         } else {
@@ -1029,27 +1090,9 @@ impl Palette {
                     return;
                 }
                 window.close_dialog(cx);
-                let _ = self.owner.update(cx, |o, cx| match pick {
-                    ChoicePick::CloneOther => o.prompt_clone(None, window, cx),
-                    ChoicePick::CloneRepo(account, repo) => {
-                        o.prompt_clone(Some((account, repo)), window, cx)
-                    }
-                    ChoicePick::CreateAccount(account) => {
-                        o.prompt_create(Some(account), window, cx)
-                    }
-                    ChoicePick::CreateLocal => o.prompt_create(None, window, cx),
-                    ChoicePick::Remote(op) => o.start_remote(op, window, cx),
-                    ChoicePick::ForcePush => o.confirm_force_push(Default::default(), window, cx),
-                    ChoicePick::Update(None) => o.update_branch(window, cx),
-                    ChoicePick::Update(Some(strategy)) => {
-                        o.update_branch_with(strategy, window, cx)
-                    }
-                    ChoicePick::ForgetUpdateMethod => o.forget_update_method(window, cx),
-                    ChoicePick::Checkout { name, remote } => {
-                        o.checkout_branch(name, remote, window, cx)
-                    }
-                    ChoicePick::CloneAccount(_) => {}
-                });
+                let _ = self
+                    .owner
+                    .update(cx, |o, cx| o.run_choice(pick, window, cx));
             }
             Pick::Nothing => {}
         }
@@ -1232,10 +1275,33 @@ impl Render for Palette {
                 let rows: Vec<usize> = (0..self.commands.len())
                     .filter(|&ix| self.commands[ix].matches(&query))
                     .collect();
-                for &ix in &rows {
-                    command = command.item(self.command_item(ix, cx));
+                command = command.group(
+                    CommandGroup::new().items(rows.iter().map(|&ix| self.command_item(ix, cx))),
+                );
+                let mut picks: Vec<Vec<Pick>> = vec![rows.into_iter().map(Pick::Command).collect()];
+                // `palette.search_submenus`: matching submenu rows, after every command.
+                if !query.trim().is_empty() {
+                    let projects: Vec<usize> = (0..self.projects.len())
+                        .filter(|&ix| label_matches(&self.projects[ix].name, &query))
+                        .collect();
+                    if !projects.is_empty() {
+                        command = command.group(
+                            CommandGroup::new()
+                                .label("Switch project")
+                                .items(projects.iter().map(|&ix| self.project_item(ix))),
+                        );
+                        picks.push(projects.into_iter().map(Pick::Project).collect());
+                    }
+                    for (section, rows) in self.choice_sections(cx) {
+                        command = command.group(
+                            CommandGroup::new()
+                                .label(section)
+                                .items(rows.iter().map(|&ix| self.choice_item(ix, cx))),
+                        );
+                        picks.push(rows.into_iter().map(Pick::Choice).collect());
+                    }
                 }
-                vec![rows.into_iter().map(Pick::Command).collect()]
+                picks
             }
             PaletteMode::SwitchProject => {
                 let sections = self.project_sections(cx);
