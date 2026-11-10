@@ -52,6 +52,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Frame drops while the settings dialog or the command palette opens. The main window was
+  laid out and drawn again on every frame of the dialog's animation although nothing in it
+  changed; it is now reused until something in it does.
 - Controls on the right of settings rows all end at the same edge: the highlighted groups
   (Updates, project status, per-project choices), the slider values and the Keymap + buttons
   sat further in than the rest.

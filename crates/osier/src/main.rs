@@ -6,6 +6,7 @@ mod app;
 mod askpass;
 mod background;
 mod blame_view;
+mod cached_root;
 mod cli;
 mod command_log;
 mod config_watch;
@@ -220,7 +221,7 @@ fn main() {
             app_id: Some(APP_ID.into()),
             ..TitleBar::window_options()
         };
-        let opened = gpui_kit::open_window(options, cx, |window, cx| {
+        let opened = crate::cached_root::open_window(options, cx, |window, cx| {
             cx.new(|cx| {
                 app::Osier::new(
                     paths,

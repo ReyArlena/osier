@@ -479,6 +479,8 @@ pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) 
     cx.bind_keys(kit);
     cx.bind_keys(ours);
     cx.set_global(keymap);
+    // Menus and tooltips in the cached main view show these keys: redraw past the cache.
+    cx.refresh_windows();
 }
 
 /// A recorded keystroke in gpui notation (`ctrl-shift-p`, `?`, `f5`). `None` for a modifier

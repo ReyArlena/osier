@@ -19,6 +19,8 @@ impl Osier {
         gpui_kit::base::TooltipDefaults::global(cx)
             .with_show_delay(Duration::from_millis(u64::from(ms)))
             .install(cx);
+        // A global the views read while rendering: redraw past the main view's cache.
+        cx.refresh_windows();
     }
 
     pub(crate) fn apply_appearance(&mut self, cx: &mut App) {

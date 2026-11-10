@@ -316,6 +316,9 @@ pub fn apply(name: &str, appearance: &Appearance, cx: &mut App) -> bool {
             syntax_contrast(theme);
         }
     });
+    // The theme is a global: views do not hear about it, and the main view is cached
+    // (`cached_root.rs`), so redraw every window in full.
+    cx.refresh_windows();
     true
 }
 
