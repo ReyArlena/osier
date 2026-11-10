@@ -82,6 +82,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The clone and create dialogs flashed a red "already exists and is not empty" error just
+  before closing, about the clone's own folder. The target folder is now checked in the
+  background when it changes (not on every frame), Clone and Create stay disabled until the
+  check passes, and a confirmed dialog no longer checks again. Problems show as an error
+  notice (icon, tinted box) instead of a red line, and paths read `~/...`.
 - Programs opened from Osier (editor, terminal, file manager, `xdg-open`) run detached in
   their own systemd scope where there is one, and no longer linger as `<defunct>` processes
   until Osier quits.

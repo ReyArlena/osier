@@ -365,7 +365,52 @@ fn check_repo_name(name: &str) -> Result<(), String> {
 
 /// The target must be missing or an empty directory (checked again by the git layer).
 fn check_target(target: &Path) -> Result<(), String> {
-    remote::check_empty_target(target).map_err(|e| e.to_string())
+    // Shown under the form: the path as everywhere else in Osier (`~/...`).
+    remote::check_empty_target(target).map_err(|e| {
+        e.to_string()
+            .replace(&target.display().to_string(), &crate::format::tilde(target))
+    })
+}
+
+/// Whether a form's target folder can take the new repository (missing or empty), checked in
+/// the background once per target path: listing a folder on every frame would be file work on
+/// the UI thread, and it would also see the clone's own files appear while it runs.
+#[derive(Default)]
+struct TargetCheck {
+    target: Option<PathBuf>,
+    result: Option<Result<(), String>>,
+    _task: Option<Task<()>>,
+}
+
+impl TargetCheck {
+    /// The result for `target`, `None` while it is being checked. A new target starts a
+    /// check; `slot` finds this check in the form when the result comes back.
+    fn status<V: 'static>(
+        &mut self,
+        target: &Path,
+        slot: fn(&mut V) -> &mut TargetCheck,
+        cx: &mut Context<V>,
+    ) -> Option<Result<(), String>> {
+        if self.target.as_deref() != Some(target) {
+            self.target = Some(target.to_path_buf());
+            self.result = None;
+            let checked = target.to_path_buf();
+            self._task = Some(cx.spawn(async move |this, cx| {
+                let path = checked.clone();
+                let result = cx
+                    .background_spawn(async move { check_target(&path) })
+                    .await;
+                let _ = this.update(cx, |form, cx| {
+                    let check = slot(form);
+                    if check.target.as_deref() == Some(checked.as_path()) {
+                        check.result = Some(result);
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+        self.result.clone()
+    }
 }
 
 /// Directory field plus "Choose directory…" (portal folder picker).
@@ -423,20 +468,18 @@ fn field_label(text: &'static str, cx: &App) -> Div {
         .child(text)
 }
 
-/// "Clones into ~/Work/app" under the form, or what is wrong.
-fn outcome_line(text: Result<String, String>, cx: &App) -> Div {
-    let theme = cx.theme();
+/// "Clones into ~/Work/app" under the form, or what is wrong as an error notice.
+fn outcome_line(text: Result<String, String>, cx: &App) -> AnyElement {
     match text {
         Ok(t) => div()
             .test_id("new-repo-target")
             .text_sm()
-            .text_color(theme.muted_foreground)
-            .child(t),
-        Err(e) => div()
+            .text_color(cx.theme().muted_foreground)
+            .child(t)
+            .into_any_element(),
+        Err(e) => crate::dialog_notice::DialogNotice::error(e)
             .test_id("new-repo-error")
-            .text_sm()
-            .text_color(theme.danger)
-            .child(e),
+            .into_any_element(),
     }
 }
 
@@ -461,8 +504,11 @@ pub(crate) struct CloneForm {
     url: Entity<InputState>,
     dir: Entity<InputState>,
     recurse: bool,
-    /// Set when OK was refused; cleared on the next edit.
-    error: Option<String>,
+    target_check: TargetCheck,
+    /// Everything checked and fine: Clone is enabled.
+    ready: bool,
+    /// Confirmed: what the form says while the dialog closes (nothing is checked any more).
+    submitted: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -480,9 +526,8 @@ impl CloneForm {
         let dir =
             cx.new(|cx| InputState::new(window, cx).default_value(crate::format::tilde(parent)));
         let watch = |cx: &mut Context<Self>, input: &Entity<InputState>| {
-            cx.subscribe(input, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe(input, |_: &mut Self, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
-                    this.error = None;
                     cx.notify();
                 }
             })
@@ -493,7 +538,9 @@ impl CloneForm {
             url,
             dir,
             recurse: true,
-            error: None,
+            target_check: TargetCheck::default(),
+            ready: false,
+            submitted: None,
             _subscriptions,
         }
     }
@@ -520,7 +567,6 @@ impl CloneForm {
                 .ok_or_else(|| format!("Cannot tell the folder name from {url}."))?,
         };
         let target = parse_dir(&self.dir.read(cx).value())?.join(name);
-        check_target(&target)?;
         Ok(ClonePlan {
             url,
             target,
@@ -531,18 +577,59 @@ impl CloneForm {
     }
 }
 
+impl CloneForm {
+    /// The line under the form (muted text, or an error), and whether Clone may go ahead.
+    fn outcome(&mut self, cx: &mut Context<Self>) -> Result<String, String> {
+        if let Some(text) = &self.submitted {
+            return Ok(text.clone());
+        }
+        let (ready, outcome) = match self.plan(cx) {
+            // Before anything is typed, say what is needed without alarm.
+            Err(e) if self.source.is_none() && self.url.read(cx).value().is_empty() => {
+                (false, Ok(e))
+            }
+            Err(e) => (false, Err(e)),
+            Ok(plan) => {
+                let target = crate::format::tilde(&plan.target);
+                match self
+                    .target_check
+                    .status(&plan.target, |f: &mut Self| &mut f.target_check, cx)
+                {
+                    None => (false, Ok(format!("Checking {target}…"))),
+                    Some(Ok(())) => (true, Ok(format!("Clones into {target}"))),
+                    Some(Err(e)) => (false, Err(e)),
+                }
+            }
+        };
+        if self.ready != ready {
+            // The dialog reads `ready` for its button before this form redraws in the same
+            // frame, so ask for one more frame. Deferred: gpui drops a notify made while the
+            // window is drawing.
+            self.ready = ready;
+            let form = cx.entity();
+            cx.defer(move |cx| form.update(cx, |_, cx| cx.notify()));
+        }
+        outcome
+    }
+
+    /// The plan to run when Clone is pressed, `None` while checks are not done or failed.
+    /// Freezes the form: it stops checking (the clone fills the folder it checked).
+    fn confirm(&mut self, cx: &mut Context<Self>) -> Option<ClonePlan> {
+        let ready = self.outcome(cx).is_ok() && self.ready;
+        let plan = self.plan(cx).ok().filter(|_| ready)?;
+        self.submitted = Some(format!(
+            "Cloning into {}…",
+            crate::format::tilde(&plan.target)
+        ));
+        cx.notify();
+        Some(plan)
+    }
+}
+
 impl Render for CloneForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
-        let outcome = match &self.error {
-            Some(e) => Err(e.clone()),
-            None => match self.plan(cx) {
-                Ok(p) => Ok(format!("Clones into {}", crate::format::tilde(&p.target))),
-                // Before anything is typed, say what is needed without alarm.
-                Err(e) if self.source.is_none() && self.url.read(cx).value().is_empty() => Ok(e),
-                Err(e) => Err(e),
-            },
-        };
+        let outcome = self.outcome(cx);
         v_flex()
             .test_id("clone-form")
             .w_full()
@@ -605,8 +692,9 @@ impl Osier {
         let form = cx.new(|cx| CloneForm::new(source, &parent, window, cx));
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_app_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (form, weak) = (form.clone(), weak.clone());
+            let ready = form.read(cx).ready;
             dialog
                 .title(title.clone())
                 .w(px(560.))
@@ -616,20 +704,18 @@ impl Osier {
                         .ok_text("Clone")
                         .show_cancel(true),
                 )
-                .footer(crate::dialog_buttons::DialogButtons::new("Clone"))
-                .on_ok(move |_, window, cx| match form.read(cx).plan(cx) {
-                    Ok(plan) => {
-                        let _ = weak.update(cx, |this, cx| this.start_clone(plan, window, cx));
-                        true
-                    }
-                    Err(e) => {
-                        form.update(cx, |f, cx| {
-                            f.error = Some(e);
-                            cx.notify();
-                        });
-                        false
-                    }
-                })
+                // Disabled until every check (the target folder in the background) passed.
+                .footer(crate::dialog_buttons::DialogButtons::new("Clone").disabled(!ready))
+                .on_ok(
+                    move |_, window, cx| match form.update(cx, |f, cx| f.confirm(cx)) {
+                        Some(plan) => {
+                            let _ = weak.update(cx, |this, cx| this.start_clone(plan, window, cx));
+                            true
+                        }
+                        // Enter before the checks are done, or with a problem shown: stay.
+                        None => false,
+                    },
+                )
         });
         focus.update(cx, |f, cx| {
             let input = if has_url { &f.url } else { &f.dir };
@@ -830,7 +916,11 @@ pub(crate) struct CreateForm {
     dir: Entity<InputState>,
     /// Lists still loading, or why they could not be.
     status: Option<String>,
-    error: Option<String>,
+    target_check: TargetCheck,
+    /// Everything checked and fine: Create is enabled.
+    ready: bool,
+    /// Confirmed: what the form says while the dialog closes (nothing is checked any more).
+    submitted: Option<String>,
     /// Lists still on their way, and the errors of those that failed.
     pending: usize,
     load_errors: Vec<String>,
@@ -872,9 +962,8 @@ impl CreateForm {
         let dir =
             cx.new(|cx| InputState::new(window, cx).default_value(crate::format::tilde(parent)));
         let watch = |cx: &mut Context<Self>, input: &Entity<InputState>| {
-            cx.subscribe(input, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe(input, |_: &mut Self, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
-                    this.error = None;
                     cx.notify();
                 }
             })
@@ -897,7 +986,9 @@ impl CreateForm {
             status: source
                 .is_some()
                 .then(|| "Loading the lists from GitHub…".to_string()),
-            error: None,
+            target_check: TargetCheck::default(),
+            ready: false,
+            submitted: None,
             pending: 0,
             load_errors: Vec::new(),
             _loads: Vec::new(),
@@ -1011,7 +1102,6 @@ impl CreateForm {
         let name = self.name.read(cx).value().trim().to_string();
         check_repo_name(&name)?;
         let target = parse_dir(&self.dir.read(cx).value())?.join(&name);
-        check_target(&target)?;
         let template = self.template(cx);
         let starters = template.is_none();
         let license_name = Self::picked(&self.license, NONE, cx);
@@ -1043,30 +1133,67 @@ impl CreateForm {
     }
 }
 
+impl CreateForm {
+    /// The line under the form (muted text, or an error), and whether Create may go ahead.
+    fn outcome(&mut self, cx: &mut Context<Self>) -> Result<String, String> {
+        if let Some(text) = &self.submitted {
+            return Ok(text.clone());
+        }
+        let (ready, outcome) = match self.plan(cx) {
+            Err(e) if self.name.read(cx).value().is_empty() => (false, Ok(e)),
+            Err(e) => (false, Err(e)),
+            Ok(plan) => {
+                let target = crate::format::tilde(&plan.target);
+                match self
+                    .target_check
+                    .status(&plan.target, |f: &mut Self| &mut f.target_check, cx)
+                {
+                    None => (false, Ok(format!("Checking {target}…"))),
+                    Some(Ok(())) => (
+                        true,
+                        Ok(match &plan.account {
+                            Some(_) => format!(
+                                "Creates {}/{} on GitHub and clones it into {target}",
+                                plan.new.owner, plan.new.name
+                            ),
+                            None => format!("Creates a local repository in {target}"),
+                        }),
+                    ),
+                    Some(Err(e)) => (false, Err(e)),
+                }
+            }
+        };
+        if self.ready != ready {
+            // The dialog reads `ready` for its button before this form redraws in the same
+            // frame, so ask for one more frame. Deferred: gpui drops a notify made while the
+            // window is drawing.
+            self.ready = ready;
+            let form = cx.entity();
+            cx.defer(move |cx| form.update(cx, |_, cx| cx.notify()));
+        }
+        outcome
+    }
+
+    /// The plan to run when Create is pressed, `None` while checks are not done or failed.
+    /// Freezes the form: it stops checking (creating fills the folder it checked).
+    fn confirm(&mut self, cx: &mut Context<Self>) -> Option<CreatePlan> {
+        let ready = self.outcome(cx).is_ok() && self.ready;
+        let plan = self.plan(cx).ok().filter(|_| ready)?;
+        self.submitted = Some(format!(
+            "Creating in {}…",
+            crate::format::tilde(&plan.target)
+        ));
+        cx.notify();
+        Some(plan)
+    }
+}
+
 impl Render for CreateForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let remote = self.account.is_some();
         let templated = self.template(cx).is_some();
-        let outcome = match &self.error {
-            Some(e) => Err(e.clone()),
-            None => match self.plan(cx) {
-                Ok(p) => Ok(match &p.account {
-                    Some(_) => format!(
-                        "Creates {}/{} on GitHub and clones it into {}",
-                        p.new.owner,
-                        p.new.name,
-                        crate::format::tilde(&p.target)
-                    ),
-                    None => format!(
-                        "Creates a local repository in {}",
-                        crate::format::tilde(&p.target)
-                    ),
-                }),
-                Err(e) if self.name.read(cx).value().is_empty() => Ok(e),
-                Err(e) => Err(e),
-            },
-        };
+        let outcome = self.outcome(cx);
         let row = |label: &'static str, child: AnyElement, cx: &App| {
             v_flex().gap_1().child(field_label(label, cx)).child(child)
         };
@@ -1206,13 +1333,19 @@ impl Render for CreateForm {
                     .child(directory_row(&self.dir, "create")),
             )
             .when_some(self.status.clone(), |this, s| {
-                this.child(
+                // Lists that could not load are worth a warning; loading is just a note.
+                this.child(if self.pending == 0 && !self.load_errors.is_empty() {
+                    crate::dialog_notice::DialogNotice::warning(s)
+                        .test_id("create-status")
+                        .into_any_element()
+                } else {
                     div()
                         .test_id("create-status")
                         .text_xs()
                         .text_color(muted)
-                        .child(s),
-                )
+                        .child(s)
+                        .into_any_element()
+                })
             })
             .child(outcome_line(outcome, cx))
     }
@@ -1251,8 +1384,9 @@ impl Osier {
         });
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_app_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (form, weak) = (form.clone(), weak.clone());
+            let ready = form.read(cx).ready;
             dialog
                 .title(title.clone())
                 .w(px(600.))
@@ -1262,20 +1396,18 @@ impl Osier {
                         .ok_text("Create")
                         .show_cancel(true),
                 )
-                .footer(crate::dialog_buttons::DialogButtons::new("Create"))
-                .on_ok(move |_, window, cx| match form.read(cx).plan(cx) {
-                    Ok(plan) => {
-                        let _ = weak.update(cx, |this, cx| this.start_create(plan, window, cx));
-                        true
-                    }
-                    Err(e) => {
-                        form.update(cx, |f, cx| {
-                            f.error = Some(e);
-                            cx.notify();
-                        });
-                        false
-                    }
-                })
+                // Disabled until every check (the target folder in the background) passed.
+                .footer(crate::dialog_buttons::DialogButtons::new("Create").disabled(!ready))
+                .on_ok(
+                    move |_, window, cx| match form.update(cx, |f, cx| f.confirm(cx)) {
+                        Some(plan) => {
+                            let _ = weak.update(cx, |this, cx| this.start_create(plan, window, cx));
+                            true
+                        }
+                        // Enter before the checks are done, or with a problem shown: stay.
+                        None => false,
+                    },
+                )
         });
         focus.update(cx, |f, cx| f.name.update(cx, |i, cx| i.focus(window, cx)));
     }

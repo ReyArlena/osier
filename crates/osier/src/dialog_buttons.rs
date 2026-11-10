@@ -6,6 +6,7 @@
 //! `AlertDialog` buttons, each dispatches from a hidden focus node inside itself, so the action
 //! reaches the dialog the button sits in whatever holds focus.
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogFooter};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -18,6 +19,7 @@ pub(crate) struct DialogButtons {
     ok: SharedString,
     variant: ButtonVariant,
     cancel: Option<SharedString>,
+    ok_disabled: bool,
 }
 
 impl DialogButtons {
@@ -26,7 +28,15 @@ impl DialogButtons {
             ok: ok.into(),
             variant: ButtonVariant::Primary,
             cancel: Some("Cancel".into()),
+            ok_disabled: false,
         }
+    }
+
+    /// Grey out OK (checks still running or failed). Enter is the dialog's own business: its
+    /// `on_ok` must refuse too.
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.ok_disabled = disabled;
+        self
     }
 
     pub(crate) fn variant(mut self, variant: ButtonVariant) -> Self {
@@ -62,6 +72,7 @@ impl RenderOnce for DialogButtons {
                     .test_id("dialog-ok")
                     .label(self.ok)
                     .with_variant(self.variant)
+                    .disabled(self.ok_disabled)
                     .child(div().absolute().size_0().track_focus(&ok_anchor))
                     .on_click(move |_, window, cx| {
                         handle.dispatch_action(&Confirm { secondary: false }, window, cx)

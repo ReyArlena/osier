@@ -13,6 +13,7 @@ mod command_log;
 mod config_watch;
 mod dialog_buttons;
 mod dialog_hint;
+mod dialog_notice;
 mod dms_cheatsheet;
 mod edit_pane;
 mod fade;

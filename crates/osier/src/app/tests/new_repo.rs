@@ -400,3 +400,47 @@ fn the_clone_submenu_waits_for_the_gh_accounts(cx: &mut TestAppContext) {
     assert!(h.bounds(cx, "palette-status").is_none());
     assert!(h.bounds(cx, "palette-choice:alice").is_some());
 }
+
+#[gpui::test]
+fn ui_clone_waits_for_the_target_check_and_refuses_a_full_folder(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let source = TempRepo::new();
+    source.commit_file("hello.txt", "hi\n", "hello");
+    let bare = source.bare_clone();
+    let mut gh_repo = crate::new_repo::tests::repo("alice", "hello");
+    gh_repo.clone_url = bare.to_string_lossy().into_owned();
+    let hub = Arc::new(FakeHub {
+        repos: vec![gh_repo],
+        ..Default::default()
+    });
+    let h = Harness::open(cx, &repo);
+    with_hub(&h, cx, hub);
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "clone");
+    h.click(cx, "palette-command:Clone repository…");
+    h.click(cx, "palette-choice:alice");
+    h.click(cx, "palette-choice:hello");
+    // A target folder that already has files: an error notice, and Clone does nothing.
+    let dest = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(dest.path().join("hello")).expect("mkdir");
+    std::fs::write(dest.path().join("hello/keep.txt"), "mine").expect("write");
+    retype(&h, cx, "clone-dir", &dest.path().to_string_lossy());
+    assert!(
+        h.bounds(cx, "new-repo-error").is_some(),
+        "the folder check failed"
+    );
+    h.click(cx, "dialog-ok");
+    assert!(h.has_settings(cx), "the dialog stays open");
+    assert!(
+        !dest.path().join("hello/hello.txt").exists(),
+        "nothing was cloned"
+    );
+    // An empty folder passes, and Clone goes ahead.
+    let other = tempfile::tempdir().expect("tempdir");
+    retype(&h, cx, "clone-dir", &other.path().to_string_lossy());
+    assert!(h.bounds(cx, "new-repo-error").is_none());
+    assert!(h.bounds(cx, "new-repo-target").is_some());
+    h.click(cx, "dialog-ok");
+    assert!(other.path().join("hello/hello.txt").exists(), "cloned");
+}
