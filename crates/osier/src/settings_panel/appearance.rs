@@ -6,12 +6,25 @@ use gpui_kit::component::setting::{
 };
 use gpui_kit::component::{Icon, h_flex};
 use gpui_kit::*;
-use osier_config::settings::ThemeMode;
+use osier_config::settings::{Animations, ThemeMode};
 
 use crate::app::Osier;
 use crate::themes::ThemeStore;
 
 use super::{get, opt_string, set};
+
+/// What Animations does, and what "Follow the desktop" currently means.
+fn motion_description(system_reduced_motion: Option<bool>) -> String {
+    let desktop = match system_reduced_motion {
+        Some(true) => "Your desktop asks for reduced motion, so following it means off.",
+        Some(false) => "Your desktop allows animations, so following it means on.",
+        None => "Your desktop does not say, so following it means on.",
+    };
+    format!(
+        "Dialogs, menus and toasts slide and fade in, and spinners turn. Off shows them at \
+         once and keeps spinners still, which also helps on a slow machine. {desktop}"
+    )
+}
 
 pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
     let store = ThemeStore::global(cx);
@@ -155,6 +168,37 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                      still looks like itself. Off: the theme's colours as they are.",
                 ),
                 ]),
+        )
+        .group(
+            SettingGroup::new().title("Motion").item(
+                SettingItem::new(
+                    "Animations",
+                    SettingField::dropdown(
+                        vec![
+                            ("system".into(), "Follow the desktop".into()),
+                            ("on".into(), "On".into()),
+                            ("off".into(), "Off".into()),
+                        ],
+                        get(view, |o| {
+                            match o.settings.appearance.animations {
+                                Animations::System => "system",
+                                Animations::On => "on",
+                                Animations::Off => "off",
+                            }
+                            .into()
+                        }),
+                        set(view, |o, v: SharedString, _| {
+                            o.settings.appearance.animations = match v.as_ref() {
+                                "on" => Animations::On,
+                                "off" => Animations::Off,
+                                _ => Animations::System,
+                            }
+                        }),
+                    )
+                    .default_value("system".to_string()),
+                )
+                .description(motion_description(view.read(cx).system_reduced_motion)),
+            ),
         )
         .group(
             SettingGroup::new()

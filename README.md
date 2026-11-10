@@ -232,6 +232,7 @@ light_theme = "Catppuccin Latte"
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
+animations = "system"         # system | on | off: dialogs, menus and toasts slide in, spinners turn
 
 [keys]
 prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key

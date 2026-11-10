@@ -29,6 +29,10 @@ All notable changes to Osier are documented here. The format follows
   inside a changed word on Catppuccin Mocha). Hue stays, so the theme still looks like
   itself. On by default; "Readable syntax colours" under Settings > Appearance > Contrast turns
   it off (`syntax_contrast` in config.toml).
+- An Animations setting under Settings > Appearance > Motion (`animations` in config.toml):
+  follow the desktop (the default), on or off. Off shows dialogs, menus and toasts at once
+  and keeps spinners still. Following the desktop uses its reduced-motion setting, or
+  GNOME's "Animations" switch where the desktop has no reduced-motion setting.
 - A Notifications panel: every toast the app showed this session, newest first, with its
   time and, for git failures, the same "View command log" button, so a message that slid
   away can still be read. It shares the bottom panel with the git command log as a second

@@ -91,6 +91,20 @@ pub struct Appearance {
     /// (refreshes, project scans, GitHub lists, diff and branch lookups). Fetch, pull, push,
     /// clone and create always show.
     pub show_background_tasks: bool,
+    /// Dialogs, menus and toasts sliding and fading in, and spinners turning: `system`
+    /// follows the desktop's reduced-motion setting, `on` and `off` override it.
+    pub animations: Animations,
+}
+
+/// Whether the interface animates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Animations {
+    /// Follow the desktop (on when it says nothing).
+    #[default]
+    System,
+    On,
+    Off,
 }
 
 /// What System mode shows when the desktop has no light/dark preference.
@@ -128,6 +142,7 @@ impl Default for Appearance {
             high_contrast: false,
             syntax_contrast: true,
             show_background_tasks: false,
+            animations: Animations::System,
         }
     }
 }
@@ -441,6 +456,24 @@ mod tests {
         let again = Settings::load(&paths).unwrap();
         assert_eq!(again.appearance.mode, ThemeMode::Light);
         assert!(again.extra.contains_key("future"));
+    }
+
+    #[test]
+    fn animations_default_to_the_system_and_read_their_names() {
+        assert_eq!(
+            Settings::default().appearance.animations,
+            Animations::System
+        );
+        for (text, want) in [
+            ("system", Animations::System),
+            ("on", Animations::On),
+            ("off", Animations::Off),
+        ] {
+            let s: Settings =
+                toml::from_str(&format!("[appearance]\nanimations = \"{text}\"\n")).unwrap();
+            assert_eq!(s.appearance.animations, want);
+        }
+        assert!(toml::from_str::<Settings>("[appearance]\nanimations = \"fast\"\n").is_err());
     }
 
     #[test]

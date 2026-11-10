@@ -293,6 +293,9 @@ pub struct Osier {
     pub(crate) prefix_pending: Option<Subscription>,
     /// The desktop's light/dark preference, for System mode (`system_scheme.rs`).
     pub(crate) system_scheme: crate::system_scheme::SystemScheme,
+    /// The desktop's reduced-motion preference, `None` until (or unless) it says
+    /// (`system_motion.rs`).
+    pub(crate) system_reduced_motion: Option<bool>,
     /// Selected row in the Branches tab (branch, tag or remote).
     pub(crate) ref_selected: Option<crate::app::row_actions::RefRow>,
     /// Selected stash, by commit id.
@@ -534,6 +537,7 @@ impl Osier {
             settings_focus: cx.focus_handle().tab_stop(true),
             prefix_pending: None,
             system_scheme: Default::default(),
+            system_reduced_motion: None,
             ref_selected: None,
             stash_selected: None,
             prefix_generation: 0,
@@ -706,6 +710,8 @@ impl Osier {
         this.start_watcher_loop(window, cx);
         #[cfg(all(target_os = "linux", not(test)))]
         this.watch_system_scheme(cx);
+        #[cfg(all(target_os = "linux", not(test)))]
+        this.watch_system_motion(cx);
         this.load_keymap(cx);
         // Without a focused element the app's key bindings have no dispatch path, so
         // shortcuts would only work after the first click into a list.

@@ -104,6 +104,47 @@ fn tooltip_delay_defaults_to_at_once_and_applies_live(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn animations_setting_turns_motion_on_and_off(cx: &mut TestAppContext) {
+    use osier_config::settings::Animations;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    let reduced = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |_, cx| cx.reduce_motion());
+    assert!(
+        !reduced(&h, cx),
+        "follows the desktop, which says nothing in tests"
+    );
+    let set = |h: &Harness, cx: &mut TestAppContext, a: Animations, desktop: Option<bool>| {
+        h.act(cx, move |o, _, cx| {
+            o.settings.appearance.animations = a;
+            o.system_reduced_motion = desktop;
+            o.settings_changed(cx);
+        });
+    };
+    set(&h, cx, Animations::Off, None);
+    assert!(reduced(&h, cx));
+    set(&h, cx, Animations::On, Some(true));
+    assert!(!reduced(&h, cx), "On wins over the desktop");
+    set(&h, cx, Animations::System, Some(true));
+    assert!(reduced(&h, cx), "the desktop asks for reduced motion");
+    set(&h, cx, Animations::System, Some(false));
+    assert!(!reduced(&h, cx));
+    // Settings opens and closes with motion off: the dialog has no animation to wait for.
+    set(&h, cx, Animations::Off, None);
+    h.keys(cx, "ctrl-,");
+    assert!(h.has_settings(cx));
+    h.keys(cx, "escape");
+    assert!(!h.has_settings(cx));
+    // An edit to config.toml applies too.
+    let file = h.read(cx, |o, _| o.paths.settings_file());
+    std::fs::write(&file, "[appearance]\nanimations = \"on\"\n").expect("write config");
+    h.act(cx, |o, window, cx| {
+        assert!(o.reload_settings_from_disk(window, cx));
+    });
+    assert!(!reduced(&h, cx));
+}
+
+#[gpui::test]
 fn settings_reload_from_disk_and_account_overrides(cx: &mut TestAppContext) {
     use gpui_kit::component::ActiveTheme as _;
     use osier_config::settings::ThemeMode;

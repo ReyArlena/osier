@@ -34,6 +34,7 @@ mod row_menu;
 mod runtime_info;
 mod settings_panel;
 mod sidebar_query;
+mod system_motion;
 mod system_scheme;
 mod test_ids;
 mod theme_cards;

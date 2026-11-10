@@ -25,6 +25,7 @@ impl Osier {
 
     pub(crate) fn apply_appearance(&mut self, cx: &mut App) {
         self.apply_tooltip_delay(cx);
+        self.apply_motion(cx);
         use crate::themes::{DUX_DARK, DUX_LIGHT, ThemeStore};
         let a = &self.settings.appearance;
         let store = ThemeStore::global(cx);
