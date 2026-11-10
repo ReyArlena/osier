@@ -137,7 +137,7 @@ impl Osier {
     pub(crate) fn open_themes_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.paths.themes_dir();
         let create = dir.clone();
-        self.in_background(
+        self.in_background_user(
             crate::background::OPENING_FOLDER,
             move || {
                 if let Err(error) = std::fs::create_dir_all(&create) {

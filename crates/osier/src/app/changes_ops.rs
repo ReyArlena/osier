@@ -37,7 +37,7 @@ impl Osier {
         {
             // Prefill with HEAD's message, like PhpStorm's amend checkbox (`git log` in the
             // background). Only if amend is still on and the box still empty when it is back.
-            self.in_background(
+            self.in_background_user(
                 crate::background::READING_COMMIT,
                 move || commit_ops::head_message(&repo).ok().flatten(),
                 |this, msg, window, cx| {

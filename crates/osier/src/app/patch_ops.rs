@@ -56,7 +56,7 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.in_background(
+        self.in_background_user(
             crate::background::READING_PATCHES,
             move || patch.text(),
             move |this, text, window, cx| match text {
@@ -219,7 +219,7 @@ impl Osier {
         let repo = project.map(|p| p.repo.clone());
         let repo_path = project.map(|p| p.path.clone());
         let paths = self.paths.clone();
-        self.in_background(
+        self.in_background_user(
             crate::background::SAVING_PATCH,
             move || {
                 let files: Vec<String> = repo
@@ -810,7 +810,7 @@ impl Osier {
     pub(crate) fn open_patches_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.paths.patches_dir();
         let create = dir.clone();
-        self.in_background(
+        self.in_background_user(
             crate::background::OPENING_FOLDER,
             move || {
                 if let Err(error) = std::fs::create_dir_all(&create) {

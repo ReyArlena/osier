@@ -255,7 +255,7 @@ impl Osier {
         let (runner, watch_runner) = (self.runner.clone(), self.watch_runner());
         let path = path.to_path_buf();
         let target = path.clone();
-        self.in_background(
+        self.in_background_user(
             crate::background::OPENING_PROJECT,
             move || Project::prepare(runner, watch_runner, &target),
             move |this, prepared, window, cx| match prepared {

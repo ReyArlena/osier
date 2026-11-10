@@ -61,6 +61,9 @@ All notable changes to Osier are documented here. The format follows
   - theme and `config.toml` reloads
   - project status watches
   - settings and state saves (finished before Osier quits)
+- Work you start and wait for (opening a project, a file, an editor, the rebase list, a
+  patch) is named in the status bar when it takes longer than a moment, even with "Show
+  background tasks" off. Quick ones show nothing, so nothing flashes.
 - The Changes list builds only the rows on screen, so thousands of changes stay smooth. The
   Files tab, Log and command log no longer copy their data on every frame.
 - Dialogs fade in where they sit instead of sliding down from the top, and finish sooner

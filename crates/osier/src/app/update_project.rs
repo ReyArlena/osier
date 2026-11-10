@@ -86,7 +86,7 @@ impl Osier {
                     .snapshot
                     .as_ref()
                     .and_then(|s| s.status.branch.head.clone());
-                self.in_background(
+                self.in_background_user(
                     crate::background::READING_GIT_CONFIG,
                     move || git_config_strategy(&repo, branch),
                     move |this, preselect, window, cx| {

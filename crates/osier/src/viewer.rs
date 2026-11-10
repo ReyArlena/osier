@@ -153,7 +153,7 @@ impl Osier {
             path: path.clone(),
             rev: rev.clone(),
         };
-        self.in_background_cx(
+        self.in_background_user_cx(
             crate::background::LOADING_FILE,
             move || read_for_viewer(&repo, &read_path, rev.as_deref(), limit),
             move |this, loaded, cx| {

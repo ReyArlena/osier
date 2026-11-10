@@ -47,7 +47,7 @@ impl Osier {
         // then the dialog opens with the list.
         let repo = project.repo.clone();
         let since = base.clone();
-        self.in_background(
+        self.in_background_user(
             crate::background::LISTING_COMMITS,
             move || rebase_interactive::commits_since(&repo, &since),
             move |this, items, window, cx| match items {

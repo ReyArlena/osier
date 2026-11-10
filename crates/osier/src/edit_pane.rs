@@ -75,7 +75,7 @@ impl Osier {
         let Some(full) = self.active_project().map(|p| p.repo.workdir().join(&path)) else {
             return;
         };
-        self.in_background(
+        self.in_background_user(
             crate::background::LOADING_FILE,
             move || std::fs::read_to_string(full).ok(),
             move |this, text, window, cx| match text {
