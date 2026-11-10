@@ -5,6 +5,7 @@ use gpui_kit::component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
 };
 use gpui_kit::component::{Icon, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_config::settings::{Animations, ThemeMode};
 
@@ -198,7 +199,50 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                     .default_value("system".to_string()),
                 )
                 .description(motion_description(view.read(cx).system_reduced_motion)),
-            ),
+            )
+            .item(
+                SettingItem::new(
+                    "Animation length",
+                    SettingField::render({
+                        let v = view.clone();
+                        move |options, _, cx| {
+                            let o = v.read(cx);
+                            let ms = o.settings.appearance.animation_ms.clamp(
+                                crate::system_motion::ANIMATION_MS_MIN,
+                                crate::system_motion::ANIMATION_MS_MAX,
+                            );
+                            // Nothing to time while animations are off.
+                            let off = cx.reduce_motion();
+                            let slider = o.animation_length.clone();
+                            h_flex()
+                                .w(px(260.))
+                                .gap_3()
+                                .items_center()
+                                .when(off, |this| this.opacity(0.5))
+                                .child(
+                                    div().flex_1().child(
+                                        gpui_kit::component::slider::Slider::new(&slider)
+                                            .disabled(off || options.is_disabled()),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .w(px(56.))
+                                        .flex_none()
+                                        .text_right()
+                                        .whitespace_nowrap()
+                                        .child(format!("{ms} ms")),
+                                )
+                        }
+                    }),
+                )
+                .description(
+                    "How long a dialog takes to fade in. Switches, tabs and collapsing sections \
+                     speed up or slow down with it; menus, tooltips and toasts keep their own \
+                     timing. Default: 180 ms.",
+                ),
+            )
         )
         .group(
             SettingGroup::new()

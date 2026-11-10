@@ -94,6 +94,9 @@ pub struct Appearance {
     /// Dialogs, menus and toasts animating in, and spinners turning: `system`
     /// follows the desktop's reduced-motion setting, `on` and `off` override it.
     pub animations: Animations,
+    /// How long a dialog takes to fade in, in milliseconds. gpui-kit's other transitions
+    /// (switches, tabs, collapsing sections) scale with it.
+    pub animation_ms: u32,
 }
 
 /// Whether the interface animates.
@@ -143,6 +146,7 @@ impl Default for Appearance {
             syntax_contrast: true,
             show_background_tasks: false,
             animations: Animations::System,
+            animation_ms: 180,
         }
     }
 }
@@ -474,6 +478,9 @@ mod tests {
             assert_eq!(s.appearance.animations, want);
         }
         assert!(toml::from_str::<Settings>("[appearance]\nanimations = \"fast\"\n").is_err());
+        assert_eq!(Settings::default().appearance.animation_ms, 180);
+        let s: Settings = toml::from_str("[appearance]\nanimation_ms = 120\n").unwrap();
+        assert_eq!(s.appearance.animation_ms, 120);
     }
 
     #[test]

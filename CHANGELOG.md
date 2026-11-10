@@ -33,6 +33,9 @@ All notable changes to Osier are documented here. The format follows
   follow the desktop (the default), on or off. Off shows dialogs, menus and toasts at once
   and keeps spinners still. Following the desktop uses its reduced-motion setting, or
   GNOME's "Animations" switch where the desktop has no reduced-motion setting.
+- An Animation length slider under Settings > Appearance > Motion (`animation_ms`, 60 to
+  400ms, default 180): how long a dialog takes to fade in. Switches, tabs and collapsing
+  sections speed up or slow down with it; menus, tooltips and toasts keep their own timing.
 - A Notifications panel: every toast the app showed this session, newest first, with its
   time and, for git failures, the same "View command log" button, so a message that slid
   away can still be read. It shares the bottom panel with the git command log as a second

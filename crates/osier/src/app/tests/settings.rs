@@ -145,6 +145,44 @@ fn animations_setting_turns_motion_on_and_off(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn animation_length_times_the_dialog_fade(cx: &mut TestAppContext) {
+    use gpui_kit::component::ActiveTheme as _;
+    use osier_config::settings::ThemeMode;
+    use std::time::Duration;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    let fade = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |_, cx| cx.theme().motion.duration_normal)
+    };
+    assert_eq!(
+        fade(&h, cx),
+        Duration::from_millis(180),
+        "gpui-kit's default"
+    );
+    h.act(cx, |o, _, cx| {
+        o.settings.appearance.animation_ms = 100;
+        o.settings_changed(cx);
+    });
+    assert_eq!(fade(&h, cx), Duration::from_millis(100));
+    h.act(cx, |o, _, cx| o.set_theme_mode(ThemeMode::Light, cx));
+    assert_eq!(
+        fade(&h, cx),
+        Duration::from_millis(100),
+        "kept across a theme change"
+    );
+    // An edit to config.toml moves the slider too.
+    let file = h.read(cx, |o, _| o.paths.settings_file());
+    std::fs::write(&file, "[appearance]\nanimation_ms = 250\n").expect("write config");
+    h.act(cx, |o, window, cx| {
+        assert!(o.reload_settings_from_disk(window, cx));
+    });
+    assert_eq!(fade(&h, cx), Duration::from_millis(250));
+    let slider = h.read(cx, |o, cx| o.animation_length.read(cx).value().start());
+    assert_eq!(slider, 250.);
+}
+
+#[gpui::test]
 fn settings_reload_from_disk_and_account_overrides(cx: &mut TestAppContext) {
     use gpui_kit::component::ActiveTheme as _;
     use osier_config::settings::ThemeMode;

@@ -19,14 +19,41 @@ pub(crate) fn reduce_motion(setting: Animations, system: Option<bool>) -> bool {
     }
 }
 
+/// Shortest and longest animation length the settings slider offers, in milliseconds.
+/// Off is the Animations setting's job, so the slider starts above zero.
+pub(crate) const ANIMATION_MS_MIN: u32 = 60;
+pub(crate) const ANIMATION_MS_MAX: u32 = 400;
+
+/// gpui-kit's motion timings with the dialog fade at `ms`, everything else scaled to match.
+/// The springs are rebuilt from gpui-kit's defaults (`MotionTokens::default`, 0.9.0): `Spring`
+/// has no getters to scale an existing one.
+pub(crate) fn motion_tokens(ms: u32) -> gpui_kit::component::theme::MotionTokens {
+    use gpui_kit::base::Spring;
+    use std::time::Duration;
+    let mut tokens = gpui_kit::component::theme::MotionTokens::default();
+    let ms = ms.clamp(ANIMATION_MS_MIN, ANIMATION_MS_MAX);
+    let factor = ms as f32 / tokens.duration_normal.as_millis().max(1) as f32;
+    let scale = |d: Duration| d.mul_f32(factor);
+    tokens.duration_fast = scale(tokens.duration_fast);
+    tokens.duration_normal = Duration::from_millis(u64::from(ms));
+    tokens.duration_slow = scale(tokens.duration_slow);
+    tokens.spring_control = Spring::new(scale(Duration::from_millis(180)));
+    tokens.spring_move = Spring::new(scale(Duration::from_millis(280)))
+        .with_damping(0.85)
+        .with_epsilon(0.1);
+    tokens
+}
+
 impl crate::app::Osier {
-    /// Turn gpui's reduced motion on or off for the current setting. gpui redraws every
-    /// window when it changes.
+    /// Turn gpui's reduced motion on or off for the current setting (gpui redraws every
+    /// window when it changes), and set gpui-kit's motion timings from the animation length.
     pub(crate) fn apply_motion(&self, cx: &mut gpui_kit::App) {
         cx.set_reduce_motion(reduce_motion(
             self.settings.appearance.animations,
             self.system_reduced_motion,
         ));
+        let tokens = motion_tokens(self.settings.appearance.animation_ms);
+        gpui_kit::component::theme::Theme::update(cx, |theme| theme.motion = tokens);
     }
 }
 
@@ -94,7 +121,28 @@ impl crate::app::Osier {
 
 #[cfg(test)]
 mod tests {
-    use super::reduce_motion;
+    use super::{ANIMATION_MS_MAX, ANIMATION_MS_MIN, motion_tokens, reduce_motion};
+    use std::time::Duration;
+
+    #[test]
+    fn animation_length_sets_the_fade_and_scales_the_rest() {
+        let d = motion_tokens(180);
+        assert_eq!(d.duration_normal, Duration::from_millis(180));
+        assert_eq!(d.duration_fast, Duration::from_millis(120));
+        assert_eq!(d.duration_slow, Duration::from_millis(280));
+        let half = motion_tokens(90);
+        assert_eq!(half.duration_normal, Duration::from_millis(90));
+        assert_eq!(half.duration_fast, Duration::from_millis(60));
+        assert_eq!(half.duration_slow, Duration::from_millis(140));
+        assert_eq!(
+            motion_tokens(0).duration_normal,
+            Duration::from_millis(u64::from(ANIMATION_MS_MIN))
+        );
+        assert_eq!(
+            motion_tokens(10_000).duration_normal,
+            Duration::from_millis(u64::from(ANIMATION_MS_MAX))
+        );
+    }
     use osier_config::settings::Animations;
 
     #[test]

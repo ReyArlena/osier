@@ -233,6 +233,7 @@ changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted ch
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
 animations = "system"         # system | on | off: dialogs, menus and toasts animate in, spinners turn
+animation_ms = 180            # how long a dialog fades in (60 to 400); switches and tabs scale with it
 
 [keys]
 prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key

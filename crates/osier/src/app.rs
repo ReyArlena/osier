@@ -323,6 +323,8 @@ pub struct Osier {
     /// Interval slider on the settings page (`projects.recent_status_minutes`).
     pub(crate) recent_interval: Entity<gpui_kit::component::slider::SliderState>,
     pub(crate) tooltip_delay: Entity<gpui_kit::component::slider::SliderState>,
+    /// Animation length slider on the settings page (`appearance.animation_ms`).
+    pub(crate) animation_length: Entity<gpui_kit::component::slider::SliderState>,
     pub(crate) prefix_timeout: Entity<gpui_kit::component::slider::SliderState>,
     /// Narrow window: title-bar buttons drop their labels.
     pub(crate) compact: bool,
@@ -373,6 +375,19 @@ impl Osier {
                 .max(TOOLTIP_DELAY_MAX_MS as f32)
                 .step(50.)
                 .default_value(tooltip_ms)
+        });
+        let animation_length = cx.new(|_| {
+            use crate::system_motion::{ANIMATION_MS_MAX, ANIMATION_MS_MIN};
+            gpui_kit::component::slider::SliderState::new()
+                .min(ANIMATION_MS_MIN as f32)
+                .max(ANIMATION_MS_MAX as f32)
+                .step(10.)
+                .default_value(
+                    settings
+                        .appearance
+                        .animation_ms
+                        .clamp(ANIMATION_MS_MIN, ANIMATION_MS_MAX) as f32,
+                )
         });
         let prefix_secs = settings
             .keys
@@ -557,6 +572,7 @@ impl Osier {
             recent_status,
             recent_interval,
             tooltip_delay,
+            animation_length,
             prefix_timeout,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
@@ -622,6 +638,23 @@ impl Osier {
                 };
                 this.settings.appearance.tooltip_delay_ms = v.start().round() as u32;
                 this.apply_tooltip_delay(cx);
+                if save {
+                    this.save_settings();
+                }
+                cx.notify();
+            },
+        ));
+        let slider = this.animation_length.clone();
+        this._subscriptions.push(cx.subscribe(
+            &slider,
+            |this, _, ev: &gpui_kit::component::slider::SliderEvent, cx| {
+                use gpui_kit::component::slider::SliderEvent;
+                let (v, save) = match ev {
+                    SliderEvent::Change(v) => (v, false),
+                    SliderEvent::Release(v) => (v, true),
+                };
+                this.settings.appearance.animation_ms = v.start().round() as u32;
+                this.apply_motion(cx);
                 if save {
                     this.save_settings();
                 }

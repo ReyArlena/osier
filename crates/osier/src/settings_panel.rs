@@ -290,6 +290,12 @@ impl Osier {
                     .min(crate::app::TOOLTIP_DELAY_MAX_MS) as f32;
                 self.tooltip_delay
                     .update(cx, |s, cx| s.set_value(tooltip_ms, window, cx));
+                let animation_ms = self.settings.appearance.animation_ms.clamp(
+                    crate::system_motion::ANIMATION_MS_MIN,
+                    crate::system_motion::ANIMATION_MS_MAX,
+                ) as f32;
+                self.animation_length
+                    .update(cx, |s, cx| s.set_value(animation_ms, window, cx));
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
