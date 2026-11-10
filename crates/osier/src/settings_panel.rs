@@ -232,6 +232,15 @@ impl Osier {
                                     .track_focus(&focus)
                                     .key_context("OsierSettings")
                                     .on_action({
+                                        // The settings shortcut again closes settings, as
+                                        // Escape does (and puts focus back on the app).
+                                        let root_focus = close_focus.clone();
+                                        move |_: &crate::app::OpenSettings, window, cx| {
+                                            window.close_dialog(cx);
+                                            root_focus.focus(window, cx);
+                                        }
+                                    })
+                                    .on_action({
                                         let focus = focus.clone();
                                         // `/`: the settings page's own search box. It lives
                                         // inside gpui-kit's component, out of reach, but it

@@ -36,6 +36,9 @@ All notable changes to Osier are documented here. The format follows
 - An Animation length slider under Settings > Appearance > Motion (`animation_ms`, 60 to
   400ms, default 180): how long a dialog takes to fade in. Switches, tabs and collapsing
   sections speed up or slow down with it; menus, tooltips and toasts keep their own timing.
+- The command palette, project switcher and settings shortcuts close what they opened when
+  pressed again, as Escape does. With the palette open, the other one of `ctrl-p` and
+  `ctrl-o` switches between commands and projects.
 - A Notifications panel: every toast the app showed this session, newest first, with its
   time and, for git failures, the same "View command log" button, so a message that slid
   away can still be read. It shares the bottom panel with the git command log as a second

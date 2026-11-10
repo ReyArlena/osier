@@ -23,7 +23,7 @@ use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandSt
 use gpui_kit::component::diff::DiffMode;
 use gpui_kit::component::input::{Backspace, Input, InputEvent, InputState};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IndexPath, Sizable as _, WindowExt as _, h_flex,
+    ActiveTheme as _, Icon, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -596,7 +596,23 @@ impl Osier {
                             query.update(cx, |q, cx| q.focus(window, cx));
                         });
                     }
-                    content.child(palette.clone())
+                    // The palette's own shortcuts while it is open: the dialog is drawn outside
+                    // the app view, so they never reach the app's handlers. The key for the
+                    // mode on screen closes the palette, the other one switches to its mode.
+                    let (p1, p2) = (palette.clone(), palette.clone());
+                    content.child(
+                        v_flex()
+                            .w_full()
+                            .on_action(move |_: &crate::app::OpenCommandPalette, window, cx| {
+                                p1.update(cx, |p, cx| p.toggle(PaletteMode::Root, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::SwitchProject, window, cx| {
+                                p2.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::SwitchProject, window, cx)
+                                })
+                            })
+                            .child(palette.clone()),
+                    )
                 })
         });
     }
@@ -819,6 +835,16 @@ impl Palette {
 
     fn query_text(&self, cx: &App) -> String {
         self.query.read(cx).value().to_string()
+    }
+
+    /// The shortcut for `mode` pressed while the palette is open: close it when it already
+    /// shows `mode`, else switch to it.
+    fn toggle(&mut self, mode: PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == mode {
+            window.close_dialog(cx);
+        } else {
+            self.enter(mode, window, cx);
+        }
     }
 
     /// Switch to `mode` with an empty query.

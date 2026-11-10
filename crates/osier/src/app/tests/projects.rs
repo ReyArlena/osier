@@ -135,6 +135,32 @@ fn ui_switch_project_shortcut_flips_to_the_other_project(cx: &mut TestAppContext
 }
 
 #[gpui::test]
+fn ui_palette_shortcuts_close_their_own_mode_and_switch_to_the_other(cx: &mut TestAppContext) {
+    let (h, _a, _b, _first, _second) = two_projects(cx);
+    let switcher = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "palette-badge").is_some();
+    h.keys(cx, "ctrl-p");
+    assert!(in_palette(&h, cx) && !switcher(&h, cx), "commands");
+    h.keys(cx, "ctrl-p");
+    assert!(!in_palette(&h, cx), "the palette key again closes it");
+    h.keys(cx, "ctrl-o");
+    assert!(switcher(&h, cx));
+    h.keys(cx, "ctrl-o");
+    assert!(!in_palette(&h, cx), "the switcher key again closes it");
+    // The other key switches mode instead of doing nothing.
+    h.keys(cx, "ctrl-o ctrl-p");
+    assert!(in_palette(&h, cx) && !switcher(&h, cx));
+    h.keys(cx, "ctrl-o");
+    assert!(switcher(&h, cx));
+    // Text in the field does not get in the way.
+    h.type_text(cx, "x");
+    h.keys(cx, "ctrl-o");
+    assert!(!in_palette(&h, cx));
+    // Focus is back on the app: its shortcuts work.
+    h.keys(cx, "ctrl-p");
+    assert!(in_palette(&h, cx));
+}
+
+#[gpui::test]
 fn ui_switch_project_highlights_the_first_row_when_it_is_not_current(cx: &mut TestAppContext) {
     let (h, _a, _b, first, second) = two_projects(cx);
     // A recent project below the open ones must not steal the highlight.

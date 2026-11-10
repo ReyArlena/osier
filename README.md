@@ -113,8 +113,8 @@ Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directori
 (Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
 projects in the command palette. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
 `ctrl-t` updates the project, `ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-p` or
-`F1` opens the command palette, `ctrl-,` opens settings, `/` searches projects, `?` searches
-files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
+`F1` opens the command palette, `ctrl-,` opens settings (each closes again when pressed a
+second time), `/` searches projects, `?` searches files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
 text field.
 
 The project filter also takes `is:changed` (uncommitted changes), `is:ahead` (unpushed

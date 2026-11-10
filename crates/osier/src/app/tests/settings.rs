@@ -44,6 +44,24 @@ fn ui_settings_close_button_closes_and_shortcuts_keep_working(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn ui_settings_shortcut_again_closes_settings(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    h.keys(cx, "ctrl-,");
+    assert!(h.has_settings(cx));
+    h.keys(cx, "ctrl-,");
+    assert!(!h.has_settings(cx), "the settings key again closes it");
+    // From the search field too, and focus goes back to the app.
+    h.keys(cx, "ctrl-, /");
+    h.type_text(cx, "theme");
+    h.keys(cx, "ctrl-,");
+    assert!(!h.has_settings(cx));
+    h.keys(cx, "ctrl-,");
+    assert!(h.has_settings(cx), "app shortcuts work after closing");
+}
+
+#[gpui::test]
 fn higher_contrast_strengthens_selections_and_switches_back_cleanly(cx: &mut TestAppContext) {
     use gpui_kit::component::ActiveTheme as _;
     let repo = TempRepo::new();
