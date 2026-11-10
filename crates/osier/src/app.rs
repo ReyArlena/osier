@@ -201,6 +201,10 @@ pub struct Osier {
     /// The command log lists only failed commands.
     pub(crate) command_log_failures_only: bool,
     pub(crate) diff: Entity<DiffState>,
+    /// The diff's line selection as it was when a "Stage lines" style button was pressed.
+    /// Any mouse press clears the selection in the diff itself, before the button's click
+    /// arrives, so the button keeps its own copy from press to release.
+    pub(crate) line_pick: Option<gpui_kit::component::diff::DiffLineRange>,
     /// Branches containing a commit, for the commit details panel, by hash. Cleared when
     /// the refs move.
     pub(crate) commit_branches: std::collections::HashMap<String, Vec<String>>,
@@ -567,6 +571,7 @@ impl Osier {
             notices_seen: 0,
             expanded_command: None,
             command_log_failures_only: false,
+            line_pick: None,
             diff,
             diff_subscription: None,
             diff_key: None,

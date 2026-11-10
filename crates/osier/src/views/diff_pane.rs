@@ -114,9 +114,14 @@ impl Osier {
             })
         });
         let area = self.diff_area();
-        let has_selection = self.diff.read(cx).selected_lines().is_some();
+        // The selected lines, or the ones a line button was pressed with (see `line_pick`).
+        let line_range = self.diff.read(cx).selected_lines().or_else(|| {
+            let pick = self.line_pick.as_ref()?;
+            let (path, _) = area.as_ref()?;
+            (pick.path().as_ref() == path.as_str()).then(|| pick.clone())
+        });
         let line_actions: &[HunkAction] = match &area {
-            Some((_, a)) if has_selection => HunkAction::for_area(*a),
+            Some((_, a)) if line_range.is_some() => HunkAction::for_area(*a),
             _ => &[],
         };
 
@@ -554,10 +559,39 @@ impl Osier {
                     )
                     .children(line_actions.iter().map(|action| {
                         let action = *action;
+                        let pressed = line_range.clone();
                         Button::new(SharedString::from(format!("lines-{}", action.label())))
+                            .test_id(|| format!("lines-{}", action.label().to_lowercase()))
                             .outline()
                             .xsmall()
                             .label(format!("{} lines", action.label()))
+                            // The press itself clears the diff's selection, so hold on to
+                            // the lines until the click (or a release somewhere else).
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.line_pick = pressed.clone();
+                                    cx.notify();
+                                }),
+                            )
+                            // Released somewhere else: let go, but only once the release
+                            // has reached every button, since the one next to this may be
+                            // the one that was clicked.
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    if this.line_pick.is_some() {
+                                        let view = cx.entity();
+                                        cx.defer(move |cx| {
+                                            view.update(cx, |this, cx| {
+                                                if this.line_pick.take().is_some() {
+                                                    cx.notify();
+                                                }
+                                            })
+                                        });
+                                    }
+                                }),
+                            )
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.lines_action(action, window, cx)
                             }))

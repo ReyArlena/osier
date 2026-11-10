@@ -69,14 +69,16 @@ impl Osier {
         self.apply_hunk_patch(path, patch, area, action, "hunk", window, cx);
     }
 
-    /// Apply `action` to the lines selected in the diff view.
+    /// Apply `action` to the lines selected in the diff view, or to the ones its button was
+    /// pressed with (`line_pick`): the selection is already gone by the time a click arrives.
     pub(crate) fn lines_action(
         &mut self,
         action: HunkAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(range) = self.diff.read(cx).selected_lines() else {
+        let picked = self.line_pick.take();
+        let Some(range) = self.diff.read(cx).selected_lines().or(picked) else {
             return;
         };
         let path = range.path().to_string();
@@ -101,13 +103,16 @@ impl Osier {
         let Some(file) = self.diff_file_model(&path) else {
             return;
         };
+        // Unstage and discard apply the patch in reverse, which changes what the lines left
+        // out of it have to look like.
+        let reverse = action != HunkAction::Stage;
         // The hunk that holds the selection: the first with a selected changed line.
         let Some((hunk_ix, patch)) = file.hunks.iter().enumerate().find_map(|(ix, h)| {
             let hit = h
                 .lines
                 .iter()
                 .any(|l| l.kind != osier_git::diff::LineKind::Context && selected(l));
-            hit.then(|| lines_patch(file, ix, selected))
+            hit.then(|| lines_patch(file, ix, reverse, selected))
                 .flatten()
                 .map(|p| (ix, p))
         }) else {

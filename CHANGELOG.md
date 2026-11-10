@@ -75,6 +75,7 @@ All notable changes to Osier are documented here. The format follows
   `ctrl-shift-n`, or "Toggle notifications" in the command palette. Session only, nothing
   is saved.
 
+
 ### Changed
 
 - With Commits not pushed yet set to Dim, the rest of an unpushed commit's row (subject,
@@ -152,6 +153,12 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- "Stage lines", "Unstage lines" and "Discard lines" did nothing when clicked: pressing the
+  button cleared the line selection before the click arrived. The buttons now keep the
+  selected lines from press to release.
+- Unstaging or discarding only some of the changed lines of a hunk failed with "patch does
+  not apply" (so did staging some lines of a deleted file): the patch for the selected lines
+  was always built for staging. It is now built for the direction it is applied in.
 - "Expand the diff pane" in the command palette shows its shortcut (`ctrl-shift-m`) like
   the other commands.
 - Log rows hid other local branches on a commit with several refs: only the first three

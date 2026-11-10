@@ -673,6 +673,114 @@ fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
     });
 }
 
+/// Select lines `start..=end` of the new side of `path` in the diff pane, as dragging over
+/// them does.
+fn select_new_lines(h: &Harness, cx: &mut TestAppContext, path: &'static str, start: usize) {
+    use gpui_kit::component::diff::{DiffLineRange, DiffSide};
+    h.act(cx, |osier, _, cx| {
+        osier.diff.update(cx, |d, cx| {
+            let range = DiffLineRange::new(path, DiffSide::Modified, start, start);
+            d.set_selected_lines(Some(range), cx)
+        });
+        cx.notify();
+    });
+}
+
+#[gpui::test]
+fn ui_unstage_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("f.txt", "a\nb\nc\n", "base");
+    repo.write("f.txt", "a\nB\nc\nd\n");
+    repo.git(["add", "f.txt"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:staged:f.txt");
+    assert!(
+        h.bounds(cx, "lines-unstage").is_none(),
+        "no button without a selection"
+    );
+    // The added "d" is line 4 of the new side; the b -> B change shares its hunk.
+    select_new_lines(&h, cx, "f.txt", 4);
+    h.click(cx, "lines-unstage");
+    assert_eq!(
+        repo.git(["diff", "--cached", "-U0"])
+            .lines()
+            .filter(|l| l.starts_with(['+', '-']) && !l.starts_with("+++") && !l.starts_with("---"))
+            .collect::<Vec<_>>(),
+        ["-b", "+B"],
+        "the other change of the hunk stays staged"
+    );
+    assert_eq!(
+        repo.git(["diff", "-U0"])
+            .lines()
+            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+            .collect::<Vec<_>>(),
+        ["+d"],
+        "the unstaged line is back under Unstaged"
+    );
+}
+
+#[gpui::test]
+fn ui_stage_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("f.txt", "a\nb\nc\n", "base");
+    repo.write("f.txt", "a\nB\nc\nd\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:unstaged:f.txt");
+    select_new_lines(&h, cx, "f.txt", 4);
+    h.click(cx, "lines-stage");
+    assert_eq!(
+        repo.git(["diff", "--cached", "-U0"])
+            .lines()
+            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+            .collect::<Vec<_>>(),
+        ["+d"]
+    );
+    assert!(
+        h.bounds(cx, "lines-stage").is_none(),
+        "the buttons go once the lines are staged"
+    );
+}
+
+#[gpui::test]
+fn ui_line_buttons_go_when_the_press_is_released_elsewhere(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("f.txt", "a\nb\nc\n", "base");
+    repo.write("f.txt", "a\nB\nc\nd\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:unstaged:f.txt");
+    select_new_lines(&h, cx, "f.txt", 4);
+    let button = h.bounds(cx, "lines-stage").unwrap().center();
+    let elsewhere = h.bounds(cx, "commit-message").unwrap().center();
+    let mut v = h.visual(cx);
+    v.simulate_mouse_down(button, gpui::MouseButton::Left, gpui::Modifiers::default());
+    v.run_until_parked();
+    v.simulate_mouse_up(
+        elsewhere,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::default(),
+    );
+    v.run_until_parked();
+    assert!(h.bounds(cx, "lines-stage").is_none());
+    assert!(
+        repo.git(["diff", "--cached", "--name-only"])
+            .trim()
+            .is_empty()
+    );
+}
+
+#[gpui::test]
+fn ui_discard_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("f.txt", "a\nb\nc\n", "base");
+    repo.write("f.txt", "a\nB\nc\nd\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:unstaged:f.txt");
+    select_new_lines(&h, cx, "f.txt", 4);
+    h.click(cx, "lines-discard");
+    h.click(cx, "dialog-ok");
+    assert_eq!(repo.read("f.txt"), "a\nB\nc\n");
+}
+
 #[gpui::test]
 fn ui_palette_only_commands_can_be_bound(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
