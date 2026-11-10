@@ -29,6 +29,7 @@ mod merge_window;
 mod new_repo;
 mod notices;
 mod palette;
+mod palette_menus;
 #[cfg(feature = "profiler")]
 mod profiling;
 mod project;

@@ -8,6 +8,16 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- "Switch branch…" in the command palette (`ctrl-shift-b`): local branches, newest first, then
+  remote branches not checked out yet, with when each last changed and its subject. The
+  current branch is left out, so `ctrl-shift-b` then Enter goes back to the branch you were
+  on before. A remote branch is checked out as a local one tracking it.
+- In the command palette, Fetch…, Pull…, Push… and Update branch… open submenus with the
+  same choices as the title bar's dropdowns (fetch and prune, pull with rebase, push and set
+  upstream, force push with lease and so on). Update branch… can also merge or rebase just
+  this once, or forget the method remembered for the project. The row a shortcut runs shows
+  its key.
+- "Forget GitHub account choice for this project" in the command palette.
 - GitHub lists are kept ready:
   - Covered: repositories to clone, organisations, templates, `.gitignore` and licence lists.
   - The clone list and the Create dialog show the last known lists at once (saved in the

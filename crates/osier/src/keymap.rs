@@ -164,6 +164,14 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             SwitchProject
         ),
         spec!(
+            "switch_branch",
+            "Switch branch",
+            "General",
+            ["ctrl-shift-b"],
+            App,
+            SwitchBranch
+        ),
+        spec!(
             "open_settings",
             "Settings",
             "General",

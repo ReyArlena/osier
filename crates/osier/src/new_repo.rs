@@ -369,6 +369,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             } else {
                 ChoicePick::CreateAccount(a.clone())
             },
+            action: None,
         })
         .collect();
     let other: SharedString = "Other".into();
@@ -379,6 +380,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             detail: Some("Any HTTPS or SSH clone address".into()),
             icon: Lucide::Link,
             pick: ChoicePick::CloneOther,
+            action: None,
         }
     } else {
         Choice {
@@ -387,6 +389,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             detail: Some("A local repository (git init)".into()),
             icon: Lucide::HardDrive,
             pick: ChoicePick::CreateLocal,
+            action: None,
         }
     });
     rows
@@ -431,6 +434,7 @@ pub(crate) fn repo_choices(account: &GhAccount, repos: &[GhRepo]) -> Vec<Choice>
                     Lucide::BookMarked
                 },
                 pick: ChoicePick::CloneRepo(account.clone(), r.clone()),
+                action: None,
             }
         })
         .collect()

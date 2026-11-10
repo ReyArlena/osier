@@ -8,6 +8,7 @@
 //! listed and cleared in Settings > Projects > Per-project choices.
 
 use crate::app_dialog::AppDialogExt as _;
+use crate::notices::WindowNoticeExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -205,6 +206,31 @@ impl Osier {
                     true
                 })
         });
+    }
+
+    /// The palette's "Update branch with merge / rebase": run it that way this once, without
+    /// the dialog and without changing the remembered method.
+    pub(crate) fn update_branch_with(
+        &mut self,
+        strategy: PullStrategy,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_project().is_some() {
+            self.start_remote(update_op(strategy), window, cx);
+        }
+    }
+
+    /// The palette's "Forget the update method for this project".
+    pub(crate) fn forget_update_method(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self
+            .active_project()
+            .map(|p| p.path.to_string_lossy().into_owned())
+        else {
+            return;
+        };
+        self.clear_update_strategy(&key, cx);
+        window.push_notice("Update branch will ask how next time", cx);
     }
 
     /// Settings > Projects > Per-project choices: forget the diverged-pull choice.

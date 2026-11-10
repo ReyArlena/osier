@@ -487,3 +487,160 @@ fn pull_request_links_come_from_git_alone(cx: &mut TestAppContext) {
         Some("https://github.com/octo/repo/pull/93")
     );
 }
+
+#[gpui::test]
+fn ui_palette_update_branch_submenu_runs_a_method_once_and_forgets(cx: &mut TestAppContext) {
+    let (repo, _other) = diverged_with_local_edit();
+    let h = Harness::open(cx, &repo);
+    let key = repo.path().to_string_lossy().into_owned();
+    let forget = "palette-choice:Forget the update method for this project";
+
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "Update branch");
+    h.click(cx, "palette-command:Update branch…");
+    assert!(h.bounds(cx, "palette-badge").is_some(), "submenu");
+    assert!(h.bounds(cx, "palette-choice:Update branch").is_some());
+    assert!(h.bounds(cx, forget).is_none(), "nothing remembered yet");
+    h.click(cx, "palette-choice:Update branch with rebase");
+    assert!(h.bounds(cx, "update-dialog").is_none(), "no dialog");
+    assert!(repo.path().join("remote.txt").exists(), "updated");
+    assert_eq!(
+        repo.git(["rev-list", "--count", "--merges", "HEAD"]).trim(),
+        "0",
+        "rebased"
+    );
+    assert_eq!(repo.read("a.txt"), "edited\n", "local edit put back");
+    h.read(cx, |o, _| {
+        assert!(o.state.update_strategies.is_empty(), "not remembered")
+    });
+
+    h.act(cx, |o, _, _| {
+        o.state.update_strategies.insert(
+            key.clone(),
+            osier_config::state::UpdateChoice {
+                strategy: "merge".into(),
+                remember: true,
+            },
+        );
+    });
+    h.act(cx, |o, w, cx| {
+        o.open_palette_in(crate::palette::PaletteMode::UpdateBranch, w, cx)
+    });
+    h.click(cx, forget);
+    h.read(cx, |o, _| assert!(o.state.update_strategies.is_empty()));
+}
+
+#[gpui::test]
+fn ui_palette_remote_submenus_offer_the_dropdown_options(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let _bare = repo.add_bare_origin();
+    let h = Harness::open(cx, &repo);
+
+    for (command, rows) in [
+        (
+            "Fetch…",
+            &[
+                "Fetch all remotes",
+                "Fetch all and prune deleted branches",
+                "Fetch origin",
+            ][..],
+        ),
+        (
+            "Pull…",
+            &[
+                "Pull (fast-forward only)",
+                "Pull with rebase",
+                "Pull with merge",
+            ][..],
+        ),
+        (
+            "Push…",
+            &[
+                "Push",
+                "Push and set upstream (origin)",
+                "Force push with lease…",
+            ][..],
+        ),
+    ] {
+        h.keys(cx, "ctrl-p");
+        h.type_text(cx, command);
+        h.click(cx, &format!("palette-command:{command}"));
+        for row in rows {
+            assert!(
+                h.bounds(cx, &format!("palette-choice:{row}")).is_some(),
+                "{command} lists {row}"
+            );
+        }
+        h.keys(cx, "escape escape");
+    }
+
+    h.keys(cx, "ctrl-p");
+    h.type_text(cx, "Push…");
+    h.click(cx, "palette-command:Push…");
+    h.click(cx, "palette-choice:Push and set upstream (origin)");
+    assert!(
+        repo.git(["ls-remote", "--heads", "origin"])
+            .contains("refs/heads/main"),
+        "pushed"
+    );
+    assert_eq!(
+        repo.git(["rev-parse", "--abbrev-ref", "main@{upstream}"])
+            .trim(),
+        "origin/main"
+    );
+}
+
+#[gpui::test]
+fn ui_switch_branch_lists_other_branches_and_flips(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let _bare = repo.add_bare_origin();
+    repo.git(["push", "-q", "-u", "origin", "main"]);
+    repo.checkout_new("away");
+    repo.git(["push", "-q", "origin", "away"]);
+    repo.checkout("main");
+    repo.git(["branch", "-q", "-D", "away"]);
+    repo.checkout_new("feature");
+    repo.commit_file("b.txt", "b\n", "feature work");
+    repo.checkout("main");
+    let h = Harness::open(cx, &repo);
+    let current = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |o, _| {
+            o.active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .and_then(|s| s.status.branch.head.clone())
+                .unwrap_or_default()
+        })
+    };
+
+    h.keys(cx, "ctrl-shift-b");
+    assert!(h.bounds(cx, "palette-badge").is_some(), "submenu");
+    assert!(h.bounds(cx, "palette-choice:feature").is_some());
+    assert!(
+        h.bounds(cx, "palette-choice:main").is_none(),
+        "current left out"
+    );
+    assert!(
+        h.bounds(cx, "palette-choice:origin/away").is_some(),
+        "remote-only branch"
+    );
+    assert!(
+        h.bounds(cx, "palette-choice:origin/main").is_none(),
+        "already checked out locally"
+    );
+    // The newest other branch is first: enter flips to it and back.
+    h.keys(cx, "enter");
+    assert_eq!(current(&h, cx), "feature");
+    h.keys(cx, "ctrl-shift-b enter");
+    assert_eq!(current(&h, cx), "main");
+
+    h.keys(cx, "ctrl-shift-b");
+    h.click(cx, "palette-choice:origin/away");
+    assert_eq!(current(&h, cx), "away");
+    assert_eq!(
+        repo.git(["rev-parse", "--abbrev-ref", "away@{upstream}"])
+            .trim(),
+        "origin/away"
+    );
+}

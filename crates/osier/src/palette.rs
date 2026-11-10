@@ -6,7 +6,9 @@
 //! Some entries open a submenu (a [`PaletteMode`]): the list is replaced and the query field
 //! shows the submenu's name in a badge. Backspace on an empty query or Escape go back to the
 //! commands; Escape there closes the palette. A submenu can also be opened directly by its
-//! own shortcut (ctrl-o for "Switch project").
+//! own shortcut (ctrl-o for "Switch project", ctrl-shift-b for "Switch branch"). The Fetch,
+//! Pull, Push and Update branch submenus list what the title bar's dropdowns offer
+//! (`palette_menus.rs`).
 //!
 //! gpui-kit's `Command` draws its own query field with a fixed search icon, so the palette
 //! hides it (`searchable(false)`), draws an `Input` with the badge in the `header` slot and
@@ -44,6 +46,12 @@ pub(crate) enum PaletteMode {
     CloneRepo,
     /// "Create new repository…": a gh account, or "No remote".
     CreateAccount,
+    /// Local branches, then remote ones not checked out yet.
+    SwitchBranch,
+    Fetch,
+    Pull,
+    Push,
+    UpdateBranch,
 }
 
 impl PaletteMode {
@@ -54,6 +62,11 @@ impl PaletteMode {
             PaletteMode::SwitchProject => Some("Switch project"),
             PaletteMode::CloneAccount | PaletteMode::CloneRepo => Some("Clone repository"),
             PaletteMode::CreateAccount => Some("New repository"),
+            PaletteMode::SwitchBranch => Some("Switch branch"),
+            PaletteMode::Fetch => Some("Fetch"),
+            PaletteMode::Pull => Some("Pull"),
+            PaletteMode::Push => Some("Push"),
+            PaletteMode::UpdateBranch => Some("Update branch"),
         }
     }
 
@@ -64,6 +77,11 @@ impl PaletteMode {
             PaletteMode::CloneAccount => "Pick a GitHub account, or Other… for any address",
             PaletteMode::CloneRepo => "Search repositories…",
             PaletteMode::CreateAccount => "Pick a GitHub account, or No remote",
+            PaletteMode::SwitchBranch => "Search branches…",
+            PaletteMode::Fetch => "How to fetch…",
+            PaletteMode::Pull => "How to pull…",
+            PaletteMode::Push => "How to push…",
+            PaletteMode::UpdateBranch => "How to update the branch…",
         }
     }
 
@@ -76,14 +94,17 @@ impl PaletteMode {
     }
 }
 
-/// A row of the clone and create submenus.
+/// A row of a submenu other than "Switch project".
 #[derive(Clone)]
 pub(crate) struct Choice {
+    /// Group heading; rows with an empty one are listed without a heading.
     pub section: SharedString,
     pub label: SharedString,
     pub detail: Option<SharedString>,
     pub icon: Lucide,
     pub pick: ChoicePick,
+    /// Registry action id whose keys are shown as the row's hint.
+    pub action: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -93,6 +114,15 @@ pub(crate) enum ChoicePick {
     CloneRepo(osier_auth::GhAccount, osier_auth::hub::GhRepo),
     CreateAccount(osier_auth::GhAccount),
     CreateLocal,
+    Remote(crate::app::remote_ops::RemoteOp),
+    ForcePush,
+    /// Update branch: `None` asks (or uses the remembered method), like the button.
+    Update(Option<osier_git::ops::remote::PullStrategy>),
+    ForgetUpdateMethod,
+    Checkout {
+        name: String,
+        remote: bool,
+    },
 }
 
 impl Choice {
@@ -158,6 +188,7 @@ fn sub(
     label: &'static str,
     icon: Lucide,
     action: Option<&'static str>,
+    needs_project: bool,
     mode: PaletteMode,
 ) -> PaletteCommand {
     PaletteCommand {
@@ -165,27 +196,36 @@ fn sub(
         label,
         icon,
         action,
-        needs_project: false,
+        needs_project,
         target: Target::Submenu(mode),
     }
 }
 
 /// Every palette command, in display order.
 pub(crate) fn commands() -> Vec<PaletteCommand> {
-    use crate::app::remote_ops::RemoteOp;
     vec![
         sub(
             "General",
             "Switch project…",
             Lucide::ArrowLeftRight,
             Some("switch_project"),
+            false,
             PaletteMode::SwitchProject,
+        ),
+        sub(
+            "General",
+            "Switch branch…",
+            Lucide::GitBranch,
+            Some("switch_branch"),
+            true,
+            PaletteMode::SwitchBranch,
         ),
         sub(
             "General",
             "Clone repository…",
             Lucide::CloudDownload,
             Some("clone_repository"),
+            false,
             PaletteMode::CloneAccount,
         ),
         sub(
@@ -193,6 +233,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Create new repository…",
             Lucide::FolderPlus,
             Some("create_repository"),
+            false,
             PaletteMode::CreateAccount,
         ),
         cmd(
@@ -399,37 +440,37 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             true,
             |o, w, cx| o.shelve_prompt(Vec::new(), w, cx),
         ),
-        cmd(
+        sub(
             "Remote",
-            "Fetch all remotes",
+            "Fetch…",
             Lucide::CloudDownload,
-            Some("fetch"),
+            None,
             true,
-            |o, w, cx| o.start_remote(RemoteOp::fetch_all(), w, cx),
+            PaletteMode::Fetch,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Update branch",
+            "Update branch…",
             Lucide::FolderSync,
-            Some("update_branch"),
+            None,
             true,
-            |o, w, cx| o.update_branch(w, cx),
+            PaletteMode::UpdateBranch,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Pull",
+            "Pull…",
             Lucide::ArrowDown,
-            Some("pull"),
+            None,
             true,
-            |o, w, cx| o.start_remote(RemoteOp::pull_default(), w, cx),
+            PaletteMode::Pull,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Push",
+            "Push…",
             Lucide::ArrowUp,
-            Some("push"),
+            None,
             true,
-            |o, w, cx| o.start_remote(RemoteOp::push_default(), w, cx),
+            PaletteMode::Push,
         ),
         cmd(
             "Remote",
@@ -438,6 +479,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             None,
             true,
             |o, w, cx| o.choose_account(w, cx),
+        ),
+        cmd(
+            "Remote",
+            "Forget GitHub account choice for this project",
+            Lucide::Github,
+            None,
+            true,
+            |o, w, cx| o.clear_project_account(w, cx),
         ),
         cmd(
             "Branches",
@@ -591,7 +640,7 @@ impl Osier {
                     // The palette's own shortcuts while it is open: the dialog is drawn outside
                     // the app view, so they never reach the app's handlers. The key for the
                     // mode on screen closes the palette, the other one switches to its mode.
-                    let (p1, p2) = (palette.clone(), palette.clone());
+                    let (p1, p2, p3) = (palette.clone(), palette.clone(), palette.clone());
                     content.child(
                         v_flex()
                             .w_full()
@@ -601,6 +650,11 @@ impl Osier {
                             .on_action(move |_: &crate::app::SwitchProject, window, cx| {
                                 p2.update(cx, |p, cx| {
                                     p.toggle(PaletteMode::SwitchProject, window, cx)
+                                })
+                            })
+                            .on_action(move |_: &crate::app::SwitchBranch, window, cx| {
+                                p3.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::SwitchBranch, window, cx)
                                 })
                             })
                             .child(palette.clone()),
@@ -630,7 +684,8 @@ impl Osier {
             PaletteMode::CloneAccount | PaletteMode::CreateAccount => {
                 crate::new_repo::account_choices(self, mode == PaletteMode::CloneAccount)
             }
-            _ => Vec::new(),
+            PaletteMode::SwitchBranch => self.branch_choices(),
+            _ => self.remote_choices(mode),
         }
     }
 }
@@ -983,6 +1038,16 @@ impl Palette {
                         o.prompt_create(Some(account), window, cx)
                     }
                     ChoicePick::CreateLocal => o.prompt_create(None, window, cx),
+                    ChoicePick::Remote(op) => o.start_remote(op, window, cx),
+                    ChoicePick::ForcePush => o.confirm_force_push(Default::default(), window, cx),
+                    ChoicePick::Update(None) => o.update_branch(window, cx),
+                    ChoicePick::Update(Some(strategy)) => {
+                        o.update_branch_with(strategy, window, cx)
+                    }
+                    ChoicePick::ForgetUpdateMethod => o.forget_update_method(window, cx),
+                    ChoicePick::Checkout { name, remote } => {
+                        o.checkout_branch(name, remote, window, cx)
+                    }
                     ChoicePick::CloneAccount(_) => {}
                 });
             }
@@ -993,6 +1058,8 @@ impl Palette {
     fn choice_item(&self, ix: usize, cx: &App) -> CommandItem {
         let c = self.choices[ix].clone();
         let muted = cx.theme().muted_foreground;
+        let mono = cx.theme().mono_font_family.clone();
+        let keys = c.action.and_then(|id| crate::keymap::hint(id, cx));
         let id = format!("palette-choice:{}", c.label);
         CommandItem::new()
             .label(c.label.clone())
@@ -1014,6 +1081,15 @@ impl Palette {
                             .text_color(muted)
                             .children(c.detail.clone()),
                     )
+                    .when_some(keys.clone(), |this, k| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .font_family(mono.clone())
+                                .child(k),
+                        )
+                    })
                     .when(matches!(c.pick, ChoicePick::CloneAccount(_)), |this| {
                         this.child(Icon::new(Lucide::ChevronRight).xsmall().text_color(muted))
                     })
@@ -1179,11 +1255,12 @@ impl Render for Palette {
                 let sections = self.choice_sections(cx);
                 let mut picks: Vec<Vec<Pick>> = Vec::new();
                 for (section, rows) in &sections {
-                    command = command.group(
-                        CommandGroup::new()
-                            .label(section.clone())
-                            .items(rows.iter().map(|&ix| self.choice_item(ix, cx))),
-                    );
+                    let mut group = CommandGroup::new();
+                    if !section.is_empty() {
+                        group = group.label(section.clone());
+                    }
+                    command =
+                        command.group(group.items(rows.iter().map(|&ix| self.choice_item(ix, cx))));
                     picks.push(rows.iter().map(|&ix| Pick::Choice(ix)).collect());
                 }
                 if let Some(status) = self.status.clone() {
