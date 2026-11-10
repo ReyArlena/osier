@@ -31,14 +31,26 @@ impl Osier {
 
     pub(crate) fn toggle_amend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.amend = !self.amend;
-        if self.amend && self.commit_message_text(cx).trim().is_empty() {
-            // Prefill with HEAD's message, like PhpStorm's amend checkbox.
-            let msg = self
-                .active_project()
-                .and_then(|p| commit_ops::head_message(&p.repo).ok().flatten());
-            if let Some(msg) = msg {
-                self.set_message(&msg, window, cx);
-            }
+        if self.amend
+            && self.commit_message_text(cx).trim().is_empty()
+            && let Some(repo) = self.active_project().map(|p| p.repo.clone())
+        {
+            // Prefill with HEAD's message, like PhpStorm's amend checkbox (`git log` in the
+            // background). Only if amend is still on and the box still empty when it is back.
+            self.in_background(
+                crate::background::READING_COMMIT,
+                move || commit_ops::head_message(&repo).ok().flatten(),
+                |this, msg, window, cx| {
+                    if let Some(msg) = msg
+                        && this.amend
+                        && this.commit_message_text(cx).trim().is_empty()
+                    {
+                        this.set_message(&msg, window, cx);
+                    }
+                },
+                window,
+                cx,
+            );
         }
         cx.notify();
     }

@@ -28,7 +28,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_auth::GhAccount;
 use osier_auth::hub::{CreatedRepo, GhRepo, License, NewRepo};
-use osier_config::history::{self, HistoryEntry};
+use osier_config::history::HistoryEntry;
 use osier_git::ops::remote::{self, CloneOptions, RemoteContext};
 use osier_git::{CancelToken, GitError, Progress};
 
@@ -739,9 +739,7 @@ impl Osier {
             entry.ok = false;
             entry.error = Some(crate::app::ops::describe(e));
         }
-        if let Err(e) = history::append(&self.paths, &entry) {
-            tracing::warn!(error = %e, "could not write history");
-        }
+        self.record_history(entry, cx);
         match result {
             Ok(_) => {
                 window.push_notice(
@@ -749,13 +747,22 @@ impl Osier {
                         .title(label.to_string()),
                     cx,
                 );
-                self.open_project_notify(target, window, cx);
-                if let (Some(account), Some(project)) = (account, self.active_project())
-                    && project.path.starts_with(target)
-                {
-                    let key = project.path.to_string_lossy().into_owned();
-                    self.set_project_account(&key, &account.login, true);
-                }
+                let target_dir = target.to_path_buf();
+                let login = account.map(|a| a.login.clone());
+                self.open_project_then(
+                    target,
+                    move |this, ix, _, _| {
+                        if let Some(login) = login
+                            && let Some(project) = this.projects.get(ix)
+                            && project.path.starts_with(&target_dir)
+                        {
+                            let key = project.path.to_string_lossy().into_owned();
+                            this.set_project_account(&key, &login, true);
+                        }
+                    },
+                    window,
+                    cx,
+                );
             }
             Err(GitError::Cancelled(_)) => {
                 window.push_notice(format!("{label}: cancelled"), cx);

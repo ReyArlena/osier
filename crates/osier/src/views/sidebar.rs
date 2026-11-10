@@ -556,7 +556,7 @@ impl Osier {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let missing = !path.is_dir();
+            let missing = self.project_missing(&path);
             let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
             let (item, dot) = self.status_item(
                 &path,
@@ -614,7 +614,7 @@ impl Osier {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let missing = !path.is_dir();
+            let missing = self.project_missing(&path);
             let open_path = path.clone();
             let menu_weak = weak.clone();
             let menu_path = path.clone();

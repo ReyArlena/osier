@@ -50,6 +50,53 @@ pub struct ThemeStore {
 
 impl Global for ThemeStore {}
 
+/// Themes read from disk by [`read_themes`], ready for [`ThemeStore::install`].
+pub struct LoadedThemes {
+    themes: Vec<ThemeConfig>,
+    dux_mode: Option<osier_theme::Mode>,
+}
+
+/// Read user theme files, the Dux Shell colours and the bundled themes, in that order (an
+/// earlier name wins). Blocking: file reads and JSON parsing.
+pub fn read_themes(user_dir: &Path, dux_file: Option<&Path>) -> LoadedThemes {
+    let mut themes: Vec<ThemeConfig> = Vec::new();
+    let mut push = |source: &str, origin: &str| -> bool {
+        match serde_json::from_str::<ThemeSet>(source) {
+            Ok(set) => {
+                for theme in set.themes {
+                    if !themes.iter().any(|t| t.name == theme.name) {
+                        themes.push(theme);
+                    }
+                }
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, origin, "ignored invalid theme file");
+                false
+            }
+        }
+    };
+    for path in user_theme_files(user_dir) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                push(&text, &path.display().to_string());
+            }
+            Err(error) => tracing::warn!(%error, path = %path.display(), "cannot read theme"),
+        }
+    }
+    let mut dux_mode = None;
+    if let Some(path) = dux_file
+        && let Some((doc, mode)) = osier_theme::dux::load_from(path)
+        && push(&doc, "dux shell")
+    {
+        dux_mode = Some(mode);
+    }
+    for source in BUNDLED {
+        push(source, "bundled");
+    }
+    LoadedThemes { themes, dux_mode }
+}
+
 impl ThemeStore {
     /// Install the global store once (the app and the headless tests both call this).
     pub fn ensure(user_dir: PathBuf, watch: bool, cx: &mut App) {
@@ -108,44 +155,23 @@ impl ThemeStore {
         self.reload();
     }
 
-    /// Re-read everything: user files first, then Dux Shell, then bundled.
+    /// Re-read everything: user files first, then Dux Shell, then bundled. Blocking (file
+    /// reads and JSON parsing): startup and tests only. A change on disk goes through
+    /// [`ThemeStore::sources`], [`read_themes`] in the background and [`ThemeStore::install`].
     pub fn reload(&mut self) {
-        let mut themes: Vec<Rc<ThemeConfig>> = Vec::new();
-        let mut push = |source: &str, origin: &str| -> bool {
-            match serde_json::from_str::<ThemeSet>(source) {
-                Ok(set) => {
-                    for theme in set.themes {
-                        if !themes.iter().any(|t| t.name == theme.name) {
-                            themes.push(Rc::new(theme));
-                        }
-                    }
-                    true
-                }
-                Err(error) => {
-                    tracing::warn!(%error, origin, "ignored invalid theme file");
-                    false
-                }
-            }
-        };
-        for path in user_theme_files(&self.user_dir) {
-            match std::fs::read_to_string(&path) {
-                Ok(text) => {
-                    push(&text, &path.display().to_string());
-                }
-                Err(error) => tracing::warn!(%error, path = %path.display(), "cannot read theme"),
-            }
-        }
-        self.dux_mode = None;
-        if let Some(path) = self.dux_file()
-            && let Some((doc, mode)) = osier_theme::dux::load_from(&path)
-            && push(&doc, "dux shell")
-        {
-            self.dux_mode = Some(mode);
-        }
-        for source in BUNDLED {
-            push(source, "bundled");
-        }
-        self.themes = themes;
+        let (user_dir, dux) = self.sources();
+        self.install(read_themes(&user_dir, dux.as_deref()));
+    }
+
+    /// Where themes are read from: the user folder and the Dux Shell colour file, if any.
+    pub fn sources(&self) -> (PathBuf, Option<PathBuf>) {
+        (self.user_dir.clone(), self.dux_file())
+    }
+
+    /// Take themes read by [`read_themes`].
+    pub fn install(&mut self, loaded: LoadedThemes) {
+        self.themes = loaded.themes.into_iter().map(Rc::new).collect();
+        self.dux_mode = loaded.dux_mode;
     }
 
     fn start_watchers(&mut self) {

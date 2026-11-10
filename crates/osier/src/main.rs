@@ -35,6 +35,7 @@ mod repo_config;
 mod repo_watch;
 mod row_menu;
 mod runtime_info;
+mod save_queue;
 mod settings_panel;
 mod sidebar_query;
 mod system_motion;

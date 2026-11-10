@@ -43,16 +43,33 @@ impl Osier {
             );
             return;
         }
-        let items = match rebase_interactive::commits_since(&project.repo, &base) {
-            Ok(items) => items,
-            Err(e) => {
-                window.push_notice(
+        // `git log` over the range can take a while on a big repository: in the background,
+        // then the dialog opens with the list.
+        let repo = project.repo.clone();
+        let since = base.clone();
+        self.in_background(
+            crate::background::LISTING_COMMITS,
+            move || rebase_interactive::commits_since(&repo, &since),
+            move |this, items, window, cx| match items {
+                Ok(items) => this.show_rebase_dialog(base, items, window, cx),
+                Err(e) => window.push_notice(
                     Notice::error(e.to_string()).title("Cannot list commits"),
                     cx,
-                );
-                return;
-            }
-        };
+                ),
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// The interactive rebase dialog for the commits above `base`.
+    fn show_rebase_dialog(
+        &mut self,
+        base: String,
+        items: Vec<TodoItem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if items.is_empty() {
             window.push_notice("No commits above that point to rebase", cx);
             return;

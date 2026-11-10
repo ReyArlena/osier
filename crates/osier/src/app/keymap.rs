@@ -41,12 +41,15 @@ impl Osier {
     ) -> Vec<String> {
         crate::keymap::apply(&file, cx);
         self.keymap_applied = file;
-        if let Some(dms) = &self.dms_dir {
-            match crate::dms_cheatsheet::write(dms, crate::keymap::Keymap::global(cx)) {
-                Ok(true) => tracing::debug!(dir = %dms.display(), "wrote the DMS cheatsheet"),
-                Ok(false) => {}
-                Err(error) => tracing::warn!(%error, "could not write the DMS cheatsheet"),
-            }
+        if let Some(dms) = self.dms_dir.clone() {
+            // Reads, compares and maybe rewrites a file: on the save queue.
+            let keymap = crate::keymap::Keymap::global(cx).clone();
+            self.saves
+                .push(move || match crate::dms_cheatsheet::write(&dms, &keymap) {
+                    Ok(true) => tracing::debug!(dir = %dms.display(), "wrote the DMS cheatsheet"),
+                    Ok(false) => {}
+                    Err(error) => tracing::warn!(%error, "could not write the DMS cheatsheet"),
+                });
         }
         let problems = crate::keymap::Keymap::global(cx).problems.clone();
         for p in &problems {

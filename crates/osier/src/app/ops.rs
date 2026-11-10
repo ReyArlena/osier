@@ -169,17 +169,17 @@ impl Osier {
         let summary = summary.into();
         let repo = project.repo.clone();
         let path = project.path.clone();
-        let head_before = repo.head_oid().ok().flatten();
         cx.spawn_in(window, async move |this, cx| {
-            let repo2 = repo.clone();
-            let (result, stash_clashed) = cx
+            // HEAD before and after are git processes too: all of it off the UI thread.
+            let (result, stash_clashed, head_before, head_after) = cx
                 .background_spawn(async move {
-                    let before = osier_git::stash::autostash_count(&repo2);
-                    let result = op(&repo2);
-                    (result, osier_git::stash::autostash_count(&repo2) > before)
+                    let head_before = repo.head_oid().ok().flatten();
+                    let before = osier_git::stash::autostash_count(&repo);
+                    let result = op(&repo);
+                    let clashed = osier_git::stash::autostash_count(&repo) > before;
+                    (result, clashed, head_before, repo.head_oid().ok().flatten())
                 })
                 .await;
-            let head_after = repo.head_oid().ok().flatten();
             let _ = this.update_in(cx, |this, window, cx| {
                 let summary = match &result {
                     Ok(Some(message)) => message.clone(),
@@ -211,9 +211,7 @@ impl Osier {
                 if stash_clashed {
                     window.push_notice(autostash_clash_notice(), cx);
                 }
-                if let Err(e) = history::append(&this.paths, &entry) {
-                    tracing::warn!(error = %e, "could not write history");
-                }
+                this.record_history(entry, cx);
                 if let Some(ix) = this.projects.iter().position(|p| p.path == path) {
                     this.refresh_project(ix, cx);
                 }
@@ -222,6 +220,17 @@ impl Osier {
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Append to the undo history file, off the UI thread (a file write per git operation).
+    pub(crate) fn record_history(&self, entry: HistoryEntry, cx: &mut Context<Self>) {
+        let paths = self.paths.clone();
+        cx.background_spawn(async move {
+            if let Err(e) = history::append(&paths, &entry) {
+                tracing::warn!(error = %e, "could not write history");
+            }
         })
         .detach();
     }

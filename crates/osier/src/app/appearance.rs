@@ -114,22 +114,40 @@ impl Osier {
         cx.notify();
     }
 
-    /// Reload themes when a theme file changed on disk. Returns true when something changed.
+    /// Reload themes when a theme file (or the Dux Shell colours) changed on disk: read and
+    /// parsed in the background, then applied. Returns false: the redraw comes with the result.
     pub(super) fn poll_themes(&mut self, cx: &mut Context<Self>) -> bool {
         if !crate::themes::ThemeStore::global(cx).take_dirty() {
             return false;
         }
-        crate::themes::ThemeStore::global_mut(cx).reload();
-        self.apply_appearance(cx);
-        true
+        let (user_dir, dux) = crate::themes::ThemeStore::global(cx).sources();
+        self.in_background_cx(
+            crate::background::READING_THEMES,
+            move || crate::themes::read_themes(&user_dir, dux.as_deref()),
+            |this, loaded, cx| {
+                crate::themes::ThemeStore::global_mut(cx).install(loaded);
+                this.apply_appearance(cx);
+                cx.notify();
+            },
+            cx,
+        );
+        false
     }
 
     pub(crate) fn open_themes_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.paths.themes_dir();
-        if let Err(error) = std::fs::create_dir_all(&dir) {
-            tracing::warn!(%error, "could not create the themes directory");
-        }
-        self.open_externally(&dir, window, cx);
+        let create = dir.clone();
+        self.in_background(
+            crate::background::OPENING_FOLDER,
+            move || {
+                if let Err(error) = std::fs::create_dir_all(&create) {
+                    tracing::warn!(%error, "could not create the themes directory");
+                }
+            },
+            move |this, (), window, cx| this.open_externally(&dir, window, cx),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {

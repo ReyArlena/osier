@@ -54,33 +54,47 @@ pub(crate) fn language_for(path: &str) -> &'static str {
 }
 
 impl Osier {
-    /// Text the merge editor should start from: the component's resolved text when every
-    /// conflict has a choice, otherwise the raw file with markers.
-    fn merge_seed(&self, path: &str, cx: &App) -> Option<String> {
-        if let Some(text) = self.diff.read(cx).resolved_text(path) {
-            return Some(text);
-        }
-        let repo = &self.active_project()?.repo;
-        std::fs::read_to_string(repo.workdir().join(path)).ok()
-    }
-
     /// Open the editor for the selected file (merge result for conflicts, plain otherwise).
+    /// A merge whose conflicts all have a choice starts from the resolved text; otherwise the
+    /// file is read in the background (no size limit here, so it can be large) and the editor
+    /// opens once it is in.
     pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((path, area)) = self.diff_area() else {
             return;
         };
-        let (kind, text) = match area {
-            Area::Conflicted => (EditKind::MergeResult, self.merge_seed(&path, cx)),
-            _ => (
-                EditKind::File,
-                self.active_project()
-                    .and_then(|p| std::fs::read_to_string(p.repo.workdir().join(&path)).ok()),
-            ),
+        let kind = match area {
+            Area::Conflicted => EditKind::MergeResult,
+            _ => EditKind::File,
         };
-        let Some(text) = text else {
-            window.push_notice(Notice::warning("Cannot read the file as text"), cx);
+        if kind == EditKind::MergeResult
+            && let Some(text) = self.diff.read(cx).resolved_text(&path)
+        {
+            self.install_editor(path, kind, text, window, cx);
+            return;
+        }
+        let Some(full) = self.active_project().map(|p| p.repo.workdir().join(&path)) else {
             return;
         };
+        self.in_background(
+            crate::background::LOADING_FILE,
+            move || std::fs::read_to_string(full).ok(),
+            move |this, text, window, cx| match text {
+                Some(text) => this.install_editor(path, kind, text, window, cx),
+                None => window.push_notice(Notice::warning("Cannot read the file as text"), cx),
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn install_editor(
+        &mut self,
+        path: String,
+        kind: EditKind,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let language = language_for(&path);
         let state = cx.new(|cx| {
             EditorState::new(window, cx)

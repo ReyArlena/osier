@@ -168,8 +168,9 @@ fn ui_switch_project_highlights_the_first_row_when_it_is_not_current(cx: &mut Te
     let c = TempRepo::new();
     c.commit_file("c.txt", "c\n", "first");
     let path = c.path().to_path_buf();
+    // Opening finishes in the background: let it land before closing the new project.
+    h.act(cx, |o, w, cx| o.open_project_notify(&path, w, cx));
     h.act(cx, |o, w, cx| {
-        o.open_project_notify(&path, w, cx);
         o.close_project(2, w, cx);
         o.activate(1, w, cx);
     });

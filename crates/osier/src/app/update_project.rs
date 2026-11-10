@@ -40,6 +40,20 @@ fn parse_strategy(s: &str) -> PullStrategy {
     }
 }
 
+/// What the repository's git config asks pulls to do on `branch` (`branch.<name>.rebase`,
+/// else `pull.rebase`): the first-time preselection of the Update project dialog. Runs git.
+fn git_config_strategy(repo: &osier_git::Repository, branch: Option<String>) -> PullStrategy {
+    let read = |key: &str| osier_git::config::get(repo, key).ok().flatten();
+    let value = branch
+        .and_then(|b| read(&format!("branch.{b}.rebase")))
+        .or_else(|| read("pull.rebase"));
+    // `true`, `merges`, `interactive` all rebase; `false` (or unset) merges.
+    match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("false" | "no" | "off" | "0") => PullStrategy::Merge,
+        Some(_) => PullStrategy::Rebase,
+    }
+}
+
 fn update_op(strategy: PullStrategy) -> RemoteOp {
     RemoteOp::Update(PullOptions {
         strategy,
@@ -60,35 +74,28 @@ impl Osier {
                 let strategy = parse_strategy(&choice.strategy);
                 self.start_remote(update_op(strategy), window, cx);
             }
-            last => {
-                let preselect = match last {
-                    Some(choice) => parse_strategy(&choice.strategy),
-                    None => self.git_config_strategy(),
-                };
+            Some(choice) => {
+                let preselect = parse_strategy(&choice.strategy);
                 self.update_dialog(key, preselect, window, cx);
             }
-        }
-    }
-
-    /// What the repository's git config asks pulls to do on the current branch
-    /// (`branch.<name>.rebase`, else `pull.rebase`): the first-time preselection.
-    fn git_config_strategy(&self) -> PullStrategy {
-        let Some(project) = self.active_project() else {
-            return PullStrategy::Merge;
-        };
-        let repo = &project.repo;
-        let branch = project
-            .snapshot
-            .as_ref()
-            .and_then(|s| s.status.branch.head.clone());
-        let read = |key: &str| osier_git::config::get(repo, key).ok().flatten();
-        let value = branch
-            .and_then(|b| read(&format!("branch.{b}.rebase")))
-            .or_else(|| read("pull.rebase"));
-        // `true`, `merges`, `interactive` all rebase; `false` (or unset) merges.
-        match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
-            None | Some("false" | "no" | "off" | "0") => PullStrategy::Merge,
-            Some(_) => PullStrategy::Rebase,
+            None => {
+                // The first time, preselect what git config asks for: `git config` runs in
+                // the background, then the dialog opens.
+                let repo = project.repo.clone();
+                let branch = project
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| s.status.branch.head.clone());
+                self.in_background(
+                    crate::background::READING_GIT_CONFIG,
+                    move || git_config_strategy(&repo, branch),
+                    move |this, preselect, window, cx| {
+                        this.update_dialog(key, preselect, window, cx)
+                    },
+                    window,
+                    cx,
+                );
+            }
         }
     }
 

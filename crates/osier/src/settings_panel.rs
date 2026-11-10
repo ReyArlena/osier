@@ -318,12 +318,26 @@ impl Osier {
     }
 
     /// Re-read `config.toml` after it changed on disk. Returns true when settings differ.
+    /// Blocking read: the file watcher goes through `poll_config`, which reads in the
+    /// background and applies with [`Osier::apply_reloaded_settings`].
+    #[cfg(test)]
     pub(crate) fn reload_settings_from_disk(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match Settings::load(&self.paths) {
+        let loaded = Settings::load(&self.paths);
+        self.apply_reloaded_settings(loaded, window, cx)
+    }
+
+    /// Take settings read from `config.toml`. Returns true when they differ from the current.
+    pub(crate) fn apply_reloaded_settings(
+        &mut self,
+        loaded: Result<Settings, osier_config::ConfigError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match loaded {
             Ok(fresh) if fresh != self.settings => {
                 let old_scan_dirs = std::mem::replace(&mut self.settings, fresh)
                     .projects
@@ -364,11 +378,25 @@ impl Osier {
         }
     }
 
+    /// The tick loop's check for an outside edit of `config.toml`: read in the background,
+    /// then applied. Returns false: the redraw comes with the result.
     pub(crate) fn poll_config(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        match &self.config_watch {
-            Some(w) if w.take_dirty() => self.reload_settings_from_disk(window, cx),
-            _ => false,
+        if !self.config_watch.as_ref().is_some_and(|w| w.take_dirty()) {
+            return false;
         }
+        let paths = self.paths.clone();
+        self.in_background(
+            crate::background::READING_SETTINGS,
+            move || Settings::load(&paths),
+            |this, loaded, window, cx| {
+                if this.apply_reloaded_settings(loaded, window, cx) {
+                    cx.notify();
+                }
+            },
+            window,
+            cx,
+        );
+        false
     }
 
     pub(crate) fn add_scan_dir_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {

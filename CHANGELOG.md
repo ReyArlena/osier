@@ -48,6 +48,21 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Osier no longer waits on git, file reads or other programs while you use it. These run in
+  the background, with the status bar's background-tasks label while they do:
+  - opening a project
+  - viewing a file
+  - the HEAD lookups around every git operation
+  - saving, reading and listing patches
+  - the interactive rebase list
+  - Update project's first choice
+  - turning on Amend
+  - the inline and merge editors
+  - theme and `config.toml` reloads
+  - project status watches
+  - settings and state saves (finished before Osier quits)
+- The Changes list builds only the rows on screen, so thousands of changes stay smooth. The
+  Files tab, Log and command log no longer copy their data on every frame.
 - Dialogs fade in where they sit instead of sliding down from the top, and finish sooner
   (180ms instead of 250ms).
 - Error toasts put their "View command log" button under the message instead of beside it,

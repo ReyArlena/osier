@@ -155,7 +155,7 @@ impl Osier {
             });
         }
         for path in self.pinned_matching(&everything) {
-            let icon = if path.is_dir() {
+            let icon = if !self.project_missing(&path) {
                 Lucide::Pin
             } else {
                 Lucide::FolderX
@@ -163,7 +163,7 @@ impl Osier {
             out.push(self.closed_entry(Section::Pinned, path, icon, dot_style));
         }
         for (path, provider) in self.recent_matching(&everything) {
-            let icon = if !path.is_dir() {
+            let icon = if self.project_missing(&path) {
                 Lucide::FolderX
             } else if provider.is_some() {
                 Lucide::FolderSearch

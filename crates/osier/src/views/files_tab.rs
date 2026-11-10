@@ -62,6 +62,101 @@ pub(crate) fn build_items(paths: &[String], expand_all: bool) -> Vec<TreeItem> {
     to_items(&root, "", 0, expand_all)
 }
 
+/// Status badges and the tracked set for the Files tab, for one snapshot.
+#[derive(Clone, Default)]
+pub(crate) struct FilesBadges {
+    status_src: std::sync::Arc<osier_git::status::RepoStatus>,
+    files_src: std::sync::Arc<Vec<String>>,
+    /// Status letter per changed path.
+    status: std::sync::Arc<BTreeMap<String, char>>,
+    /// Changed entries inside each folder.
+    dirty_dirs: std::sync::Arc<BTreeMap<String, usize>>,
+    /// Tracked files and the folders holding them ("Untrack" in the context menu).
+    tracked: std::sync::Arc<std::collections::HashSet<String>>,
+}
+
+impl FilesBadges {
+    fn is_for(
+        &self,
+        status: &std::sync::Arc<osier_git::status::RepoStatus>,
+        files: &std::sync::Arc<Vec<String>>,
+    ) -> bool {
+        std::sync::Arc::ptr_eq(&self.status_src, status)
+            && std::sync::Arc::ptr_eq(&self.files_src, files)
+    }
+
+    fn new(
+        status_src: std::sync::Arc<osier_git::status::RepoStatus>,
+        files: std::sync::Arc<Vec<String>>,
+    ) -> Self {
+        // Status per path, and a "dirty" flag per folder, for badges.
+        let mut status: BTreeMap<String, char> = BTreeMap::new();
+        for e in &status_src.entries {
+            let c = if e.is_conflicted() {
+                'U'
+            } else if e.is_untracked() {
+                '?'
+            } else if e.index != '.' {
+                e.index
+            } else {
+                e.worktree
+            };
+            status.insert(e.path.clone(), c);
+        }
+        // Changed entries inside each folder, at any depth (an untracked folder counts once).
+        let mut dirty_dirs: BTreeMap<String, usize> = BTreeMap::new();
+        for p in status.keys() {
+            let mut acc = String::new();
+            let parts: Vec<&str> = p.trim_end_matches('/').split('/').collect();
+            for part in &parts[..parts.len().saturating_sub(1)] {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(part);
+                *dirty_dirs.entry(acc.clone()).or_default() += 1;
+            }
+        }
+        // Tracked files and the folders holding them, for "Untrack" in the context menu.
+        // `files` lists tracked plus untracked; status names the untracked (whole untracked
+        // folders end in `/`).
+        let untracked_dirs: Vec<&str> = status_src
+            .entries
+            .iter()
+            .filter(|e| e.is_untracked() && e.path.ends_with('/'))
+            .map(|e| e.path.as_str())
+            .collect();
+        let untracked_files: std::collections::HashSet<&str> = status_src
+            .entries
+            .iter()
+            .filter(|e| e.is_untracked() && !e.path.ends_with('/'))
+            .map(|e| e.path.as_str())
+            .collect();
+        let mut tracked: std::collections::HashSet<String> = Default::default();
+        for f in files.iter() {
+            if untracked_files.contains(f.as_str())
+                || untracked_dirs.iter().any(|d| f.starts_with(d))
+            {
+                continue;
+            }
+            let mut acc = String::new();
+            for part in f.split('/') {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(part);
+                tracked.insert(acc.clone());
+            }
+        }
+        Self {
+            status: std::sync::Arc::new(status),
+            dirty_dirs: std::sync::Arc::new(dirty_dirs),
+            tracked: std::sync::Arc::new(tracked),
+            status_src,
+            files_src: files,
+        }
+    }
+}
+
 /// Case-insensitive substring match on the whole path, the same rule as the sidebar filter.
 /// The Files tab's rows for one listing, ignored list and filter. Building them sorts and
 /// walks every path, which with thousands of ignored files (eg a build folder) takes longer
@@ -294,7 +389,7 @@ impl Osier {
     }
 
     pub(crate) fn render_files(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (repo, entries, files, ignored, selection) = {
+        let (repo, status_src, files, ignored, selection) = {
             let Some(project) = self.active_project() else {
                 return self
                     .empty_state(
@@ -326,73 +421,53 @@ impl Osier {
             }
             (
                 project.repo.clone(),
-                snapshot.status.entries.clone(),
+                snapshot.status.clone(),
                 snapshot.files.clone(),
                 snapshot.ignored.clone().filter(|_| self.show_ignored),
                 project.selection.clone(),
             )
         };
-        // Status per path, and a "dirty" flag per folder, for badges.
-        let mut status: BTreeMap<String, char> = BTreeMap::new();
-        for e in &entries {
-            let c = if e.is_conflicted() {
-                'U'
-            } else if e.is_untracked() {
-                '?'
-            } else if e.index != '.' {
-                e.index
-            } else {
-                e.worktree
-            };
-            status.insert(e.path.clone(), c);
+        // Badges and the tracked set are built once per snapshot, in the background: walking
+        // every file of a big repository takes tens of milliseconds. Until the new set is back
+        // the previous one is shown (or none, the first time).
+        let fresh = self
+            .files_badges
+            .as_ref()
+            .is_some_and(|b| b.is_for(&status_src, &files));
+        let pending = self.files_badges_pending.as_ref().is_some_and(|(s, f)| {
+            std::sync::Arc::ptr_eq(s, &status_src) && std::sync::Arc::ptr_eq(f, &files)
+        });
+        if !fresh && !pending {
+            self.files_badges_pending = Some((status_src.clone(), files.clone()));
+            let (s, f) = (status_src.clone(), files.clone());
+            self.in_background_cx(
+                crate::background::FILES_BADGES,
+                move || FilesBadges::new(s, f),
+                |this, badges, cx| {
+                    let current = this
+                        .files_badges_pending
+                        .as_ref()
+                        .is_some_and(|(s, f)| badges.is_for(s, f));
+                    if current {
+                        this.files_badges_pending = None;
+                        this.files_badges = Some(badges);
+                        cx.notify();
+                    }
+                },
+                cx,
+            );
         }
-        // Changed entries inside each folder, at any depth (an untracked folder counts once).
-        let mut dirty_dirs: BTreeMap<String, usize> = BTreeMap::new();
-        for p in status.keys() {
-            let mut acc = String::new();
-            let parts: Vec<&str> = p.trim_end_matches('/').split('/').collect();
-            for part in &parts[..parts.len().saturating_sub(1)] {
-                if !acc.is_empty() {
-                    acc.push('/');
-                }
-                acc.push_str(part);
-                *dirty_dirs.entry(acc.clone()).or_default() += 1;
-            }
-        }
+        let badges = self.files_badges.clone().unwrap_or_default();
+        let FilesBadges {
+            status,
+            dirty_dirs,
+            tracked,
+            ..
+        } = badges;
         // Folders are marked like sidebar projects (Settings > Appearance > Sidebar).
         let changes_dot = self.settings.appearance.changes_indicator
             == osier_config::settings::ChangesIndicator::Dot;
         let changes_color = cx.theme().warning;
-        // Tracked files and the folders holding them, for "Untrack" in the context menu.
-        // `files` lists tracked plus untracked; status names the untracked (whole untracked
-        // folders end in `/`).
-        let untracked_dirs: Vec<&str> = entries
-            .iter()
-            .filter(|e| e.is_untracked() && e.path.ends_with('/'))
-            .map(|e| e.path.as_str())
-            .collect();
-        let untracked_files: std::collections::HashSet<&str> = entries
-            .iter()
-            .filter(|e| e.is_untracked() && !e.path.ends_with('/'))
-            .map(|e| e.path.as_str())
-            .collect();
-        let mut tracked: std::collections::HashSet<String> = Default::default();
-        for f in files.iter() {
-            if untracked_files.contains(f.as_str())
-                || untracked_dirs.iter().any(|d| f.starts_with(d))
-            {
-                continue;
-            }
-            let mut acc = String::new();
-            for part in f.split('/') {
-                if !acc.is_empty() {
-                    acc.push('/');
-                }
-                acc.push_str(part);
-                tracked.insert(acc.clone());
-            }
-        }
-        let tracked = std::rc::Rc::new(tracked);
         let filter = self.files_filter.read(cx).value().to_string();
         let listing = match &self.files_listing {
             Some(l) if l.is_for(&files, ignored.as_ref(), &filter) => l.clone(),
@@ -470,8 +545,6 @@ impl Osier {
         };
         let weak = cx.entity().downgrade();
         let count = paths.len();
-        let status = std::rc::Rc::new(status);
-        let dirty_dirs = std::rc::Rc::new(dirty_dirs);
 
         v_flex()
             .size_full()

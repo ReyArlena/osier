@@ -37,6 +37,9 @@ pub(crate) struct RecentStatus {
     /// Watch roots and the repository each belongs to.
     roots: Vec<(PathBuf, PathBuf)>,
     watcher: Option<notify::RecommendedWatcher>,
+    /// Bumped whenever the listed repositories change: a watch set built for an older list is
+    /// dropped (`install_watch`).
+    watch_generation: u64,
     /// Watch roots the watcher reported, drained by the tick loop.
     touched: Arc<Mutex<BTreeSet<PathBuf>>>,
     /// `(repo, full)`: full = worktree status, otherwise refs only.
@@ -99,6 +102,61 @@ pub(crate) fn watch_targets(repo: &Path) -> Vec<(PathBuf, notify::RecursiveMode)
     out
 }
 
+/// A watch set to build for the listed repositories.
+pub(crate) struct WatchRebuild {
+    generation: u64,
+    tracked: Vec<PathBuf>,
+    touched: Arc<Mutex<BTreeSet<PathBuf>>>,
+}
+
+/// A built watch set: the watcher and its roots (watched path, repository).
+pub(crate) struct BuiltWatch {
+    watcher: notify::RecommendedWatcher,
+    roots: Vec<(PathBuf, PathBuf)>,
+}
+
+/// Create a watcher over every repository's refs (a few hundred small watches; notify walks
+/// the recursive ones, and each repository's `.git` is inspected). Blocking: runs in the
+/// background.
+fn build_watch(tracked: &[PathBuf], touched: Arc<Mutex<BTreeSet<PathBuf>>>) -> Option<BuiltWatch> {
+    let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(event) = res else { return };
+        if !matches!(
+            event.kind,
+            notify::EventKind::Create(_)
+                | notify::EventKind::Modify(_)
+                | notify::EventKind::Remove(_)
+        ) {
+            return;
+        }
+        if let Ok(mut set) = touched.lock() {
+            for p in event.paths {
+                let is_lock = p.extension().is_some_and(|e| e == "lock");
+                if !is_lock {
+                    set.insert(p);
+                }
+            }
+        }
+    });
+    let mut watcher = match watcher {
+        Ok(w) => w,
+        Err(error) => {
+            tracing::warn!(%error, "cannot watch recent projects");
+            return None;
+        }
+    };
+    let mut roots = Vec::new();
+    for repo in tracked {
+        for (root, mode) in watch_targets(repo) {
+            match watcher.watch(&root, mode) {
+                Ok(()) => roots.push((root, repo.clone())),
+                Err(error) => tracing::debug!(%error, path = %root.display(), "watch failed"),
+            }
+        }
+    }
+    Some(BuiltWatch { watcher, roots })
+}
+
 /// The repository a watcher event belongs to: the longest watch root that prefixes the path.
 pub(crate) fn repo_for_event(roots: &[(PathBuf, PathBuf)], path: &Path) -> Option<PathBuf> {
     roots
@@ -127,6 +185,7 @@ impl RecentStatus {
             tracked: Vec::new(),
             roots: Vec::new(),
             watcher: None,
+            watch_generation: 0,
             touched: Arc::new(Mutex::new(BTreeSet::new())),
             queue: VecDeque::new(),
             busy: false,
@@ -202,10 +261,12 @@ impl RecentStatus {
         }
     }
 
-    /// Point the watcher at the repositories currently listed and queue the new ones.
-    fn sync_tracked(&mut self, tracked: Vec<PathBuf>) {
+    /// Note the repositories currently listed and queue the new ones. When the list changed,
+    /// returns the watch set to build (in the background, [`build_watch`]) and hand to
+    /// [`RecentStatus::install_watch`].
+    fn sync_tracked(&mut self, tracked: Vec<PathBuf>) -> Option<WatchRebuild> {
         if tracked == self.tracked {
-            return;
+            return None;
         }
         let added: Vec<PathBuf> = tracked
             .iter()
@@ -214,57 +275,34 @@ impl RecentStatus {
             .collect();
         self.tracked = tracked;
         if !self.watching() {
-            return;
+            return None;
         }
         let full = self.mode == RecentStatusMode::Check;
         for repo in added {
             self.enqueue(repo, full);
         }
-        // Rebuild the watch set. A few hundred non-recursive or tiny recursive watches.
-        let touched = self.touched.clone();
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let Ok(event) = res else { return };
-            if !matches!(
-                event.kind,
-                notify::EventKind::Create(_)
-                    | notify::EventKind::Modify(_)
-                    | notify::EventKind::Remove(_)
-            ) {
-                return;
-            }
-            if let Ok(mut set) = touched.lock() {
-                for p in event.paths {
-                    let is_lock = p.extension().is_some_and(|e| e == "lock");
-                    if !is_lock {
-                        set.insert(p);
-                    }
-                }
-            }
-        });
-        let mut watcher = match watcher {
-            Ok(w) => w,
-            Err(error) => {
-                tracing::warn!(%error, "cannot watch recent projects");
-                return;
-            }
-        };
-        self.roots.clear();
-        for repo in &self.tracked {
-            for (root, mode) in watch_targets(repo) {
-                match watcher.watch(&root, mode) {
-                    Ok(()) => self.roots.push((root, repo.clone())),
-                    Err(error) => {
-                        tracing::debug!(%error, path = %root.display(), "watch failed")
-                    }
-                }
-            }
+        self.watch_generation += 1;
+        Some(WatchRebuild {
+            generation: self.watch_generation,
+            tracked: self.tracked.clone(),
+            touched: self.touched.clone(),
+        })
+    }
+
+    /// Take a watch set built by [`build_watch`], unless the list changed again meanwhile.
+    fn install_watch(&mut self, generation: u64, built: Option<BuiltWatch>) {
+        if generation != self.watch_generation {
+            return;
         }
-        tracing::debug!(
-            repos = self.tracked.len(),
-            watches = self.roots.len(),
-            "recent status watching"
-        );
-        self.watcher = Some(watcher);
+        if let Some(built) = built {
+            tracing::debug!(
+                repos = self.tracked.len(),
+                watches = built.roots.len(),
+                "recent status watching"
+            );
+            self.roots = built.roots;
+            self.watcher = Some(built.watcher);
+        }
     }
 
     /// Queue every tracked repository (sweep, window focus).
@@ -301,6 +339,45 @@ impl RecentStatus {
 
 impl Osier {
     /// Repositories shown in the sidebar that are not open.
+    /// Check in the background which listed projects' folders are gone (pinned, recent and
+    /// scanned ones), every few seconds from the tick loop. The sidebar and the project
+    /// switcher read [`Osier::project_missing`] instead of asking the disk on every frame, which
+    /// could stall a frame on a sleeping disk or a dead network mount.
+    pub(crate) fn check_missing_projects(&mut self, cx: &mut Context<Self>) {
+        const EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+        if self.missing_check_running
+            || self
+                .missing_checked_at
+                .is_some_and(|at| at.elapsed() < EVERY)
+        {
+            return;
+        }
+        self.missing_check_running = true;
+        let paths = self.recent_status_targets();
+        self.in_background_quiet(
+            move || {
+                paths
+                    .into_iter()
+                    .filter(|p| !p.is_dir())
+                    .collect::<std::collections::HashSet<PathBuf>>()
+            },
+            |this, missing, cx| {
+                this.missing_check_running = false;
+                this.missing_checked_at = Some(std::time::Instant::now());
+                if missing != this.missing_projects {
+                    this.missing_projects = missing;
+                    cx.notify();
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Whether a listed project's folder was gone at the last check.
+    pub(crate) fn project_missing(&self, path: &Path) -> bool {
+        self.missing_projects.contains(path)
+    }
+
     fn recent_status_targets(&self) -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = Vec::new();
         let open = |p: &PathBuf| self.projects.iter().any(|o| &o.path == p);
@@ -344,7 +421,15 @@ impl Osier {
             return;
         }
         let targets = self.recent_status_targets();
-        self.recent_status.sync_tracked(targets);
+        if let Some(rebuild) = self.recent_status.sync_tracked(targets) {
+            let generation = rebuild.generation;
+            self.in_background_cx(
+                crate::background::WATCHING_PROJECTS,
+                move || build_watch(&rebuild.tracked, rebuild.touched),
+                move |this, built, _| this.recent_status.install_watch(generation, built),
+                cx,
+            );
+        }
 
         // Watcher events to repositories, refs-only check (a fetch or commit elsewhere).
         let touched: Vec<PathBuf> = match self.recent_status.touched.lock() {
@@ -425,9 +510,12 @@ impl Osier {
 
         if self.recent_status.cache_dirty && !self.recent_status.busy {
             self.recent_status.cache_dirty = false;
-            if let Err(error) = self.recent_status.cache.save(&self.paths) {
-                tracing::warn!(%error, "could not save the project status cache");
-            }
+            let (cache, paths) = (self.recent_status.cache.clone(), self.paths.clone());
+            self.saves.push(move || {
+                if let Err(error) = cache.save(&paths) {
+                    tracing::warn!(%error, "could not save the project status cache");
+                }
+            });
         }
     }
 

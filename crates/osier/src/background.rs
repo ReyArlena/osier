@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::app::Osier;
+use gpui_kit::{AppContext as _, Context, Window};
 
 pub(crate) const SCAN_DIRS: &str = "Scanning project directories";
 pub(crate) const GH_ACCOUNTS: &str = "Loading GitHub accounts";
@@ -19,6 +20,18 @@ pub(crate) const GH_LISTS: &str = "Loading GitHub lists";
 pub(crate) const BRANCHES: &str = "Looking up branches";
 pub(crate) const UPDATE_CHECK: &str = "Checking for updates";
 pub(crate) const UPDATE_INSTALL: &str = "Updating Osier";
+pub(crate) const FILES_BADGES: &str = "Reading file status";
+pub(crate) const OPENING_PROJECT: &str = "Opening project";
+pub(crate) const LOADING_FILE: &str = "Loading file";
+pub(crate) const LISTING_COMMITS: &str = "Listing commits";
+pub(crate) const READING_PATCHES: &str = "Reading patches";
+pub(crate) const SAVING_PATCH: &str = "Saving patch";
+pub(crate) const READING_GIT_CONFIG: &str = "Reading git config";
+pub(crate) const READING_COMMIT: &str = "Reading commit";
+pub(crate) const READING_THEMES: &str = "Reading themes";
+pub(crate) const WATCHING_PROJECTS: &str = "Watching projects";
+pub(crate) const READING_SETTINGS: &str = "Reading settings";
+pub(crate) const OPENING_FOLDER: &str = "Opening folder";
 
 /// Counted background work, shared with the tasks doing it: each holds a [`BgGuard`] and
 /// counts itself out when it finishes or is dropped (a closed dialog cancels its task). The
@@ -78,6 +91,68 @@ impl Drop for BgGuard {
 }
 
 impl Osier {
+    /// The standard way to do blocking work for the app view: git, other processes, file
+    /// reads and writes, anything that can take more than a fraction of a millisecond.
+    ///
+    /// `work` runs on the background executor, never on the UI thread. While it runs it is
+    /// counted under `label` (the status bar's background-tasks spinner, when that setting is
+    /// on). Its result comes back to `done` on the UI thread, which stores it and decides what
+    /// to redraw: `cx.notify()` when the main view shows it, `redraw_settings` when only the
+    /// settings dialog does. Nothing happens if the app view is gone by then.
+    pub(crate) fn in_background<T: Send + 'static>(
+        &mut self,
+        label: &'static str,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Osier, T, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let busy = self.background.begin(label);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx.background_spawn(async move { work() }).await;
+            drop(busy);
+            let _ = this.update_in(cx, |this, window, cx| done(this, result, window, cx));
+        })
+        .detach();
+    }
+
+    /// [`Osier::in_background`] for callers without a window.
+    pub(crate) fn in_background_cx<T: Send + 'static>(
+        &mut self,
+        label: &'static str,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Osier, T, &mut Context<Osier>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let busy = Some(self.background.begin(label));
+        Self::spawn_background(busy, work, done, cx);
+    }
+
+    /// [`Osier::in_background_cx`] that does not show in the status bar: routine checks on a
+    /// timer, which would otherwise make the background-tasks label flicker every few seconds.
+    pub(crate) fn in_background_quiet<T: Send + 'static>(
+        &mut self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Osier, T, &mut Context<Osier>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        Self::spawn_background(None, work, done, cx);
+    }
+
+    fn spawn_background<T: Send + 'static>(
+        busy: Option<BgGuard>,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Osier, T, &mut Context<Osier>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { work() }).await;
+            drop(busy);
+            let _ = this.update(cx, |this, cx| done(this, result, cx));
+        })
+        .detach();
+    }
+
     /// What is running now, in a stable order; empty when the setting is off.
     pub(crate) fn background_labels(&self) -> Vec<String> {
         if !self.settings.appearance.show_background_tasks {

@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use gpui_kit::*;
-use osier_config::history::{self, HistoryEntry};
+use osier_config::history::HistoryEntry;
 use osier_config::patches::{self, StoredPatch};
 use osier_git::ops::discard;
 use osier_git::ops::patches::{self as git_patches, ApplyOptions, ApplyReport, PatchSource};
@@ -24,12 +24,51 @@ pub(crate) fn count_files(text: &str) -> usize {
 }
 
 impl Osier {
+    /// Re-read the patch clipboard folder (one file read per patch) in the background.
     pub(crate) fn reload_patches(&mut self, cx: &mut Context<Self>) {
-        self.patches = patches::list(&self.paths).unwrap_or_else(|error| {
-            tracing::warn!(%error, "could not list patches");
-            Vec::new()
-        });
-        cx.notify();
+        let paths = self.paths.clone();
+        self.patches_load += 1;
+        let load = self.patches_load;
+        self.in_background_cx(
+            crate::background::READING_PATCHES,
+            move || patches::list(&paths),
+            move |this, listed, cx| {
+                // A later reload (another save or delete) wins.
+                if this.patches_load != load {
+                    return;
+                }
+                this.patches = listed.unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not list patches");
+                    Vec::new()
+                });
+                cx.notify();
+            },
+            cx,
+        );
+    }
+
+    /// Read a stored patch's text in the background, then `then` with it. A read error is
+    /// shown as a toast.
+    fn read_stored_then(
+        &mut self,
+        patch: StoredPatch,
+        then: impl FnOnce(&mut Osier, String, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.in_background(
+            crate::background::READING_PATCHES,
+            move || patch.text(),
+            move |this, text, window, cx| match text {
+                Ok(text) => then(this, text, window, cx),
+                Err(e) => window.push_notice(
+                    Notice::error(e.to_string()).title("Could not read patch"),
+                    cx,
+                ),
+            },
+            window,
+            cx,
+        );
     }
 
     /// Everything in the working tree, tracked and untracked. `None` when clean.
@@ -152,48 +191,61 @@ impl Osier {
         self.create_patch_then(
             source,
             move |this, text, window, cx| {
-                if this.store_patch(&name, &text, window, cx).is_some() {
-                    this.set_tab(Tab::Patches, cx);
-                }
+                this.store_patch_then(
+                    name.clone(),
+                    text,
+                    |this, _, _, cx| this.set_tab(Tab::Patches, cx),
+                    window,
+                    cx,
+                );
             },
             window,
             cx,
         );
     }
 
-    /// Write a patch into the patch clipboard and refresh the list.
-    fn store_patch(
+    /// Write a patch into the patch clipboard and refresh the list, then `then` with it. The
+    /// file list (`git apply --numstat`) and the write run in the background; a failure is
+    /// shown as a toast and `then` is not called.
+    fn store_patch_then(
         &mut self,
-        name: &str,
-        text: &str,
+        name: String,
+        text: String,
+        then: impl FnOnce(&mut Osier, StoredPatch, &mut Window, &mut Context<Osier>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<StoredPatch> {
+    ) {
         let project = self.active_project();
+        let repo = project.map(|p| p.repo.clone());
         let repo_path = project.map(|p| p.path.clone());
-        let files: Vec<String> = match project {
-            Some(p) => git_patches::inspect(&p.repo, text)
-                .map(|files| files.into_iter().map(|f| f.path).collect())
-                .unwrap_or_default(),
-            None => Vec::new(),
-        };
-        match patches::save(&self.paths, name, repo_path.as_deref(), files, text) {
-            Ok(stored) => {
-                self.reload_patches(cx);
-                window.push_notice(
-                    Notice::success(format!("Saved patch \"{}\"", stored.meta.name)),
-                    cx,
-                );
-                Some(stored)
-            }
-            Err(error) => {
-                window.push_notice(
+        let paths = self.paths.clone();
+        self.in_background(
+            crate::background::SAVING_PATCH,
+            move || {
+                let files: Vec<String> = repo
+                    .as_ref()
+                    .and_then(|repo| git_patches::inspect(repo, &text).ok())
+                    .map(|files| files.into_iter().map(|f| f.path).collect())
+                    .unwrap_or_default();
+                patches::save(&paths, &name, repo_path.as_deref(), files, &text)
+            },
+            move |this, saved, window, cx| match saved {
+                Ok(stored) => {
+                    this.reload_patches(cx);
+                    window.push_notice(
+                        Notice::success(format!("Saved patch \"{}\"", stored.meta.name)),
+                        cx,
+                    );
+                    then(this, stored, window, cx);
+                }
+                Err(error) => window.push_notice(
                     Notice::error(error.to_string()).title("Could not save patch"),
                     cx,
-                );
-                None
-            }
-        }
+                ),
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn export_patch(
@@ -228,7 +280,10 @@ impl Osier {
             let Ok(Ok(Some(path))) = rx.await else {
                 return;
             };
-            let result = std::fs::write(&path, text);
+            let target = path.clone();
+            let result = cx
+                .background_spawn(async move { std::fs::write(&target, text) })
+                .await;
             let _ = this.update_in(cx, |_, window, cx| match result {
                 Ok(()) => window.push_notice(
                     Notice::success(format!("Wrote {}", crate::format::tilde(&path))),
@@ -325,21 +380,27 @@ impl Osier {
         self.create_patch_then(
             source,
             move |this, text, window, cx| {
-                if this.store_patch(&name, &text, window, cx).is_none() {
-                    return;
-                }
-                let (t, u) = (tracked.clone(), untracked.clone());
-                this.run_op(
-                    format!("Shelved \"{name}\""),
-                    move |repo| {
-                        discard::discard_all(repo, &t)?;
-                        discard::trash_untracked(repo, &u)?;
-                        Ok(())
+                // Only once the patch is safely stored are the changes discarded.
+                let (t, u, name) = (tracked.clone(), untracked.clone(), name.clone());
+                this.store_patch_then(
+                    name.clone(),
+                    text,
+                    move |this, _, window, cx| {
+                        this.run_op(
+                            format!("Shelved \"{name}\""),
+                            move |repo| {
+                                discard::discard_all(repo, &t)?;
+                                discard::trash_untracked(repo, &u)?;
+                                Ok(())
+                            },
+                            window,
+                            cx,
+                        );
+                        this.set_tab(Tab::Patches, cx);
                     },
                     window,
                     cx,
                 );
-                this.set_tab(Tab::Patches, cx);
             },
             window,
             cx,
@@ -511,9 +572,7 @@ impl Osier {
                         false
                     }
                 };
-                if let Err(e) = history::append(&this.paths, &entry) {
-                    tracing::warn!(error = %e, "could not write history");
-                }
+                this.record_history(entry, cx);
                 if let Some(ix) = this.projects.iter().position(|p| p.path == path) {
                     this.refresh_project(ix, cx);
                 }
@@ -559,7 +618,10 @@ impl Osier {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let text = std::fs::read_to_string(&path);
+            let source = path.clone();
+            let text = cx
+                .background_spawn(async move { std::fs::read_to_string(&source) })
+                .await;
             let _ = this.update_in(cx, |this, window, cx| match text {
                 Ok(text) => {
                     let label = path
@@ -595,25 +657,23 @@ impl Osier {
             return;
         };
         let label = format!("\"{}\"", patch.meta.name);
-        let text = match patch.text() {
-            Ok(t) => t,
-            Err(e) => {
-                window.push_notice(
-                    Notice::error(e.to_string()).title("Could not read patch"),
-                    cx,
-                );
-                return;
-            }
-        };
-        let after: Option<After> = unshelve.then(|| {
-            let id = id.clone();
-            Rc::new(
-                move |this: &mut Osier, window: &mut Window, cx: &mut Context<Osier>| {
-                    this.delete_stored(id.clone(), window, cx)
-                },
-            ) as After
-        });
-        self.apply_patch_text(text, label, after, window, cx);
+        let patch = patch.clone();
+        self.read_stored_then(
+            patch,
+            move |this, text, window, cx| {
+                let after: Option<After> = unshelve.then(|| {
+                    let id = id.clone();
+                    Rc::new(
+                        move |this: &mut Osier, window: &mut Window, cx: &mut Context<Osier>| {
+                            this.delete_stored(id.clone(), window, cx)
+                        },
+                    ) as After
+                });
+                this.apply_patch_text(text, label, after, window, cx);
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn select_patch(&mut self, id: String, cx: &mut Context<Self>) {
@@ -712,20 +772,20 @@ impl Osier {
         let Some(patch) = self.stored_patch(&id) else {
             return;
         };
-        match patch.text() {
-            Ok(text) => {
+        let patch = patch.clone();
+        self.read_stored_then(
+            patch,
+            |_, text, window, cx| {
                 let n = count_files(&text);
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 window.push_notice(
                     Notice::success(format!("Copied patch ({n} {})", plural(n, "file"))),
                     cx,
                 );
-            }
-            Err(e) => window.push_notice(
-                Notice::error(e.to_string()).title("Could not read patch"),
-                cx,
-            ),
-        }
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn export_stored(
@@ -738,21 +798,29 @@ impl Osier {
             return;
         };
         let suggested = format!("{}.patch", patches::slug(&patch.meta.name));
-        match patch.text() {
-            Ok(text) => self.write_patch_file(text, suggested, window, cx),
-            Err(e) => window.push_notice(
-                Notice::error(e.to_string()).title("Could not read patch"),
-                cx,
-            ),
-        }
+        let patch = patch.clone();
+        self.read_stored_then(
+            patch,
+            move |this, text, window, cx| this.write_patch_file(text, suggested, window, cx),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn open_patches_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.paths.patches_dir();
-        if let Err(error) = std::fs::create_dir_all(&dir) {
-            tracing::warn!(%error, "could not create the patches directory");
-        }
-        self.open_externally(&dir, window, cx);
+        let create = dir.clone();
+        self.in_background(
+            crate::background::OPENING_FOLDER,
+            move || {
+                if let Err(error) = std::fs::create_dir_all(&create) {
+                    tracing::warn!(%error, "could not create the patches directory");
+                }
+            },
+            move |this, (), window, cx| this.open_externally(&dir, window, cx),
+            window,
+            cx,
+        );
     }
 }
 

@@ -12,7 +12,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
 use osier_auth::RemoteKind;
-use osier_config::history::{self, HistoryEntry};
+use osier_config::history::HistoryEntry;
 use osier_git::ops::remote::{
     self, FetchOptions, PullOptions, PullStrategy, PushOptions, RemoteContext,
 };
@@ -295,12 +295,13 @@ impl Osier {
         };
         let repo = project.repo.clone();
         let path = project.path.clone();
-        let head_before = repo.head_oid().ok().flatten();
         let op2 = op.clone();
         cx.spawn_in(window, async move |this, cx| {
             let repo2 = repo.clone();
-            let (result, stash_clashed) = cx
+            // HEAD before and after are git processes too: all of it off the UI thread.
+            let (result, stash_clashed, head_before, head_after) = cx
                 .background_spawn(async move {
+                    let head_before = repo2.head_oid().ok().flatten();
                     let progress = move |p: Progress| {
                         let _ = tx.send(p);
                     };
@@ -312,10 +313,15 @@ impl Osier {
                         }
                         RemoteOp::Push(o) => remote::push(&repo2, o, &ctx, progress),
                     };
-                    (result, osier_git::stash::autostash_count(&repo2) > before)
+                    let clashed = osier_git::stash::autostash_count(&repo2) > before;
+                    (
+                        result,
+                        clashed,
+                        head_before,
+                        repo2.head_oid().ok().flatten(),
+                    )
                 })
                 .await;
-            let head_after = repo.head_oid().ok().flatten();
             let _ = this.update_in(cx, |this, window, cx| {
                 this.remote_job = None;
                 let mut entry = HistoryEntry::now(&path, label.clone());
@@ -328,9 +334,7 @@ impl Osier {
                         entry.error = Some(describe(e));
                     }
                 }
-                if let Err(e) = history::append(&this.paths, &entry) {
-                    tracing::warn!(error = %e, "could not write history");
-                }
+                this.record_history(entry.clone(), cx);
                 if let Some(ix) = this.projects.iter().position(|p| p.path == path) {
                     this.refresh_project(ix, cx);
                 }

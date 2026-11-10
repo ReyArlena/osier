@@ -48,30 +48,42 @@ impl Osier {
             Err(error) => Err(error),
         };
         match opened {
-            Ok(project) => {
-                let workdir = project.path.clone();
-                self.projects.push(project);
-                let ix = self.projects.len() - 1;
-                self.state.open(&workdir);
-                self.save_state();
-                self.refresh_project(ix, cx);
-                if make_active {
-                    self.park_pane();
-                    self.active = Some(ix);
-                    // A new project has no snapshot yet: decided when it arrives.
-                    self.switch_tab_for_project();
-                }
-                Ok(ix)
-            }
-            Err(error) => {
-                tracing::warn!(%error, path = %path.display(), "cannot open repository");
-                self.state.forget_recent(path);
-                self.state.close(path);
-                self.save_state();
-                cx.notify();
-                Err(format!("{}: {error}", crate::format::tilde(path)))
-            }
+            Ok(project) => Ok(self.install_opened(project, make_active, cx)),
+            Err(error) => Err(self.forget_unopenable(path, &error, cx)),
         }
+    }
+
+    /// Add a newly opened project (not open yet) and start its first refresh.
+    fn install_opened(
+        &mut self,
+        project: Project,
+        make_active: bool,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let workdir = project.path.clone();
+        self.projects.push(project);
+        let ix = self.projects.len() - 1;
+        self.state.open(&workdir);
+        self.save_state();
+        self.refresh_project(ix, cx);
+        if make_active {
+            self.park_pane();
+            self.active = Some(ix);
+            // A new project has no snapshot yet: decided when it arrives.
+            self.switch_tab_for_project();
+        }
+        ix
+    }
+
+    /// A path that is not (or no longer) a repository: drop it from recents and the open list.
+    /// Returns the message to show.
+    fn forget_unopenable(&mut self, path: &Path, error: &str, cx: &mut Context<Self>) -> String {
+        tracing::warn!(%error, path = %path.display(), "cannot open repository");
+        self.state.forget_recent(path);
+        self.state.close(path);
+        self.save_state();
+        cx.notify();
+        format!("{}: {error}", crate::format::tilde(path))
     }
 
     /// Open-project path for a repository that is already open at `ix`.
@@ -219,23 +231,61 @@ impl Osier {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let before = self.projects.len();
-        match self.open_project(path, true, cx) {
-            Ok(ix) => {
-                if self.projects.len() > before {
-                    self.fresh_open = Some(self.projects[ix].path.clone());
-                    if self.projects[ix].snapshot.is_some() {
-                        self.switch_tab_for_project();
-                    }
-                }
-                self.activate(ix, window, cx)
-            }
-            Err(error) => window.push_notice(
-                Notice::warning(format!("{error}. It was removed from the recent list."))
-                    .title("Could not open repository"),
-                cx,
-            ),
+        self.open_project_then(path, |_, _, _, _| {}, window, cx);
+    }
+
+    /// [`Osier::open_project_notify`], then `then` with the project's index once it is open
+    /// and active (not called when the path cannot be opened). The open finishes in the
+    /// background, so follow-up work that needs the project goes here.
+    pub(crate) fn open_project_then(
+        &mut self,
+        path: &Path,
+        then: impl FnOnce(&mut Osier, usize, &mut Window, &mut Context<Osier>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self.projects.iter().position(|p| p.path == path) {
+            let ix = self.reopen_project(ix, true);
+            self.activate(ix, window, cx);
+            then(self, ix, window, cx);
+            return;
         }
+        // Finding the repository runs git and starting its watcher walks folders: both in the
+        // background, then the project is added here.
+        let (runner, watch_runner) = (self.runner.clone(), self.watch_runner());
+        let path = path.to_path_buf();
+        let target = path.clone();
+        self.in_background(
+            crate::background::OPENING_PROJECT,
+            move || Project::prepare(runner, watch_runner, &target),
+            move |this, prepared, window, cx| match prepared {
+                Ok(prepared) => {
+                    let project = Project::from_prepared(prepared, this.settings.git.log_page_size);
+                    // `path` may have been a folder inside a repository that is open already,
+                    // or the same repository opened twice quickly.
+                    let ix = match this.projects.iter().position(|p| p.path == project.path) {
+                        Some(ix) => this.reopen_project(ix, true),
+                        None => {
+                            let ix = this.install_opened(project, true, cx);
+                            this.fresh_open = Some(this.projects[ix].path.clone());
+                            ix
+                        }
+                    };
+                    this.activate(ix, window, cx);
+                    then(this, ix, window, cx);
+                }
+                Err(error) => {
+                    let message = this.forget_unopenable(&path, &error, cx);
+                    window.push_notice(
+                        Notice::warning(format!("{message}. It was removed from the recent list."))
+                            .title("Could not open repository"),
+                        cx,
+                    )
+                }
+            },
+            window,
+            cx,
+        );
     }
 
     /// Forget a recent entry. Entries provided by a scan directory cannot be removed here.

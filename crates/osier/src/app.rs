@@ -240,6 +240,24 @@ pub struct Osier {
     /// The Files tab's rows, rebuilt only when the listing, the ignored list or the filter
     /// changes (with thousands of ignored files, rebuilding on every frame is slow).
     pub(crate) files_listing: Option<crate::views::files_tab::FilesListing>,
+    /// Files tab badges and tracked set, built once per snapshot.
+    pub(crate) files_badges: Option<crate::views::files_tab::FilesBadges>,
+    /// Counts viewer loads, so a slow read for an old selection does not replace a newer one.
+    pub(crate) viewer_load: u64,
+    /// Counts patch list reloads, so only the newest one is installed.
+    pub(crate) patches_load: u64,
+    /// Listed projects whose folder was gone at the last check (`check_missing_projects`).
+    pub(crate) missing_projects: std::collections::HashSet<std::path::PathBuf>,
+    pub(crate) missing_checked_at: Option<std::time::Instant>,
+    pub(crate) missing_check_running: bool,
+    /// Settings, state and cache writes, off the UI thread and in order (`save_queue.rs`).
+    pub(crate) saves: crate::save_queue::SaveQueue,
+    /// The snapshot lists `files_badges` is being built from in the background.
+    #[allow(clippy::type_complexity)]
+    pub(crate) files_badges_pending: Option<(
+        std::sync::Arc<osier_git::status::RepoStatus>,
+        std::sync::Arc<Vec<String>>,
+    )>,
     /// Repository the tree was last built for, so its cursor is only carried over within
     /// one project.
     pub(crate) files_tree_root: Option<PathBuf>,
@@ -485,6 +503,14 @@ impl Osier {
             show_ignored: false,
             files_tree_key: 0,
             files_listing: None,
+            files_badges: None,
+            viewer_load: 0,
+            patches_load: 0,
+            missing_projects: Default::default(),
+            missing_checked_at: None,
+            missing_check_running: false,
+            saves: crate::save_queue::SaveQueue::new(),
+            files_badges_pending: None,
             files_tree_root: None,
             files_tree_folders: std::collections::HashMap::new(),
             files_tree_filtering: false,
@@ -601,6 +627,11 @@ impl Osier {
         let files_tree = this.files_tree.clone();
         this._subscriptions
             .push(cx.observe(&files_tree, |this, _, cx| this.follow_files_cursor(cx)));
+        // Queued writes finish before Osier exits.
+        this._subscriptions.push(cx.on_app_quit(|this, _| {
+            this.saves.flush();
+            async {}
+        }));
         this._subscriptions
             .push(cx.observe_window_appearance(window, |this, _, cx| {
                 if this.settings.appearance.mode == ThemeMode::System {
@@ -817,10 +848,14 @@ impl Osier {
         this
     }
 
+    /// Write `config.toml`, on the save queue (off the UI thread, in order).
     pub(crate) fn save_settings(&self) {
-        if let Err(error) = self.settings.save(&self.paths) {
-            tracing::warn!(%error, "could not save settings");
-        }
+        let (settings, paths) = (self.settings.clone(), self.paths.clone());
+        self.saves.push(move || {
+            if let Err(error) = settings.save(&paths) {
+                tracing::warn!(%error, "could not save settings");
+            }
+        });
     }
 
     pub(crate) fn save_state(&mut self) {
@@ -835,9 +870,13 @@ impl Osier {
             self.state.layout.command_log_visible = self.command_log_visible;
             snapshot.layout.command_log_visible = self.command_log_visible;
         }
-        if let Err(error) = snapshot.save(&self.paths) {
-            tracing::warn!(%error, "could not save state");
-        }
+        // On the save queue: dragging the window saves every 400ms.
+        let paths = self.paths.clone();
+        self.saves.push(move || {
+            if let Err(error) = snapshot.save(&paths) {
+                tracing::warn!(%error, "could not save state");
+            }
+        });
     }
 }
 
