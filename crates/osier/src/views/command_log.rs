@@ -1,6 +1,7 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
@@ -8,13 +9,18 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::panes::ResizeBottomPanel;
 use crate::notices::WindowNoticeExt as _;
 use crate::test_ids::TestId as _;
 use osier_git::runner::CommandRecord;
 
 impl Osier {
     /// The bottom panel: a tab row (git commands, notifications), then the chosen list.
-    pub(crate) fn render_bottom_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_bottom_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::app::BottomTab;
         let muted = cx.theme().muted_foreground;
         let tab = self.bottom_tab;
@@ -112,9 +118,8 @@ impl Osier {
                         cx.notify();
                     })),
             );
-        v_flex()
-            .h(px(220.))
-            .flex_none()
+        let panel = v_flex()
+            .size_full()
             .border_t_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
@@ -122,7 +127,27 @@ impl Osier {
             .child(match tab {
                 BottomTab::Commands => self.render_command_log(cx).into_any_element(),
                 BottomTab::Notifications => self.render_notices(cx).into_any_element(),
-            })
+            });
+        // The panel with a draggable top edge, followed here like the sidebar's.
+        div()
+            .test_id("bottom-panel")
+            .relative()
+            .h(px(self.bottom_panel_height(window)))
+            .flex_none()
+            .child(panel)
+            .child(
+                resize_handle("bottom-panel-edge", Axis::Vertical)
+                    .inside(HandleEdge::Leading)
+                    .on_drag(ResizeBottomPanel, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    }),
+            )
+            .on_drag_move(
+                cx.listener(|this, e: &DragMoveEvent<ResizeBottomPanel>, window, cx| {
+                    this.resize_bottom_panel(e.bounds.bottom() - e.event.position.y, window, cx)
+                }),
+            )
     }
 
     /// The git command list of the bottom panel.

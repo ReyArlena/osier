@@ -7,7 +7,88 @@ use gpui_kit::*;
 use super::{BottomTab, Osier, Tab};
 use crate::project::{Project, Selection};
 
+/// Width of the project sidebar until its edge is dragged, and how far a drag can take it.
+pub(crate) const SIDEBAR_WIDTH: f32 = 240.;
+const SIDEBAR_MIN: f32 = 160.;
+const SIDEBAR_MAX: f32 = 600.;
+/// The same for the height of the bottom panel.
+pub(crate) const BOTTOM_PANEL_HEIGHT: f32 = 220.;
+const BOTTOM_PANEL_MIN: f32 = 100.;
+const BOTTOM_PANEL_MAX: f32 = 900.;
+
+/// What a drag of the sidebar's edge carries. gpui tells drags apart by the type of their
+/// payload; it draws nothing under the pointer.
+#[derive(Clone)]
+pub(crate) struct ResizeSidebar;
+
+impl Render for ResizeSidebar {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
+/// What a drag of the bottom panel's top edge carries.
+#[derive(Clone)]
+pub(crate) struct ResizeBottomPanel;
+
+impl Render for ResizeBottomPanel {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
 impl Osier {
+    /// Width of the project sidebar: the dragged one, kept to a usable size and to half the
+    /// window at most.
+    pub(crate) fn sidebar_width(&self, window: &Window) -> f32 {
+        let most = (f32::from(window.viewport_size().width) / 2.).clamp(SIDEBAR_MIN, SIDEBAR_MAX);
+        self.state
+            .layout
+            .sidebar_width
+            .unwrap_or(SIDEBAR_WIDTH)
+            .clamp(SIDEBAR_MIN, most)
+    }
+
+    /// The sidebar's edge was dragged to `width`.
+    pub(crate) fn resize_sidebar(
+        &mut self,
+        width: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Stored as dragged, then as `sidebar_width` limits it.
+        self.state.layout.sidebar_width = Some(f32::from(width));
+        self.state.layout.sidebar_width = Some(self.sidebar_width(window));
+        self.state_dirty = true;
+        cx.notify();
+    }
+
+    /// Height of the bottom panel (git commands, notifications): the dragged one, kept to a
+    /// usable size and to 60% of the window at most.
+    pub(crate) fn bottom_panel_height(&self, window: &Window) -> f32 {
+        let most = (f32::from(window.viewport_size().height) * 0.6)
+            .clamp(BOTTOM_PANEL_MIN, BOTTOM_PANEL_MAX);
+        self.state
+            .layout
+            .command_log_height
+            .unwrap_or(BOTTOM_PANEL_HEIGHT)
+            .clamp(BOTTOM_PANEL_MIN, most)
+    }
+
+    /// The bottom panel's top edge was dragged so that the panel is `height` tall.
+    pub(crate) fn resize_bottom_panel(
+        &mut self,
+        height: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Stored as dragged, then as `bottom_panel_height` limits it.
+        self.state.layout.command_log_height = Some(f32::from(height));
+        self.state.layout.command_log_height = Some(self.bottom_panel_height(window));
+        self.state_dirty = true;
+        cx.notify();
+    }
+
     pub(crate) fn on_pane_resize(&mut self, sizes: &[Pixels]) {
         if let Some(first) = sizes.first() {
             self.state.layout.center_width = Some(f32::from(*first));

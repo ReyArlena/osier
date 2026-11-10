@@ -28,7 +28,7 @@ pub(crate) mod ignore_ops;
 mod keymap;
 pub(crate) mod merge_ops;
 pub(crate) mod ops;
-mod panes;
+pub(crate) mod panes;
 mod patch_ops;
 mod prefix;
 mod projects;
@@ -1174,7 +1174,7 @@ impl Render for Osier {
                                 )
                                 })
                                 .when(self.command_log_visible, |this| {
-                                    this.child(self.render_bottom_panel(cx))
+                                    this.child(self.render_bottom_panel(window, cx))
                                 }),
                         ),
                 ),

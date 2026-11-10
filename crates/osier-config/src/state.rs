@@ -67,6 +67,7 @@ pub struct WindowGeometry {
 #[serde(default)]
 pub struct Layout {
     pub sidebar_visible: bool,
+    pub sidebar_width: Option<f32>,
     pub center_width: Option<f32>,
     pub command_log_visible: bool,
     pub command_log_height: Option<f32>,

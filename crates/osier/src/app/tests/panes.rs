@@ -84,6 +84,145 @@ fn center_pane_keeps_its_saved_width_when_the_window_resizes(cx: &mut TestAppCon
     }
 }
 
+/// Press at `from`, move to `to` in two steps and release, as dragging an edge does.
+fn drag(
+    h: &Harness,
+    cx: &mut TestAppContext,
+    from: gpui::Point<gpui::Pixels>,
+    to: gpui::Point<gpui::Pixels>,
+) {
+    let (left, none) = (gpui::MouseButton::Left, gpui::Modifiers::none());
+    let mut v = h.visual(cx);
+    v.simulate_mouse_move(from, None, none);
+    v.simulate_mouse_down(from, left, none);
+    let half = gpui::point((from.x + to.x) / 2., (from.y + to.y) / 2.);
+    v.simulate_mouse_move(half, Some(left), none);
+    v.simulate_mouse_move(to, Some(left), none);
+    v.simulate_mouse_up(to, left, none);
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn ui_sidebar_edge_drags_to_resize_and_the_width_is_kept(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.visual(cx)
+        .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+    cx.run_until_parked();
+    let pane =
+        |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "sidebar-pane").expect("sidebar");
+    let width = |h: &Harness, cx: &mut TestAppContext| f32::from(pane(h, cx).size.width);
+    assert!(
+        (width(&h, cx) - 240.).abs() < 1.,
+        "default: {}",
+        width(&h, cx)
+    );
+
+    let edge = |h: &Harness, cx: &mut TestAppContext| {
+        let b = pane(h, cx);
+        gpui::point(b.origin.x + b.size.width - gpui::px(2.), b.center().y)
+    };
+    let from = edge(&h, cx);
+    drag(&h, cx, from, gpui::point(gpui::px(330.), from.y));
+    assert!(
+        (width(&h, cx) - 330.).abs() < 3.,
+        "dragged wider: {}",
+        width(&h, cx)
+    );
+    h.read(cx, |o, _| {
+        let saved = o.state.layout.sidebar_width.expect("width saved");
+        assert!((saved - 330.).abs() < 3., "saved: {saved}");
+    });
+
+    // Never narrower than its smallest size, never past half the window.
+    let from = edge(&h, cx);
+    drag(&h, cx, from, gpui::point(gpui::px(20.), from.y));
+    assert!(
+        (width(&h, cx) - 160.).abs() < 1.,
+        "smallest: {}",
+        width(&h, cx)
+    );
+    let from = edge(&h, cx);
+    drag(&h, cx, from, gpui::point(gpui::px(1300.), from.y));
+    assert!(
+        (width(&h, cx) - 600.).abs() < 1.,
+        "largest: {}",
+        width(&h, cx)
+    );
+}
+
+#[gpui::test]
+fn ui_sidebar_width_is_restored(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    state.layout.sidebar_width = Some(300.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    let width = f32::from(h.bounds(cx, "sidebar-pane").expect("sidebar").size.width);
+    assert!((width - 300.).abs() < 1., "restored: {width}");
+}
+
+#[gpui::test]
+fn ui_bottom_panel_edge_drags_to_resize_and_the_height_is_kept(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.command_log_visible = true;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.visual(cx)
+        .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1000.)));
+    cx.run_until_parked();
+    let panel =
+        |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "bottom-panel").expect("bottom panel");
+    let height = |h: &Harness, cx: &mut TestAppContext| f32::from(panel(h, cx).size.height);
+    assert!(
+        (height(&h, cx) - 220.).abs() < 1.,
+        "default: {}",
+        height(&h, cx)
+    );
+
+    let edge = |h: &Harness, cx: &mut TestAppContext| {
+        let b = panel(h, cx);
+        gpui::point(b.center().x, b.origin.y + gpui::px(2.))
+    };
+    let from = edge(&h, cx);
+    let bottom = panel(&h, cx).origin.y + panel(&h, cx).size.height;
+    drag(&h, cx, from, gpui::point(from.x, bottom - gpui::px(400.)));
+    assert!(
+        (height(&h, cx) - 400.).abs() < 3.,
+        "dragged taller: {}",
+        height(&h, cx)
+    );
+    h.read(cx, |o, _| {
+        let saved = o.state.layout.command_log_height.expect("height saved");
+        assert!((saved - 400.).abs() < 3., "saved: {saved}");
+    });
+    assert!(
+        h.bounds(cx, "close-log").is_some(),
+        "the panel's own buttons are still there"
+    );
+
+    // Never shorter than its smallest size, never more than 60% of the window.
+    let from = edge(&h, cx);
+    drag(&h, cx, from, gpui::point(from.x, bottom - gpui::px(10.)));
+    assert!(
+        (height(&h, cx) - 100.).abs() < 1.,
+        "smallest: {}",
+        height(&h, cx)
+    );
+    let from = edge(&h, cx);
+    drag(&h, cx, from, gpui::point(from.x, gpui::px(5.)));
+    assert!(
+        (height(&h, cx) - 600.).abs() < 1.,
+        "largest: {}",
+        height(&h, cx)
+    );
+}
+
 fn selection(h: &Harness, cx: &mut TestAppContext) -> Selection {
     h.read(cx, |o, _| o.active_project().unwrap().selection.clone())
 }

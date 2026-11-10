@@ -3,6 +3,7 @@ use gpui_kit::component::Collapsible;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem, SidebarMenuItem,
 };
@@ -14,6 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::panes::ResizeSidebar;
 use crate::format::{ahead_behind as arrows_text, tilde};
 use crate::test_ids::TestId as _;
 
@@ -400,9 +402,9 @@ impl Osier {
         let filter = self.sidebar_filter_text(cx);
         let query = self.sidebar_query(cx);
         let project_count = self.projects.len();
+        let name_hints = self.sidebar_name_hints();
 
         let mut open = ReorderMenu::new();
-        let name_hints = self.sidebar_name_hints();
         let mut open_rows: Vec<(usize, SharedString)> = Vec::new();
         let mut shown_open = 0;
         for (ix, project) in self.projects.iter().enumerate() {
@@ -675,8 +677,11 @@ impl Osier {
             );
         }
 
-        Sidebar::new("projects")
-            .w(px(240.))
+        // Not collapsible: Osier hides the sidebar as a whole, and a collapsible one animates
+        // every change of width, which trails behind the pointer while its edge is dragged.
+        let sidebar = Sidebar::new("projects")
+            .collapsible(false)
+            .w(px(self.sidebar_width(window)))
             .header(
                 SidebarHeader::new().child(
                     v_flex()
@@ -789,6 +794,28 @@ impl Osier {
                                 })),
                         ),
                 ),
+            );
+        // The sidebar with a draggable right edge. The drag is followed here rather than on
+        // the handle, since the pointer leaves the handle as soon as it moves.
+        div()
+            .test_id("sidebar-pane")
+            .relative()
+            .flex()
+            .flex_none()
+            .h_full()
+            .child(sidebar)
+            .child(
+                resize_handle("sidebar-edge", Axis::Horizontal)
+                    .inside(HandleEdge::Trailing)
+                    .on_drag(ResizeSidebar, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    }),
+            )
+            .on_drag_move(
+                cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, window, cx| {
+                    this.resize_sidebar(e.event.position.x - e.bounds.left(), window, cx)
+                }),
             )
     }
 }
