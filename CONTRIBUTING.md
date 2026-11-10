@@ -72,3 +72,8 @@ tests (`OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`) need g
 and a private repository you can push to: set `OSIER_LIVE_REPO` (its https URL) and
 `OSIER_LIVE_OWNER` (the gh login that owns it), and optionally `OSIER_LIVE_OTHER` (a second
 login without access, for the refusal test). See the top of `crates/osier/tests/live.rs`.
+
+## Releasing
+
+The steps for cutting a release (version bump, checks, tag, what to verify afterwards) are
+in [docs/releasing.md](docs/releasing.md).

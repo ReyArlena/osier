@@ -80,6 +80,7 @@ All notable changes to Osier are documented here. The format follows
   panel's top edge (100 px to 60% of the window). Both sizes are remembered.
 - Projects that share a folder name show the folder they are in next to it in the sidebar,
   `app (Work)` and `app (Projects)`, with more of the path when one folder is not enough.
+- The release procedure is written down in `docs/releasing.md`.
 
 ### Changed
 
