@@ -14,7 +14,6 @@
 //! and Enter still reach the list.
 
 use crate::app_dialog::AppDialogExt as _;
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as Lucide;
@@ -582,20 +581,13 @@ impl Osier {
         if Palette::lists_accounts(mode) && !self.gh_accounts_loaded {
             palette.update(cx, |p, cx| p.wait_for_accounts(window, cx));
         }
-        let focus_on_mount = Rc::new(Cell::new(true));
+        let query = palette.read(cx).query.clone();
         window.open_app_dialog(cx, move |dialog, _, _| {
             let palette = palette.clone();
-            let focus_on_mount = focus_on_mount.clone();
             dialog
                 .close_button(false)
                 .p_0()
-                .content(move |content, window, cx| {
-                    if focus_on_mount.replace(false) {
-                        let query = palette.read(cx).query.clone();
-                        window.defer(cx, move |window, cx| {
-                            query.update(cx, |q, cx| q.focus(window, cx));
-                        });
-                    }
+                .content(move |content, _, _| {
                     // The palette's own shortcuts while it is open: the dialog is drawn outside
                     // the app view, so they never reach the app's handlers. The key for the
                     // mode on screen closes the palette, the other one switches to its mode.
@@ -614,6 +606,12 @@ impl Osier {
                             .child(palette.clone()),
                     )
                 })
+        });
+        // Focus the field now, before the dialog's first frame. Moving focus redraws the
+        // whole window (main view included, past its cache), so doing it from the first
+        // frame instead cost a second full redraw while the palette animates in.
+        window.defer(cx, move |window, cx| {
+            query.update(cx, |q, cx| q.focus(window, cx))
         });
     }
 

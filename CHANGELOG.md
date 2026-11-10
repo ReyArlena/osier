@@ -64,6 +64,7 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The command palette redrew the whole window twice while opening; now once.
 - Frame drops while the settings dialog or the command palette opens. The main window was
   laid out and drawn again on every frame of the dialog's animation although nothing in it
   changed; it is now reused until something in it does.
