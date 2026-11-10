@@ -8,6 +8,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::app::row_actions;
 use crate::test_ids::TestId as _;
@@ -127,6 +128,10 @@ impl Osier {
                         move |this, _, _, cx| this.select_stash(oid.clone(), cx)
                     }))
                     .test_id(|| format!("stash-row:{}", s.index))
+                    .a11y_row(
+                        || format!("{} {}", s.selector, s.message),
+                        self.stash_selected.as_deref() == Some(s.oid.as_str()),
+                    )
                     .group("row")
                     .px_3()
                     .py_1p5()
@@ -158,6 +163,7 @@ impl Osier {
                                     .ghost()
                                     .xsmall()
                                     .label("Apply")
+                                    .a11y_name(|| format!("Apply {}", s.selector))
                                     .tooltip("Apply and keep the stash")
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.stash_apply(index, false, window, cx)
@@ -168,6 +174,7 @@ impl Osier {
                                     .ghost()
                                     .xsmall()
                                     .label("Pop")
+                                    .a11y_name(|| format!("Pop {}", s.selector))
                                     .tooltip("Apply and drop the stash")
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.stash_apply(index, true, window, cx)
@@ -179,6 +186,7 @@ impl Osier {
                                     .xsmall()
                                     .icon(Lucide::Trash)
                                     .tooltip("Drop")
+                                    .a11y_name(|| format!("Drop {}", s.selector))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.confirm_stash_drop(index, message.clone(), window, cx)
                                     })),

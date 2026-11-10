@@ -15,6 +15,7 @@ use osier_git::ops::reset::ResetMode;
 
 use osier_git::ops::patches::PatchSource;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::test_ids::TestId as _;
 
@@ -411,6 +412,10 @@ impl Osier {
                                         });
                                     ListItem::new(("commit", ix))
                                         .test_id(|| format!("log-row:{ix}"))
+                                        .a11y_row(
+                                            || format!("{} {}", commit.short_hash(), commit.subject),
+                                            is_selected,
+                                        )
                                         .group("log-row")
                                         .selected(is_selected)
                                         .h(px(crate::graph::ROW_HEIGHT))
@@ -512,6 +517,12 @@ impl Osier {
                                                 )
                                                 .child(
                                                     Button::new(("commit-menu", ix))
+                                                        .a11y_name(|| {
+                                                            format!(
+                                                                "Actions for commit {}",
+                                                                commit.short_hash()
+                                                            )
+                                                        })
                                                         .when(!menu_buttons, |b| b.hidden())
                                                         .ghost()
                                                         .xsmall()
@@ -632,6 +643,7 @@ impl Osier {
             list = list.child(
                 h_flex()
                     .id(("reflog", ix))
+                    .a11y_item(|| format!("{} {}", e.selector, e.message))
                     .px_3()
                     .py_1p5()
                     .gap_3()
@@ -669,6 +681,7 @@ impl Osier {
                     )
                     .child(
                         Button::new(("reflog-menu", ix))
+                            .a11y_name(|| format!("Actions for {}", e.selector))
                             .when(!menu_buttons, |b| b.hidden())
                             .ghost()
                             .xsmall()

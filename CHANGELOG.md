@@ -81,6 +81,12 @@ All notable changes to Osier are documented here. The format follows
 - Projects that share a folder name show the folder they are in next to it in the sidebar,
   `app (Work)` and `app (Projects)`, with more of the path when one folder is not enough.
 - The release procedure is written down in `docs/releasing.md`.
+- Screen readers and voice control can now reach the lists: files in Changes, commits and
+  reflog entries in the Log, branches, tags, remotes, worktrees, stashes, patches, git
+  commands and notifications are announced by name, with which one is selected. Each file's
+  stage checkbox, the per-row action menus and buttons that repeat on every row ("Checkout
+  main", "Apply stash@{0}") are named after what they act on, and icon-only buttons (close
+  panel, diff settings) have names too.
 
 ### Changed
 

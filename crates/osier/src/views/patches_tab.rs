@@ -8,6 +8,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::app::row_actions;
 use crate::test_ids::TestId as _;
@@ -196,6 +197,7 @@ impl Osier {
                 h_flex()
                     .id(("patch", ix))
                     .test_id(|| format!("patch-row:{}", p.id))
+                    .a11y_row(|| format!("Patch {}", p.meta.name), selected)
                     .group("row")
                     .px_3()
                     .py_1p5()
@@ -258,6 +260,7 @@ impl Osier {
                             )
                             .child(
                                 Button::new(("patch-more", ix))
+                                    .a11y_name(|| format!("Actions for patch {}", p.meta.name))
                                     .when(!menu_buttons, |b| b.hidden())
                                     .ghost()
                                     .xsmall()

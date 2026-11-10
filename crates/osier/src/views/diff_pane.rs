@@ -864,6 +864,7 @@ impl Osier {
             .child(
                 Button::new("diff-settings")
                     .test_id("diff-settings")
+                    .accessibility_label("Diff settings")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::Settings)

@@ -2,6 +2,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod a11y;
 mod app;
 mod app_dialog;
 mod askpass;

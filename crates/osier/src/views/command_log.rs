@@ -8,6 +8,7 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::a11y::A11yRow as _;
 use crate::app::Osier;
 use crate::app::panes::ResizeBottomPanel;
 use crate::notices::WindowNoticeExt as _;
@@ -109,6 +110,7 @@ impl Osier {
             .child(
                 Button::new("close-log")
                     .test_id("close-log")
+                    .accessibility_label("Close panel")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::X)
@@ -182,6 +184,7 @@ impl Osier {
                 v_flex()
                     .id(("cmd", id as usize))
                     .test_id(|| format!("command-row:{id}"))
+                    .a11y_item(|| short.clone())
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().list_hover))
                     .when(is_open, |this| this.bg(cx.theme().list_active))

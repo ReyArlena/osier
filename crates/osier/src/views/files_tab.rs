@@ -635,6 +635,7 @@ impl Osier {
                             let weak = weak.clone();
                             let click_id = id.clone();
                             let is_selected = selected_path.as_deref() == Some(id.as_str());
+                            // a11y: the tree names its own items.
                             ListItem::new(ix)
                                 .test_id(|| format!("files-row:{id}"))
                                 .w_full()

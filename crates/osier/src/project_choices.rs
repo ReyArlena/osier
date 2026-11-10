@@ -183,6 +183,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| repo.clone());
             col = col.child(
+                // a11y: a card, not a row to pick: its pills are the controls.
                 v_flex()
                     .test_id(|| format!("project-choice-row:{ix}"))
                     .gap_2()

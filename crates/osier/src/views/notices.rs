@@ -6,6 +6,7 @@ use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::a11y::A11yRow as _;
 use crate::app::Osier;
 use crate::notices::{NoticeKind, NoticeLog};
 use crate::test_ids::TestId as _;
@@ -39,6 +40,7 @@ impl Osier {
                 h_flex()
                     .id(("notice", id as usize))
                     .test_id(|| format!("notice-row:{id}"))
+                    .a11y_item(|| notice.message.to_string())
                     .px_3()
                     .py_1p5()
                     .gap_2()

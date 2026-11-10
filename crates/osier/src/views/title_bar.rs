@@ -412,6 +412,7 @@ impl Osier {
         let weak2 = cx.entity().downgrade();
         let weak3 = cx.entity().downgrade();
         let has_gh = !self.gh_accounts.is_empty();
+        // a11y: named just below, by its label or (compact) its tooltip.
         let mut button = Button::new(id)
             .test_id(id)
             .ghost()

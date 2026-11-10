@@ -19,6 +19,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::ops::ignore::{self, IgnoreFile};
 
+use crate::a11y::A11yName as _;
 use crate::app::Osier;
 use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::test_ids::TestId as _;
@@ -298,6 +299,9 @@ impl Osier {
                                     .child(
                                         Checkbox::new("tracked-dialog-check")
                                             .test_id("tracked-dialog-check")
+                                            // The sentence next to it is built word by word,
+                                            // so it is not the checkbox's own label.
+                                            .a11y_name(|| format!("{before} {code} {after}"))
                                             .small()
                                             .checked(c1.get())
                                             .on_click(move |v, window, cx| {

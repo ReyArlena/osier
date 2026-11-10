@@ -918,6 +918,8 @@ impl Osier {
 impl Render for Osier {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::WindowExt as _;
+        // Before anything is built: rows only make their accessible names while this is on.
+        crate::a11y::sync(window);
         // A dialog that closes can leave nothing focused (it gives focus back to a handle that
         // is gone), and app shortcuts need a focused element to dispatch from. Put focus back
         // on the app once no dialog or sheet is open.

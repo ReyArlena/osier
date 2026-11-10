@@ -8,6 +8,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::refs::Branch;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::app::row_actions;
 use crate::test_ids::TestId as _;
@@ -289,19 +290,17 @@ impl Osier {
                     };
                     (inner.build())(menu, window, cx)
                 });
+                let row_selected = selected_ref.as_ref()
+                    == Some(&RefRow::Branch {
+                        name: b.name.clone(),
+                        remote: b.is_remote,
+                    });
                 list =
                     list.child(
                         h_flex()
                             .id((title, ix))
                             .cursor_pointer()
-                            .when(
-                                selected_ref.as_ref()
-                                    == Some(&RefRow::Branch {
-                                        name: b.name.clone(),
-                                        remote: b.is_remote,
-                                    }),
-                                |this| this.bg(cx.theme().list_active),
-                            )
+                            .when(row_selected, |this| this.bg(cx.theme().list_active))
                             .on_click(cx.listener({
                                 let row = RefRow::Branch {
                                     name: b.name.clone(),
@@ -310,6 +309,19 @@ impl Osier {
                                 move |this, _, _, cx| this.select_ref(row.clone(), cx)
                             }))
                             .test_id(|| format!("branch-row:{}", b.name))
+                            .a11y_row(
+                                || {
+                                    let kind = if b.is_head {
+                                        ", current branch"
+                                    } else if b.is_remote {
+                                        ", remote branch"
+                                    } else {
+                                        ""
+                                    };
+                                    format!("{}{kind}", b.name)
+                                },
+                                row_selected,
+                            )
                             .group("row")
                             .px_3()
                             .py_1p5()
@@ -373,6 +385,7 @@ impl Osier {
                                             .ghost()
                                             .xsmall()
                                             .label("Checkout")
+                                            .a11y_name(|| format!("Checkout {}", b.name))
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.checkout_branch(
                                                     checkout_name.clone(),
@@ -391,6 +404,7 @@ impl Osier {
                                                 Button::new(SharedString::from(format!(
                                                     "branch-menu-{title}-{ix}"
                                                 )))
+                                                .a11y_name(|| format!("Actions for {}", b.name))
                                                 .ghost()
                                                 .xsmall()
                                                 .icon(Lucide::Ellipsis)
@@ -480,19 +494,18 @@ impl Osier {
                     }
                     menu
                 });
+                let row_selected = selected_ref.as_ref() == Some(&RefRow::Tag(t.name.clone()));
                 list = list.child(
                     h_flex()
                         .id(("tag", ix))
                         .cursor_pointer()
-                        .when(
-                            selected_ref.as_ref() == Some(&RefRow::Tag(t.name.clone())),
-                            |this| this.bg(cx.theme().list_active),
-                        )
+                        .when(row_selected, |this| this.bg(cx.theme().list_active))
                         .on_click(cx.listener({
                             let row = RefRow::Tag(t.name.clone());
                             move |this, _, _, cx| this.select_ref(row.clone(), cx)
                         }))
                         .test_id(|| format!("tag-row:{}", t.name))
+                        .a11y_row(|| format!("Tag {}", t.name), row_selected)
                         .group("row")
                         .px_3()
                         .py_1p5()
@@ -522,6 +535,7 @@ impl Osier {
                         )
                         .child(
                             Button::new(("tag-menu", ix))
+                                .a11y_name(|| format!("Actions for tag {}", t.name))
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()
@@ -577,6 +591,7 @@ impl Osier {
                 list = list.child(
                     h_flex()
                         .id(("worktree", ix))
+                        .a11y_item(|| format!("Worktree {}", crate::format::tilde(&w.path)))
                         .px_3()
                         .py_1p5()
                         .gap_2()
@@ -612,6 +627,12 @@ impl Osier {
                         })
                         .child(
                             Button::new(("worktree-menu", ix))
+                                .a11y_name(|| {
+                                    format!(
+                                        "Actions for worktree {}",
+                                        crate::format::tilde(&w.path)
+                                    )
+                                })
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()
@@ -736,14 +757,13 @@ impl Osier {
                         ),
                     )
                 });
+                let row_selected = selected_ref.as_ref() == Some(&RefRow::Remote(r.name.clone()));
                 list = list.child(
                     h_flex()
                         .id(("remote", ix))
+                        .a11y_row(|| format!("Remote {}", r.name), row_selected)
                         .cursor_pointer()
-                        .when(
-                            selected_ref.as_ref() == Some(&RefRow::Remote(r.name.clone())),
-                            |this| this.bg(cx.theme().list_active),
-                        )
+                        .when(row_selected, |this| this.bg(cx.theme().list_active))
                         .on_click(cx.listener({
                             let row = RefRow::Remote(r.name.clone());
                             move |this, _, _, cx| this.select_ref(row.clone(), cx)
@@ -766,6 +786,7 @@ impl Osier {
                         )
                         .child(
                             Button::new(("remote-menu", ix))
+                                .a11y_name(|| format!("Actions for remote {}", r.name))
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()

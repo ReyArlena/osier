@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::status::StatusEntry;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::app::row_actions;
 use crate::project::{Area, Selection};
@@ -235,6 +236,7 @@ impl Osier {
                         .w_full()
                     .h(px(CHANGE_ROW_H))
                         .test_id(|| format!("change-row:{}:{}", title.to_lowercase(), entry.path))
+                        .a11y_row(|| format!("{display}, {}", title.to_lowercase()), selected)
                         .group("row")
                         .px_3()
                         .py_1()
@@ -417,6 +419,7 @@ impl Osier {
                                 .test_id(|| {
                                     format!("change-stage:{}:{}", title.to_lowercase(), entry.path)
                                 })
+                                .a11y_name(|| format!("Stage {}", entry.path))
                                 .small()
                                 .checked(area == Area::Staged)
                                 .disabled(area == Area::Conflicted)

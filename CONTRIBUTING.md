@@ -57,6 +57,21 @@ without a pointer. For visual checks, `scripts/dev-screenshot.sh [seconds] [repo
 launches, captures with `grim` (Wayland) and prints the log. Screenshots for the README show
 only this repository or a throwaway one.
 
+Everything a user can act on needs a name for assistive technology (screen readers, voice
+control). gpui-kit's controls name themselves when they show a label; what we build
+ourselves does not. The top of `crates/osier/src/a11y.rs` lists what needs what:
+
+- a list row (a `div` or `ListItem` with a click): `.a11y_row(|| label, selected)`, or
+  `.a11y_item(|| label)` when it cannot be selected, right after its `.test_id(..)`
+- a button that shows only an icon: `.tooltip(..)` or `.accessibility_label(..)`
+- a checkbox without a visible label, and buttons that repeat on every row with the same
+  text: `.a11y_name(|| ..)` with what they act on
+
+`cargo test` checks the source for these (`a11y::tests`), and a real exception takes a
+`// a11y: <why>` comment on the line above. To see what assistive technology gets, turn on
+the session's accessibility flag and look at the app with an AT-SPI browser such as
+Accerciser; every button, checkbox and row should have a name.
+
 ## Pull requests
 
 1. Fork and branch from `main`.
