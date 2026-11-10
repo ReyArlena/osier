@@ -45,6 +45,20 @@ impl Osier {
             .map_or(&[], Vec::as_slice)
     }
 
+    /// The parent folders the sidebar shows next to names that more than one project has,
+    /// by path. Counted over every project it can list (open, pinned, recent, scanned), so a
+    /// name does not change as the filter narrows the list.
+    pub(crate) fn sidebar_name_hints(&self) -> std::collections::HashMap<PathBuf, String> {
+        crate::format::name_hints(
+            self.projects
+                .iter()
+                .map(|p| p.path.as_path())
+                .chain(self.state.pinned.iter().map(PathBuf::as_path))
+                .chain(self.state.recent.iter().map(PathBuf::as_path))
+                .chain(self.scanned().iter().map(PathBuf::as_path)),
+        )
+    }
+
     /// Lower-case filter text from the sidebar box.
     pub(crate) fn sidebar_filter_text(&self, cx: &App) -> String {
         self.sidebar_filter.read(cx).value().trim().to_lowercase()

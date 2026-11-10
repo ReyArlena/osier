@@ -75,6 +75,8 @@ All notable changes to Osier are documented here. The format follows
   `ctrl-shift-n`, or "Toggle notifications" in the command palette. Session only, nothing
   is saved.
 
+- Projects that share a folder name show the folder they are in next to it in the sidebar,
+  `app (Work)` and `app (Projects)`, with more of the path when one folder is not enough.
 
 ### Changed
 

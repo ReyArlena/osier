@@ -402,6 +402,7 @@ impl Osier {
         let project_count = self.projects.len();
 
         let mut open = ReorderMenu::new();
+        let name_hints = self.sidebar_name_hints();
         let mut open_rows: Vec<(usize, SharedString)> = Vec::new();
         let mut shown_open = 0;
         for (ix, project) in self.projects.iter().enumerate() {
@@ -409,7 +410,8 @@ impl Osier {
                 continue;
             }
             shown_open += 1;
-            open_rows.push((ix, project.name.clone().into()));
+            let label = crate::format::name_with_hint(&project.name, name_hints.get(&project.path));
+            open_rows.push((ix, label.clone().into()));
             let pinned = self.state.is_pinned(&project.path);
             let (dirty, ahead, behind) = project
                 .snapshot
@@ -433,7 +435,7 @@ impl Osier {
                 crate::app::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref())
                     .is_some()
             });
-            let item = SidebarMenuItem::new(project.name.clone())
+            let item = SidebarMenuItem::new(label)
                 .icon(
                     Icon::new(Lucide::FolderGit2)
                         .when(by_icon, |icon| icon.text_color(changes_color)),
@@ -560,7 +562,7 @@ impl Osier {
             let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
             let (item, dot) = self.status_item(
                 &path,
-                &name,
+                &crate::format::name_with_hint(&name, name_hints.get(&path)),
                 if missing {
                     Lucide::FolderX
                 } else {
@@ -626,7 +628,8 @@ impl Osier {
             } else {
                 Lucide::Folder
             };
-            let (item, dot) = self.status_item(&path, &name, icon, cx);
+            let label = crate::format::name_with_hint(&name, name_hints.get(&path));
+            let (item, dot) = self.status_item(&path, &label, icon, cx);
             recent = recent.row(
                 format!("sidebar-recent:{name}"),
                 item.on_click(cx.listener(move |this, _, window, cx| {
