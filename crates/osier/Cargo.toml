@@ -46,12 +46,19 @@ serde_json.workspace = true
 osier-auth.workspace = true
 # Local time zone for the full date and time in time tooltips. Already in the graph via gpui.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# Developer builds only (`--features profiler`, see `src/profiling.rs`): gpui's frame profiler,
+# switched on in gpui itself. Same exact snapshot gpui-kit pins, so still one copy of gpui.
+# gpui-kit's own `profiler` feature can't be used: it names gpui-fast, whose pins conflict.
+gpui-pre = { version = "=0.3.11", optional = true, default-features = false }
 
 # The desktop's light/dark preference, read directly so "no preference" can be told apart from
 # "prefer light" (gpui reports both as light). Same crate and features gpui's Linux platform uses.
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
 futures-util = { version = "0.3", default-features = false }
+
+[features]
+profiler = ["dep:gpui-pre", "gpui-pre/profiler"]
 
 [dev-dependencies]
 # gpui's own test harness, on the exact snapshot gpui-kit pins. Not gpui-kit's `test-support`

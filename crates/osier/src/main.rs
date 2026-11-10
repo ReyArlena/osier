@@ -27,6 +27,8 @@ mod merge_window;
 mod new_repo;
 mod notices;
 mod palette;
+#[cfg(feature = "profiler")]
+mod profiling;
 mod project;
 mod project_choices;
 mod repo_config;
@@ -238,11 +240,16 @@ fn main() {
                 )
             })
         });
-        if let Err(error) = opened {
-            tracing::error!(%error, "failed to open main window");
-            cx.quit();
-            return;
-        }
+        let (_window, _) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                tracing::error!(%error, "failed to open main window");
+                cx.quit();
+                return;
+            }
+        };
+        #[cfg(feature = "profiler")]
+        profiling::start(_window, cx);
         cx.activate(true);
     });
 }
