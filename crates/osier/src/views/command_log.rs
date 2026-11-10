@@ -18,8 +18,7 @@ impl Osier {
         use crate::app::BottomTab;
         let muted = cx.theme().muted_foreground;
         let tab = self.bottom_tab;
-        let commands = self.sink.records().len();
-        let failed = self.sink.records().iter().filter(|r| !r.expected).count();
+        let (commands, failed) = self.sink.counts();
         let failures_only = self.command_log_failures_only;
         let notices = crate::notices::NoticeLog::notices(cx).len();
         let tab_button = |id: &'static str, label: &'static str, which: BottomTab| {
@@ -130,15 +129,10 @@ impl Osier {
     fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
-        let all = self.sink.records();
         let failures_only = self.command_log_failures_only;
         // Failures are easy to miss: a refresh right after one runs a dozen routine commands.
-        let records: Vec<CommandRecord> = if failures_only {
-            all.iter().filter(|r| !r.expected).cloned().collect()
-        } else {
-            all.clone()
-        };
-        let shown = records.len().min(200);
+        // Only the newest 200 are listed, so only those are taken from the log.
+        let records = self.sink.newest(200, failures_only);
         let expanded = self.expanded_command;
 
         let mut list = v_flex()
@@ -148,7 +142,7 @@ impl Osier {
             .overflow_y_scrollbar()
             .font_family(mono.clone())
             .text_xs();
-        for rec in records.iter().rev().take(shown) {
+        for rec in records.iter() {
             let ok = rec.expected;
             let id = rec.id;
             let is_open = expanded == Some(id);

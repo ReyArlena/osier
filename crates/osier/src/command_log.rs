@@ -10,13 +10,38 @@ const CAP: usize = 1000;
 /// Thread-safe sink shared by every runner. The panel polls it after tasks finish.
 #[derive(Debug, Default)]
 pub struct UiCommandSink {
-    records: Mutex<Vec<CommandRecord>>,
+    /// Shared, so the panel takes them by pointer instead of copying every record each frame.
+    records: Mutex<Vec<Arc<CommandRecord>>>,
     version: AtomicU64,
 }
 
 impl UiCommandSink {
-    pub fn records(&self) -> Vec<CommandRecord> {
+    pub fn records(&self) -> Vec<Arc<CommandRecord>> {
         self.records.lock().map(|r| r.clone()).unwrap_or_default()
+    }
+
+    /// How many records there are, and how many of them failed unexpectedly, without copying.
+    pub fn counts(&self) -> (usize, usize) {
+        self.records
+            .lock()
+            .map(|r| (r.len(), r.iter().filter(|c| !c.expected).count()))
+            .unwrap_or_default()
+    }
+
+    /// The newest `limit` records (only unexpected failures with `failures_only`), newest
+    /// first.
+    pub fn newest(&self, limit: usize, failures_only: bool) -> Vec<Arc<CommandRecord>> {
+        self.records
+            .lock()
+            .map(|r| {
+                r.iter()
+                    .rev()
+                    .filter(|c| !failures_only || !c.expected)
+                    .take(limit)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn version(&self) -> u64 {
@@ -38,7 +63,7 @@ impl CommandSink for UiCommandSink {
                 let drop = r.len() - CAP + 1;
                 r.drain(..drop);
             }
-            r.push(record.clone());
+            r.push(Arc::new(record.clone()));
         }
         self.version.fetch_add(1, Ordering::Relaxed);
     }
