@@ -56,6 +56,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Commit details list both dates whenever the author and committer dates differ at all
+  (amended, rebased or cherry-picked commits), as "Authored" and "Committed" with seconds.
+  A commit whose dates match still shows one "Date". Before, the committer date only showed
+  when it was more than a minute off, to the minute.
 - The sidebar lists the projects found in the scan directories at once, from the last scan
   (kept on disk); the fresh scan replaces them when it is done.
 - Finding the branches that contain a commit (commit details) is named in the status bar

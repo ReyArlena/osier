@@ -134,11 +134,10 @@ impl Osier {
                         format!("{} <{}>", commit.author_name, commit.author_email),
                         muted,
                     ))
-                    .child(meta_row(
-                        "Date",
-                        crate::format::full_time(commit.authored_at),
-                        muted,
-                    ))
+                    .child({
+                        let (name, value) = author_date(commit.authored_at, commit.committed_at);
+                        meta_row(name, value, muted).test_id(|| format!("commit-date:{name}"))
+                    })
                     .when(
                         commit.committer_name != commit.author_name
                             || commit.committer_email != commit.author_email,
@@ -150,16 +149,16 @@ impl Osier {
                             ))
                         },
                     )
-                    .when(
-                        (commit.committed_at - commit.authored_at).abs() > 60,
-                        |this| {
-                            this.child(meta_row(
+                    .when(commit.committed_at != commit.authored_at, |this| {
+                        this.child(
+                            meta_row(
                                 "Committed",
-                                crate::format::full_time(commit.committed_at),
+                                crate::format::full_time_seconds(commit.committed_at),
                                 muted,
-                            ))
-                        },
-                    )
+                            )
+                            .test_id("commit-date:Committed"),
+                        )
+                    })
                     .when(!commit.parents.is_empty(), |this| {
                         this.child(self.meta_parents(&commit, cx))
                     })
@@ -266,4 +265,40 @@ fn meta_row(name: &'static str, value: String, muted: Hsla) -> Div {
         .gap_0p5()
         .child(label(name, muted))
         .child(div().whitespace_normal().child(value))
+}
+
+/// The author date's row. A plain commit stamps both dates with the same second and shows
+/// one "Date". An amend, rebase or cherry-pick moves the committer date, and then the panel
+/// shows "Authored" here and "Committed" further down, both with seconds so two dates a few
+/// seconds apart never read the same.
+fn author_date(authored: i64, committed: i64) -> (&'static str, String) {
+    if authored == committed {
+        ("Date", crate::format::full_time(authored))
+    } else {
+        ("Authored", crate::format::full_time_seconds(authored))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::author_date;
+    use crate::format::{full_time, full_time_seconds};
+
+    #[test]
+    fn equal_dates_are_one_date_without_seconds() {
+        let t = 1_704_110_400;
+        assert_eq!(author_date(t, t), ("Date", full_time(t)));
+    }
+
+    #[test]
+    fn differing_dates_name_the_author_date_with_seconds() {
+        let t = 1_704_110_400;
+        for committed in [t + 3, t + 600, t - 5] {
+            let (name, value) = author_date(t, committed);
+            assert_eq!(name, "Authored");
+            assert_eq!(value, full_time_seconds(t));
+            // A few seconds apart still reads as two different times.
+            assert_ne!(value, full_time_seconds(committed));
+        }
+    }
 }

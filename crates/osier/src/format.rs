@@ -57,6 +57,16 @@ pub fn full_time(unix: i64) -> String {
     }
 }
 
+/// [`full_time`] with seconds: "Monday 1 January 2024, 12:00:05". For times that may sit
+/// seconds apart, such as a commit's author and committer dates.
+pub fn full_time_seconds(unix: i64) -> String {
+    use chrono::TimeZone as _;
+    match chrono::Local.timestamp_opt(unix, 0).single() {
+        Some(t) => t.format("%A %-d %B %Y, %H:%M:%S").to_string(),
+        None => iso_date(unix),
+    }
+}
+
 /// `YYYY-MM-DD` without a date crate (proleptic Gregorian, UTC).
 pub fn iso_date(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
@@ -203,5 +213,13 @@ mod tests {
         // Noon UTC is the same calendar day in every time zone from -11 to +11.
         let t = full_time(1_704_110_400); // 2024-01-01 12:00 UTC
         assert!(t.starts_with("Monday 1 January 2024, "), "{t}");
+    }
+
+    #[test]
+    fn full_time_seconds_adds_the_seconds() {
+        let t = super::full_time_seconds(1_704_110_405); // 2024-01-01 12:00:05 UTC
+        assert!(t.starts_with("Monday 1 January 2024, "), "{t}");
+        assert!(t.ends_with(":05"), "{t}");
+        assert!(t.starts_with(&super::full_time(1_704_110_405)), "{t}");
     }
 }

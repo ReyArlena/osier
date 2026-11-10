@@ -322,6 +322,40 @@ fn ui_commit_details_panel_shows_toggles_and_remembers(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn ui_commit_details_list_both_dates_only_when_they_differ(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-log");
+    // A plain commit: one "Date".
+    assert!(h.bounds(cx, "commit-date:Date").is_some());
+    assert!(h.bounds(cx, "commit-date:Authored").is_none());
+    assert!(h.bounds(cx, "commit-date:Committed").is_none());
+
+    // Amended a few seconds later: the committer date moves, the author date stays.
+    repo.runner()
+        .with_env("GIT_COMMITTER_DATE", "2024-01-02T12:00:03+00:00")
+        .run(Some(repo.path()), ["commit", "-q", "--amend", "--no-edit"])
+        .expect("amend");
+    h.act(cx, |o, _, cx| o.refresh_active(cx));
+    h.read(cx, |o, _| {
+        let c = &o
+            .active_project()
+            .unwrap()
+            .snapshot
+            .as_ref()
+            .unwrap()
+            .commits[0];
+        assert_eq!(c.committed_at - c.authored_at, 3);
+    });
+    // The amend replaced the selected commit: pick the new one.
+    h.click(cx, "log-row:0");
+    assert!(h.bounds(cx, "commit-date:Date").is_none());
+    assert!(h.bounds(cx, "commit-date:Authored").is_some());
+    assert!(h.bounds(cx, "commit-date:Committed").is_some());
+}
+
+#[gpui::test]
 fn squash_over_uncommitted_changes_stashes_them_while_it_runs(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     for f in ["a", "b", "c", "d"] {
