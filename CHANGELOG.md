@@ -112,6 +112,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Log rows hid other local branches on a commit with several refs: only the first three
+  badges showed, in git's order, which puts remote branches before local ones. Badges now
+  go checked-out branch, other local branches, tags, then remote branches; a remote's `HEAD`
+  is left out when another branch of that remote is on the row; and a "+N" badge lists the
+  rest in its tooltip.
 - The pencil button on a Files tab file did nothing; it now opens the file in the editor.
   It only shows for text in the working tree, not for a file at a revision, an image or a
   binary.

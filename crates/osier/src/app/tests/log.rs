@@ -67,6 +67,47 @@ fn log_badges_sit_before_the_subject_or_at_the_end(cx: &mut TestAppContext) {
     assert!(badge(&h, cx) > subject(&h, cx), "right when set");
 }
 
+#[gpui::test]
+fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.add_bare_origin();
+    repo.git(["fetch", "-q", "origin"]);
+    repo.git(["remote", "set-head", "origin", "main"]);
+    repo.branch("feat/a");
+    repo.branch("feat/b");
+    repo.git(["tag", "v1"]);
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    // Local branches first, the checked-out one leading, the others by name.
+    let x = |h: &Harness, cx: &mut TestAppContext, id: &'static str| {
+        h.bounds(cx, id).unwrap_or_else(|| panic!("{id}")).origin.x
+    };
+    let (main, a, b) = (
+        x(&h, cx, "log-ref:0:main"),
+        x(&h, cx, "log-ref:0:feat/a"),
+        x(&h, cx, "log-ref:0:feat/b"),
+    );
+    assert!(main < a && a < b, "{main:?} {a:?} {b:?}");
+    // The tag and origin/main do not fit; origin/HEAD says nothing origin/main does not.
+    for id in [
+        "log-ref:0:v1",
+        "log-ref:0:origin/main",
+        "log-ref:0:origin/HEAD",
+    ] {
+        assert!(h.bounds(cx, id).is_none(), "{id}");
+    }
+    // Its visible left edge: in this narrow window the row's end fade lies over the rest.
+    let more = h.bounds(cx, "log-ref-more:0").expect("+2 badge");
+    let more = gpui::point(more.origin.x + gpui::px(3.), more.center().y);
+    h.visual(cx)
+        .simulate_mouse_move(more, None, gpui::Modifiers::none());
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    cx.run_until_parked();
+    assert!(h.bounds(cx, "log-ref-more-tooltip").is_some());
+}
+
 fn log_subjects(h: &Harness, cx: &mut TestAppContext) -> Vec<String> {
     h.read(cx, |o, _| {
         o.active_project()

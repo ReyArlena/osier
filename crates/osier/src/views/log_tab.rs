@@ -196,7 +196,7 @@ impl Osier {
                                     } else {
                                         commit.subject.clone()
                                     };
-                                    let refs: Vec<String> = commit.refs.clone();
+                                    let refs = log_badges(&commit.refs, &remotes);
                                     // Pull requests git already knows about: the one a merge or
                                     // squash commit names, and the remote branches on this row.
                                     let pr_number = on_github
@@ -709,8 +709,58 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
     tag.xsmall().child(text)
 }
 
-/// A commit subject with up to three ref badges (`git.log_badges`). Without badges the
-/// subject ends in an ellipsis.
+/// How many ref badges a log row shows before the rest go into a "+N" badge.
+const MAX_LOG_BADGES: usize = 3;
+
+/// A log row's ref badges, most useful first, and the refs that did not fit.
+pub(crate) struct LogBadges {
+    pub shown: Vec<String>,
+    pub hidden: Vec<String>,
+}
+
+/// Order a commit's decorations for its log row: the checked-out branch (or a detached
+/// HEAD), other local branches, tags, then remote branches, each group by name. Git
+/// lists other local branches after the remote ones, so a row with a branch, `origin/main`
+/// and `origin/HEAD` used to leave the second local branch out. A remote's `HEAD` (which
+/// branch the remote treats as its default) is dropped when another branch of that remote is
+/// on the same row; it adds nothing there. The first [`MAX_LOG_BADGES`] are shown.
+pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+    /// The remote and branch of a remote-tracking ref, `None` for anything else.
+    fn remote_of<'a>(
+        remotes: &'a [osier_git::refs::Remote],
+        r: &'a str,
+    ) -> Option<(&'a str, &'a str)> {
+        crate::app::github::split_remote_branch(remotes, r)
+            .map(|(remote, branch)| (remote.name.as_str(), branch))
+    }
+    let rank = |r: &str| {
+        if r.starts_with("HEAD") {
+            0
+        } else if r.starts_with("tag: ") {
+            2
+        } else if remote_of(remotes, r).is_some() {
+            3
+        } else {
+            1
+        }
+    };
+    let mut kept: Vec<&String> = refs
+        .iter()
+        .filter(|r| match remote_of(remotes, r) {
+            Some((remote, "HEAD")) => !refs.iter().any(|other| {
+                other != *r && remote_of(remotes, other).is_some_and(|(o, _)| o == remote)
+            }),
+            _ => true,
+        })
+        .collect();
+    kept.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+    let mut shown: Vec<String> = kept.into_iter().cloned().collect();
+    let hidden = shown.split_off(shown.len().min(MAX_LOG_BADGES));
+    LogBadges { shown, hidden }
+}
+
+/// A commit subject with up to [`MAX_LOG_BADGES`] ref badges (`git.log_badges`), and a "+N"
+/// badge naming the rest in its tooltip. Without badges the subject ends in an ellipsis.
 ///
 /// Left: badges first, then the subject; the row's end fades out over badges that do not
 /// fit. Right: the subject runs up to the badges at the end of the line and fades out
@@ -720,13 +770,13 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
 fn subject_with_refs(
     ix: usize,
     subject: String,
-    refs: Vec<String>,
+    refs: LogBadges,
     right: bool,
     fade: (Hsla, Hsla),
     cx: &App,
 ) -> AnyElement {
     let (base, hover) = fade;
-    if refs.is_empty() {
+    if refs.shown.is_empty() {
         return div()
             .test_id(|| format!("log-subject:{ix}"))
             .flex_1()
@@ -736,7 +786,19 @@ fn subject_with_refs(
             .child(subject)
             .into_any_element();
     }
-    let badges = refs.into_iter().take(3).map(|r| {
+    let more = (!refs.hidden.is_empty()).then(|| {
+        super::hint(
+            ("log-ref-more", ix),
+            refs.hidden.join(", "),
+            "log-ref-more-tooltip",
+            cx,
+        )
+        .flex_none()
+        .test_id(|| format!("log-ref-more:{ix}"))
+        .child(ref_tag(format!("+{}", refs.hidden.len()), false, false, cx))
+        .into_any_element()
+    });
+    let badges = refs.shown.into_iter().map(|r| {
         let is_head = r.starts_with("HEAD");
         let is_tag = r.starts_with("tag: ");
         let label = r
@@ -747,7 +809,9 @@ fn subject_with_refs(
             .flex_none()
             .test_id(|| format!("log-ref:{ix}:{label}"))
             .child(ref_tag(label, is_head, is_tag, cx))
+            .into_any_element()
     });
+    let badges = badges.chain(more);
     if !right {
         return h_flex()
             .relative()
@@ -851,4 +915,65 @@ fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
         }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_badges;
+    use osier_git::refs::Remote;
+
+    fn refs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn origin() -> Vec<Remote> {
+        vec![Remote {
+            name: "origin".into(),
+            fetch_url: "https://example.com/app.git".into(),
+            push_url: None,
+        }]
+    }
+
+    #[test]
+    fn local_branches_come_before_remote_ones() {
+        // Git's own order for a commit two local branches point at.
+        let b = log_badges(
+            &refs(&["HEAD -> main", "origin/main", "origin/HEAD", "feat/multi"]),
+            &origin(),
+        );
+        assert_eq!(b.shown, ["HEAD -> main", "feat/multi", "origin/main"]);
+        assert!(b.hidden.is_empty(), "{:?}", b.hidden);
+    }
+
+    #[test]
+    fn order_is_head_local_tags_remote_and_the_rest_are_counted() {
+        let b = log_badges(
+            &refs(&[
+                "HEAD -> main",
+                "origin/main",
+                "origin/feat/a",
+                "tag: v1",
+                "feat/b",
+                "feat/a",
+            ]),
+            &origin(),
+        );
+        assert_eq!(b.shown, ["HEAD -> main", "feat/a", "feat/b"]);
+        assert_eq!(b.hidden, ["tag: v1", "origin/feat/a", "origin/main"]);
+    }
+
+    #[test]
+    fn a_remote_head_alone_stays() {
+        let b = log_badges(&refs(&["origin/HEAD", "feat/x"]), &origin());
+        assert_eq!(b.shown, ["feat/x", "origin/HEAD"]);
+        // A local branch that only looks like one is not a remote's HEAD.
+        let b = log_badges(&refs(&["upstream/HEAD", "origin/main"]), &origin());
+        assert_eq!(b.shown, ["upstream/HEAD", "origin/main"]);
+    }
+
+    #[test]
+    fn a_detached_head_leads() {
+        let b = log_badges(&refs(&["origin/main", "HEAD"]), &origin());
+        assert_eq!(b.shown, ["HEAD", "origin/main"]);
+    }
 }
