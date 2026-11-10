@@ -64,6 +64,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Programs opened from Osier (editor, terminal, file manager, `xdg-open`) run detached in
+  their own systemd scope where there is one, and no longer linger as `<defunct>` processes
+  until Osier quits.
 - Settings opens without waiting for `ssh-add -l`: the ssh status loads in the background
   and the Accounts page shows "checking…" until it is back.
 - The command palette redrew the whole window twice while opening; now once.

@@ -42,18 +42,60 @@ fn expand(template: &str, path: &Path, file: Option<(&Path, Option<u32>)>) -> Ve
         .collect()
 }
 
+/// Start a program detached from Osier.
+///
+/// - Under a systemd user session it runs through `systemd-run --user --scope`, so it gets its
+///   own scope (cgroup): quitting Osier, or the out-of-memory killer stopping Osier's scope,
+///   leaves it alone. Without systemd it is started directly.
+/// - Its exit is collected on a background thread, so a finished program does not linger as a
+///   zombie process for as long as Osier runs.
 fn spawn(argv: &[String], cwd: &Path) -> std::io::Result<()> {
+    let argv = launch_argv(argv, systemd_user_session());
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| std::io::Error::other("empty command"))?;
-    Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
+        .spawn()?;
+    std::thread::Builder::new()
+        .name("osier-launch".into())
+        .spawn(move || {
+            let _ = child.wait();
+        })?;
+    Ok(())
+}
+
+/// `argv`, wrapped in `systemd-run --user --scope` when `systemd` says a user manager is there.
+fn launch_argv(argv: &[String], systemd: bool) -> Vec<String> {
+    if !systemd || argv.is_empty() {
+        return argv.to_vec();
+    }
+    [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--collect",
+        "--quiet",
+        "--",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain(argv.iter().cloned())
+    .collect()
+}
+
+/// A systemd user manager we can ask for a scope: `systemd-run` on PATH and the manager's
+/// socket present. Not inside Flatpak, where the sandbox has its own rules.
+fn systemd_user_session() -> bool {
+    if Path::new("/.flatpak-info").exists() || !on_path("systemd-run") {
+        return false;
+    }
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .is_some_and(|dir| Path::new(&dir).join("systemd/private").exists())
 }
 
 impl Osier {
@@ -215,5 +257,30 @@ mod tests {
             Some((Path::new("/r/x"), None)),
         );
         assert_eq!(argv, ["kate", "--line", "1", "/r/x"]);
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::launch_argv;
+
+    #[test]
+    fn systemd_wraps_the_command_in_its_own_scope() {
+        let argv = vec!["zed".to_string(), "/x/a.rs:3".to_string()];
+        assert_eq!(launch_argv(&argv, false), argv);
+        assert_eq!(
+            launch_argv(&argv, true),
+            [
+                "systemd-run",
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                "--",
+                "zed",
+                "/x/a.rs:3"
+            ]
+        );
+        assert!(launch_argv(&[], true).is_empty());
     }
 }
