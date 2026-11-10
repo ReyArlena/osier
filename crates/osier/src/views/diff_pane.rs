@@ -129,7 +129,12 @@ impl Osier {
         let body: AnyElement = if let Some(view) = &blame {
             self.render_blame(view, cx)
         } else if let Some(editor) = &self.editor {
-            Editor::new(&editor.state).size_full().into_any_element()
+            // No border of its own: the header's bottom border already separates it, and a
+            // second line under it reads as one thick rule.
+            Editor::new(&editor.state)
+                .bordered(false)
+                .size_full()
+                .into_any_element()
         } else if three_way {
             match self.merge_view(window, cx) {
                 Ok(Some(view)) => view.into_any_element(),
@@ -938,6 +943,7 @@ impl Osier {
             Some(Viewer::Code { .. }) => match &editor {
                 Some(state) => Editor::new(state)
                     .readonly(true)
+                    .bordered(false)
                     .size_full()
                     .into_any_element(),
                 None => div().into_any_element(),
@@ -947,6 +953,7 @@ impl Osier {
                     match &editor {
                         Some(state) => Editor::new(state)
                             .readonly(true)
+                            .bordered(false)
                             .size_full()
                             .into_any_element(),
                         None => div().into_any_element(),

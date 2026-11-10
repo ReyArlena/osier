@@ -108,6 +108,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Code files in the viewer and the editor drew their own border under the pane header,
+  which read as one thick line; they now sit flush like rendered Markdown.
 - The clone and create dialogs flashed a red "already exists and is not empty" error just
   before closing, about the clone's own folder. The target folder is now checked in the
   background when it changes (not on every frame), Clone and Create stay disabled until the
