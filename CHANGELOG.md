@@ -25,6 +25,10 @@ All notable changes to Osier are documented here. The format follows
 - The reflog, the Stashes and Patches tabs, the git command log and the notification list
   also build only the rows on screen. Moving through stashes with the arrow keys scrolls the
   selected one into view.
+- The project sidebar stays quick with hundreds of projects (scan directories): it builds
+  only the rows on screen, and listing recent and scanned projects no longer compares every
+  project with every other on each redraw. A hover over a sidebar with ~480 projects went from
+  5.5 ms to 1.9 ms to draw.
 
 ## [0.3.0] - 2026-11-11
 

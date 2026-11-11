@@ -788,3 +788,41 @@ fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui::test]
+fn ui_sidebar_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    // A real repository first (it gets opened below), then plain folders: as many recents as
+    // scanning can bring, more than fit. The sidebar list builds only what is on screen.
+    let first = TempRepo::new();
+    first.commit_file("b.txt", "b\n", "first");
+    let first_name = first
+        .path()
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let dirs = tempfile::tempdir().expect("tempdir");
+    let mut recents = vec![first.path().to_path_buf()];
+    recents.extend((1..30).map(|i| {
+        let p = dirs.path().join(format!("recent-{i:02}"));
+        std::fs::create_dir_all(&p).expect("dir");
+        p
+    }));
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |osier, _, cx| {
+        osier.state.recent.extend(recents.iter().cloned());
+        osier.sidebar_visible = true;
+        cx.notify();
+    });
+    let first_row = format!("sidebar-recent:{first_name}");
+    assert!(h.bounds(cx, &first_row).is_some());
+    assert!(
+        h.bounds(cx, "sidebar-recent:recent-29").is_none(),
+        "rows below the fold are not built"
+    );
+    // Rows still work: a recent row opens its project.
+    h.click(cx, &first_row);
+    assert_eq!(active_name(&h, cx), first_name);
+}
