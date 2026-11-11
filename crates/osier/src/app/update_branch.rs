@@ -12,8 +12,8 @@ use crate::notices::WindowNoticeExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::checkbox::Checkbox;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::radio::RadioGroup;
 use gpui_kit::component::{Sizable as _, v_flex};

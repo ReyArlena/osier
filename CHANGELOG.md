@@ -8,6 +8,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Checkboxes change colour under the pointer (an empty box takes an accent edge and a tint,
+  a ticked one lightens), so it is clear they can be clicked.
+
 - The line under the pointer is highlighted in every code editor: the file viewer, the edit
   pane and the three panes of the merge tool.
 

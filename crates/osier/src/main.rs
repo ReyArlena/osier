@@ -9,6 +9,7 @@ mod askpass;
 mod background;
 mod blame_view;
 mod cached_list;
+mod checkbox;
 mod cli;
 mod command_log;
 mod config_watch;

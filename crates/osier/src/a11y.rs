@@ -21,8 +21,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::checkbox::Checkbox;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::{Role, StatefulInteractiveElement, Window};
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);

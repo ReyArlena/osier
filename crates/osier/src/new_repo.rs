@@ -13,9 +13,9 @@ use crate::app_dialog::AppDialogExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
+use crate::checkbox::Checkbox;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};

@@ -9,9 +9,9 @@ use crate::app_dialog::AppDialogExt as _;
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::checkbox::Checkbox;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
