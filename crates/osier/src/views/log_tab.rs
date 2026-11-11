@@ -160,7 +160,7 @@ impl Osier {
                     ),
             )
             .child(
-                self.with_commit_details(
+                div().flex_1().min_h_0().child(
                     div().id("log-list").size_full().child(
                         uniform_list("commits", count, move |range, _, cx| {
                             range
@@ -538,22 +538,33 @@ impl Osier {
                         .track_scroll(&self.log_scroll)
                         .size_full(),
                     ),
-                    cx,
                 ),
             )
             .into_any_element()
     }
 
-    /// The log list, with the commit details panel under it when shown: a vertical split
-    /// whose details height is remembered.
-    fn with_commit_details(&self, list: impl IntoElement, cx: &mut Context<Self>) -> AnyElement {
-        if !self.commit_details_visible() {
-            return div().flex_1().min_h_0().child(list).into_any_element();
-        }
+    /// Whether the Log tab shows the commit details panel under the list: turned on, and a
+    /// list of commits (not the reflog, not an empty state) to show them for.
+    pub(crate) fn log_shows_details(&self) -> bool {
+        self.commit_details_visible()
+            && !self.show_reflog
+            && self
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .is_some_and(|s| !s.commits.is_empty())
+    }
+
+    /// The Log tab's list with the commit details panel under it: a vertical split whose
+    /// details height is remembered. Both sides are panes (`crate::pane`).
+    pub(crate) fn with_commit_details(
+        &self,
+        list: AnyElement,
+        details: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let height = self.state.layout.log_details_height.unwrap_or(220.);
         div()
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .child(
                 gpui_kit::component::resizable::v_resizable("log-split")
                     .on_resize(cx.listener(
@@ -577,13 +588,7 @@ impl Osier {
                             .size(px(height))
                             .size_range(px(90.)..px(900.))
                             .fixed()
-                            .child(
-                                div()
-                                    .size_full()
-                                    .border_t_1()
-                                    .border_color(cx.theme().border)
-                                    .child(self.render_commit_details(cx)),
-                            ),
+                            .child(details),
                     ),
             )
             .into_any_element()

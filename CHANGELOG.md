@@ -10,6 +10,10 @@ All notable changes to Osier are documented here. The format follows
 
 - GitHub release notes list every commit in the release, grouped by type, above the list of
   pull requests.
+- Hovering list rows redraws only the part of the window under the pointer (the list, the
+  sidebar, the diff, the commit details and the bottom panel each redraw on their own), so
+  the hover highlight keeps up with the mouse: on the Log tab a hover now takes about a third
+  less time to draw.
 
 ## [0.3.0] - 2026-11-11
 

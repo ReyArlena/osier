@@ -16,12 +16,10 @@ use crate::test_ids::TestId as _;
 use osier_git::runner::CommandRecord;
 
 impl Osier {
-    /// The bottom panel: a tab row (git commands, notifications), then the chosen list.
-    pub(crate) fn render_bottom_panel(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    /// The bottom panel's content (a pane, `crate::pane`): a tab row (git commands,
+    /// notifications), then the chosen list. [`Self::render_bottom_panel_frame`] gives it
+    /// its height and draggable edge.
+    pub(crate) fn render_bottom_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::app::BottomTab;
         let muted = cx.theme().muted_foreground;
         let tab = self.bottom_tab;
@@ -120,7 +118,7 @@ impl Osier {
                         cx.notify();
                     })),
             );
-        let panel = v_flex()
+        v_flex()
             .size_full()
             .border_t_1()
             .border_color(cx.theme().border)
@@ -129,14 +127,23 @@ impl Osier {
             .child(match tab {
                 BottomTab::Commands => self.render_command_log(cx).into_any_element(),
                 BottomTab::Notifications => self.render_notices(cx).into_any_element(),
-            });
-        // The panel with a draggable top edge, followed here like the sidebar's.
+            })
+            .into_any_element()
+    }
+
+    /// The bottom panel pane with a draggable top edge (shell), followed here like the
+    /// sidebar's.
+    pub(crate) fn render_bottom_panel_frame(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .test_id("bottom-panel")
             .relative()
             .h(px(self.bottom_panel_height(window)))
             .flex_none()
-            .child(panel)
+            .child(crate::pane::cached(&self.panes.bottom_panel, window))
             .child(
                 resize_handle("bottom-panel-edge", Axis::Vertical)
                     .inside(HandleEdge::Leading)

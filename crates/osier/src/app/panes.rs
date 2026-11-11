@@ -1,10 +1,12 @@
 //! Layout: tabs, the right pane kept per tab, diff views, the sidebar and the command log
 //! panel.
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::diff::{DiffEvent, DiffState};
 use gpui_kit::*;
 
 use super::{BottomTab, Osier, Tab};
+use crate::pane::{Pane, RenderFn};
 use crate::project::{Project, Selection};
 
 /// Width of the project sidebar until its edge is dragged, and how far a drag can take it.
@@ -34,6 +36,46 @@ pub(crate) struct ResizeBottomPanel;
 impl Render for ResizeBottomPanel {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         Empty
+    }
+}
+
+/// The parts of the main window that redraw on their own (`crate::pane`). `Osier::render`
+/// is the shell that lays them out.
+pub(crate) struct Panes {
+    pub(crate) title_bar: Entity<Pane<Osier>>,
+    pub(crate) sidebar: Entity<Pane<Osier>>,
+    pub(crate) tab_strip: Entity<Pane<Osier>>,
+    pub(crate) tab: Entity<Pane<Osier>>,
+    pub(crate) commit_details: Entity<Pane<Osier>>,
+    pub(crate) diff: Entity<Pane<Osier>>,
+    pub(crate) bottom_panel: Entity<Pane<Osier>>,
+    pub(crate) status_bar: Entity<Pane<Osier>>,
+}
+
+impl Panes {
+    pub(crate) fn new(owner: &Entity<Osier>, cx: &mut App) -> Self {
+        let mut pane = |render: RenderFn<Osier>| Pane::new(owner, render, cx);
+        Self {
+            title_bar: pane(|o, _, cx| o.render_title_bar(cx).into_any_element()),
+            sidebar: pane(|o, window, cx| o.render_sidebar(window, cx)),
+            tab_strip: pane(|o, _, cx| o.render_tab_strip(cx)),
+            tab: pane(|o, window, cx| o.render_tab(window, cx)),
+            commit_details: pane(|o, _, cx| {
+                let border = cx.theme().border;
+                div()
+                    .size_full()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(o.render_commit_details(cx))
+                    .into_any_element()
+            }),
+            diff: pane(|o, window, cx| o.render_diff_pane(window, cx).into_any_element()),
+            bottom_panel: pane(|o, _, cx| o.render_bottom_panel(cx)),
+            status_bar: pane(|o, _, cx| {
+                let has_project = o.active.is_some();
+                o.render_status_bar(has_project, cx).into_any_element()
+            }),
+        }
     }
 }
 

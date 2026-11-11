@@ -393,11 +393,9 @@ impl Osier {
         )
     }
 
-    pub(crate) fn render_sidebar(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    /// The project sidebar's content (a pane, `crate::pane`); [`Self::render_sidebar_frame`]
+    /// gives it its width and draggable edge.
+    pub(crate) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let weak = cx.entity().downgrade();
         let filter = self.sidebar_filter_text(cx);
         let query = self.sidebar_query(cx);
@@ -795,15 +793,24 @@ impl Osier {
                         ),
                 ),
             );
-        // The sidebar with a draggable right edge. The drag is followed here rather than on
-        // the handle, since the pointer leaves the handle as soon as it moves.
+        sidebar.into_any_element()
+    }
+
+    /// The sidebar pane with a draggable right edge (shell). The drag is followed here rather
+    /// than on the handle, since the pointer leaves the handle as soon as it moves.
+    pub(crate) fn render_sidebar_frame(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .test_id("sidebar-pane")
             .relative()
             .flex()
             .flex_none()
             .h_full()
-            .child(sidebar)
+            .w(px(self.sidebar_width(window)))
+            .child(crate::pane::cached(&self.panes.sidebar, window))
             .child(
                 resize_handle("sidebar-edge", Axis::Horizontal)
                     .inside(HandleEdge::Trailing)
