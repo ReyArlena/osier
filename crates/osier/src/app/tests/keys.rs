@@ -462,6 +462,35 @@ fn ui_context_menu_keys_fire_on_the_selected_row(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn ui_branches_list_draws_rows_on_screen_and_follows_the_keyboard(cx: &mut TestAppContext) {
+    use crate::app::row_actions::RefRow;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    for i in 0..80 {
+        repo.git(["branch", &format!("b-{i:02}")]);
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-branches");
+
+    // Only rows on screen are built.
+    assert!(h.bounds(cx, "branch-row:b-00").is_some());
+    assert!(h.bounds(cx, "branch-row:b-79").is_none());
+
+    // Walking down past the bottom scrolls the selected row into view.
+    h.click(cx, "branch-row:b-00");
+    h.keys(cx, &["down"; 80].join(" "));
+    let selected = h.read(cx, |o, _| match &o.ref_selected {
+        Some(RefRow::Branch { name, .. }) => name.clone(),
+        other => panic!("selected {other:?}"),
+    });
+    assert_ne!(selected, "b-00");
+    assert!(
+        h.bounds(cx, &format!("branch-row:{selected}")).is_some(),
+        "{selected} is drawn"
+    );
+}
+
+#[gpui::test]
 fn ui_branch_tag_and_stash_rows_select_and_take_menu_keys(cx: &mut TestAppContext) {
     use crate::app::row_actions::RefRow;
     let repo = TempRepo::new();

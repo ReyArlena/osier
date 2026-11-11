@@ -14,6 +14,9 @@ All notable changes to Osier are documented here. The format follows
   sidebar, the diff, the commit details and the bottom panel each redraw on their own), so
   the hover highlight keeps up with the mouse: on the Log tab a hover now takes about a third
   less time to draw.
+- The Branches tab builds only the rows on screen, so long lists of branches and tags stay
+  quick to hover and scroll, and moving the selection with the arrow keys scrolls it into
+  view.
 
 ## [0.3.0] - 2026-11-11
 

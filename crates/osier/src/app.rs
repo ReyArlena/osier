@@ -384,6 +384,8 @@ pub struct Osier {
     diff_task: Task<()>,
     /// The parts of the window that redraw on their own (`crate::pane`).
     pub(crate) panes: panes::Panes,
+    /// The Branches tab's list (`crate::lazy_list`).
+    pub(crate) branches_list: crate::lazy_list::LazyList,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -657,6 +659,7 @@ impl Osier {
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
             panes: panes::Panes::new(&cx.entity(), cx),
+            branches_list: Default::default(),
             _subscriptions: vec![
                 message_subscription,
                 filter_subscription,

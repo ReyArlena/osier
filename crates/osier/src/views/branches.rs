@@ -6,7 +6,6 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use osier_git::refs::Branch;
 
 use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
@@ -15,10 +14,36 @@ use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::MergeMode;
 use row_actions::RefRow;
 
+/// One row of the Branches list: a section header, or an entry by its index in the
+/// snapshot's list (branches also by their position in their section, for element ids).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum RefListRow {
+    Header(Section),
+    Branch {
+        section: Section,
+        pos: usize,
+        at: usize,
+    },
+    Tag(usize),
+    Worktree(usize),
+    Submodule(usize),
+    Remote(usize),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Section {
+    Local,
+    RemoteBranches,
+    Tags,
+    Worktrees,
+    Submodules,
+    Remotes,
+}
+
 impl Osier {
+    /// The Branches tab: branches, tags, worktrees, submodules and remotes in one list that
+    /// builds only the rows on screen (`crate::lazy_list`).
     pub(crate) fn render_branches(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let menu_buttons = self.settings.appearance.row_menu_buttons;
-        let selected_ref = self.ref_selected.clone();
         let Some(project) = self.active_project() else {
             return self
                 .empty_state(
@@ -33,36 +58,248 @@ impl Osier {
                 .empty_state(&project.name, "Reading branches…", cx)
                 .into_any_element();
         };
-        let on_github = self.active_github_url().is_some();
-        let local: Vec<&Branch> = snapshot.branches.iter().filter(|b| !b.is_remote).collect();
-        let remote: Vec<&Branch> = snapshot.branches.iter().filter(|b| b.is_remote).collect();
-        let muted = cx.theme().muted_foreground;
-        let weak = cx.entity().downgrade();
-
-        let mut list = v_flex()
-            .flex_1()
-            .min_h_0()
-            .id("branches-list")
-            .overflow_y_scrollbar();
-        for (title, entries, icon) in [
-            ("Local", &local, Lucide::GitBranch),
-            ("Remote", &remote, Lucide::Cloud),
-        ] {
+        let mut rows = Vec::new();
+        let (mut local, mut remote) = (0, 0);
+        for (section, is_remote) in [(Section::Local, false), (Section::RemoteBranches, true)] {
+            let entries: Vec<usize> = snapshot
+                .branches
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.is_remote == is_remote)
+                .map(|(at, _)| at)
+                .collect();
+            if is_remote {
+                remote = entries.len();
+            } else {
+                local = entries.len();
+            }
             if entries.is_empty() {
                 continue;
             }
-            list = list.child(
+            rows.push(RefListRow::Header(section));
+            rows.extend(
+                entries
+                    .into_iter()
+                    .enumerate()
+                    .map(|(pos, at)| RefListRow::Branch { section, pos, at }),
+            );
+        }
+        // Tags, newest first.
+        if !snapshot.tags.is_empty() {
+            rows.push(RefListRow::Header(Section::Tags));
+            rows.extend((0..snapshot.tags.len()).map(RefListRow::Tag));
+        }
+        // Worktrees: the main checkout plus linked ones.
+        if snapshot.worktrees.len() > 1 {
+            rows.push(RefListRow::Header(Section::Worktrees));
+            rows.extend((0..snapshot.worktrees.len()).map(RefListRow::Worktree));
+        }
+        // Submodules: path, where it points, whether it is checked out.
+        if !snapshot.submodules.is_empty() {
+            rows.push(RefListRow::Header(Section::Submodules));
+            rows.extend((0..snapshot.submodules.len()).map(RefListRow::Submodule));
+        }
+        // Remotes with their URLs and a menu.
+        if !snapshot.remotes.is_empty() {
+            rows.push(RefListRow::Header(Section::Remotes));
+            rows.extend((0..snapshot.remotes.len()).map(RefListRow::Remote));
+        }
+        let selected = self.ref_selected.as_ref().and_then(|sel| {
+            rows.iter().position(|row| match (row, sel) {
+                (RefListRow::Branch { at, .. }, RefRow::Branch { name, remote }) => {
+                    let b = &snapshot.branches[*at];
+                    &b.name == name && b.is_remote == *remote
+                }
+                (RefListRow::Tag(ix), RefRow::Tag(name)) => &snapshot.tags[*ix].name == name,
+                (RefListRow::Remote(ix), RefRow::Remote(name)) => {
+                    &snapshot.remotes[*ix].name == name
+                }
+                _ => false,
+            })
+        });
+        let state = self.branches_list.sync(&rows, selected);
+        let muted = cx.theme().muted_foreground;
+        v_flex()
+            .size_full()
+            .child(
                 h_flex()
                     .px_3()
-                    .py_1()
+                    .py_2()
                     .gap_2()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(muted)
-                    .child(title)
-                    .child(entries.len().to_string()),
-            );
-            for (ix, b) in entries.iter().enumerate() {
+                    .items_center()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(div().text_sm().font_medium().flex_none().child("Branches"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(format!("{local} local, {remote} remote")),
+                    )
+                    .child(
+                        Button::new("add-worktree")
+                            .test_id("add-worktree")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::FolderTree)
+                            .label("Worktree")
+                            .tooltip("Add a worktree")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.prompt_add_worktree(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("add-remote")
+                            .test_id("add-remote")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::Globe)
+                            .label("Add remote")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.prompt_add_remote(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("new-branch")
+                            .test_id("new-branch")
+                            .outline()
+                            .xsmall()
+                            .icon(Lucide::GitBranchPlus)
+                            .label("New branch")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.prompt_new_branch(None, window, cx)
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        crate::lazy_list::rows(
+                            state.clone(),
+                            cx.processor(move |this, ix: usize, _, cx| {
+                                this.render_ref_row(rows[ix], cx)
+                            }),
+                        )
+                        .size_full(),
+                    )
+                    .vertical_scrollbar(&state),
+            )
+            .into_any_element()
+    }
+
+    /// One row of the Branches list, built only while it is on screen.
+    fn render_ref_row(&self, row: RefListRow, cx: &mut Context<Self>) -> AnyElement {
+        let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
+            return div().into_any_element();
+        };
+        let menu_buttons = self.settings.appearance.row_menu_buttons;
+        let selected_ref = self.ref_selected.clone();
+        let on_github = self.active_github_url().is_some();
+        let muted = cx.theme().muted_foreground;
+        let weak = cx.entity().downgrade();
+        match row {
+            RefListRow::Header(Section::Local) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Local")
+                .child(
+                    snapshot
+                        .branches
+                        .iter()
+                        .filter(|b| !b.is_remote)
+                        .count()
+                        .to_string(),
+                )
+                .into_any_element(),
+            RefListRow::Header(Section::RemoteBranches) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Remote")
+                .child(
+                    snapshot
+                        .branches
+                        .iter()
+                        .filter(|b| b.is_remote)
+                        .count()
+                        .to_string(),
+                )
+                .into_any_element(),
+            RefListRow::Header(Section::Tags) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Tags")
+                .child(snapshot.tags.len().to_string())
+                .into_any_element(),
+            RefListRow::Header(Section::Worktrees) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Worktrees")
+                .child(snapshot.worktrees.len().to_string())
+                .into_any_element(),
+            RefListRow::Header(Section::Submodules) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Submodules")
+                .child(snapshot.submodules.len().to_string())
+                .child(div().flex_1())
+                .child(
+                    Button::new("submodules-update-all")
+                        .test_id("submodules-update-all")
+                        .ghost()
+                        .xsmall()
+                        .label("Update all")
+                        .tooltip("git submodule update --init --recursive")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.update_submodules(Vec::new(), window, cx)
+                        })),
+                )
+                .into_any_element(),
+            RefListRow::Header(Section::Remotes) => h_flex()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child("Remotes")
+                .child(snapshot.remotes.len().to_string())
+                .into_any_element(),
+            RefListRow::Branch {
+                section,
+                pos: ix,
+                at,
+            } => {
+                let b = &snapshot.branches[at];
+                let (title, icon) = match section {
+                    Section::RemoteBranches => ("Remote", Lucide::Cloud),
+                    _ => ("Local", Lucide::GitBranch),
+                };
+
                 let name = b.name.clone();
                 let is_remote = b.is_remote;
                 let is_head = b.is_head;
@@ -295,143 +532,130 @@ impl Osier {
                         name: b.name.clone(),
                         remote: b.is_remote,
                     });
-                list =
-                    list.child(
-                        h_flex()
-                            .id((title, ix))
-                            .cursor_pointer()
-                            .when(row_selected, |this| this.bg(cx.theme().list_active))
-                            .on_click(cx.listener({
-                                let row = RefRow::Branch {
-                                    name: b.name.clone(),
-                                    remote: b.is_remote,
-                                };
-                                move |this, _, _, cx| this.select_ref(row.clone(), cx)
-                            }))
-                            .test_id(|| format!("branch-row:{}", b.name))
-                            .a11y_row(
-                                || {
-                                    let kind = if b.is_head {
-                                        ", current branch"
-                                    } else if b.is_remote {
-                                        ", remote branch"
-                                    } else {
-                                        ""
-                                    };
-                                    format!("{}{kind}", b.name)
-                                },
-                                row_selected,
-                            )
-                            .group("row")
-                            .px_3()
-                            .py_1p5()
-                            .gap_2()
-                            .items_center()
-                            .hover(|this| this.bg(cx.theme().list_hover))
-                            .child(Icon::new(icon).xsmall())
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .when(b.is_head, |this| this.font_medium())
-                                    .child(b.name.clone()),
-                            )
-                            .when(b.is_head, |this| {
-                                this.child(Tag::primary().xsmall().child("current"))
-                            })
-                            .when(b.upstream_gone, |this| {
-                                this.child(Tag::danger().xsmall().child("upstream gone"))
-                            })
-                            .when(b.ahead > 0, |this| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(format!("↑{}", b.ahead)),
-                                )
-                            })
-                            .when(b.behind > 0, |this| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(format!("↓{}", b.behind)),
-                                )
-                            })
-                            .child(
-                                super::relative_time_label(
-                                    SharedString::from(format!("branch-time:{}", b.name)),
-                                    b.committed_at,
-                                    cx,
-                                )
+
+                h_flex()
+                    .id((title, ix))
+                    .cursor_pointer()
+                    .when(row_selected, |this| this.bg(cx.theme().list_active))
+                    .on_click(cx.listener({
+                        let row = RefRow::Branch {
+                            name: b.name.clone(),
+                            remote: b.is_remote,
+                        };
+                        move |this, _, _, cx| this.select_ref(row.clone(), cx)
+                    }))
+                    .test_id(|| format!("branch-row:{}", b.name))
+                    .a11y_row(
+                        || {
+                            let kind = if b.is_head {
+                                ", current branch"
+                            } else if b.is_remote {
+                                ", remote branch"
+                            } else {
+                                ""
+                            };
+                            format!("{}{kind}", b.name)
+                        },
+                        row_selected,
+                    )
+                    .group("row")
+                    .px_3()
+                    .py_1p5()
+                    .gap_2()
+                    .items_center()
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(Icon::new(icon).xsmall())
+                    .child(
+                        div()
+                            .text_sm()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .when(b.is_head, |this| this.font_medium())
+                            .child(b.name.clone()),
+                    )
+                    .when(b.is_head, |this| {
+                        this.child(Tag::primary().xsmall().child("current"))
+                    })
+                    .when(b.upstream_gone, |this| {
+                        this.child(Tag::danger().xsmall().child("upstream gone"))
+                    })
+                    .when(b.ahead > 0, |this| {
+                        this.child(
+                            div()
                                 .text_xs()
                                 .text_color(muted)
-                                .flex_none()
-                                .w(px(78.))
-                                .text_right(),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .invisible()
-                                    .group_hover("row", |this| this.visible())
-                                    .when(!is_head, |this| {
-                                        this.child(
-                                            Button::new(SharedString::from(format!(
-                                                "checkout-{title}-{ix}"
-                                            )))
-                                            .ghost()
-                                            .xsmall()
-                                            .label("Checkout")
-                                            .a11y_name(|| format!("Checkout {}", b.name))
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.checkout_branch(
-                                                    checkout_name.clone(),
-                                                    is_remote,
-                                                    window,
-                                                    cx,
-                                                )
-                                            })),
+                                .child(format!("↑{}", b.ahead)),
+                        )
+                    })
+                    .when(b.behind > 0, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(format!("↓{}", b.behind)),
+                        )
+                    })
+                    .child(
+                        super::relative_time_label(
+                            SharedString::from(format!("branch-time:{}", b.name)),
+                            b.committed_at,
+                            cx,
+                        )
+                        .text_xs()
+                        .text_color(muted)
+                        .flex_none()
+                        .w(px(78.))
+                        .text_right(),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .invisible()
+                            .group_hover("row", |this| this.visible())
+                            .when(!is_head, |this| {
+                                this.child(
+                                    Button::new(SharedString::from(format!(
+                                        "checkout-{title}-{ix}"
+                                    )))
+                                    .ghost()
+                                    .xsmall()
+                                    .label("Checkout")
+                                    .a11y_name(|| format!("Checkout {}", b.name))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.checkout_branch(
+                                            checkout_name.clone(),
+                                            is_remote,
+                                            window,
+                                            cx,
                                         )
-                                    })
+                                    })),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .test_id(|| format!("branch-menu:{}", b.name))
+                                    .when(!menu_buttons, |d| d.hidden())
                                     .child(
-                                        div()
-                                            .test_id(|| format!("branch-menu:{}", b.name))
-                                            .when(!menu_buttons, |d| d.hidden())
-                                            .child(
-                                                Button::new(SharedString::from(format!(
-                                                    "branch-menu-{title}-{ix}"
-                                                )))
-                                                .a11y_name(|| format!("Actions for {}", b.name))
-                                                .ghost()
-                                                .xsmall()
-                                                .icon(Lucide::Ellipsis)
-                                                .dropdown_menu(row_menu.build()),
-                                            ),
+                                        Button::new(SharedString::from(format!(
+                                            "branch-menu-{title}-{ix}"
+                                        )))
+                                        .a11y_name(|| format!("Actions for {}", b.name))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(Lucide::Ellipsis)
+                                        .dropdown_menu(row_menu.build()),
                                     ),
-                            )
-                            .context_menu(row_menu.build()),
-                    );
+                            ),
+                    )
+                    .context_menu(row_menu.build())
+                    .into_any_element()
             }
-        }
+            RefListRow::Tag(ix) => {
+                let t = &snapshot.tags[ix];
+                let remotes: Vec<String> =
+                    snapshot.remotes.iter().map(|r| r.name.clone()).collect();
 
-        // Tags, newest first.
-        if !snapshot.tags.is_empty() {
-            list = list.child(
-                h_flex()
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(muted)
-                    .child("Tags")
-                    .child(snapshot.tags.len().to_string()),
-            );
-            let remotes: Vec<String> = snapshot.remotes.iter().map(|r| r.name.clone()).collect();
-            for (ix, t) in snapshot.tags.iter().enumerate() {
                 let name = t.name.clone();
                 let target = t.target.clone();
                 let weak = weak.clone();
@@ -495,72 +719,59 @@ impl Osier {
                     menu
                 });
                 let row_selected = selected_ref.as_ref() == Some(&RefRow::Tag(t.name.clone()));
-                list = list.child(
-                    h_flex()
-                        .id(("tag", ix))
-                        .cursor_pointer()
-                        .when(row_selected, |this| this.bg(cx.theme().list_active))
-                        .on_click(cx.listener({
-                            let row = RefRow::Tag(t.name.clone());
-                            move |this, _, _, cx| this.select_ref(row.clone(), cx)
-                        }))
-                        .test_id(|| format!("tag-row:{}", t.name))
-                        .a11y_row(|| format!("Tag {}", t.name), row_selected)
-                        .group("row")
-                        .px_3()
-                        .py_1p5()
-                        .gap_2()
-                        .items_center()
-                        .hover(|this| this.bg(cx.theme().list_hover))
-                        .child(Icon::new(Lucide::Tag).xsmall())
-                        .child(div().text_sm().flex_none().child(t.name.clone()))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(t.subject.clone()),
-                        )
-                        .when(t.annotated, |this| {
-                            this.child(Tag::secondary().xsmall().child("annotated"))
-                        })
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .flex_none()
-                                .child(t.target[..t.target.len().min(7)].to_string()),
-                        )
-                        .child(
-                            Button::new(("tag-menu", ix))
-                                .a11y_name(|| format!("Actions for tag {}", t.name))
-                                .when(!menu_buttons, |b| b.hidden())
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Ellipsis)
-                                .dropdown_menu(row_menu.build()),
-                        )
-                        .context_menu(row_menu.build()),
-                );
-            }
-        }
 
-        // Worktrees: the main checkout plus linked ones.
-        if snapshot.worktrees.len() > 1 {
-            list = list.child(
                 h_flex()
+                    .id(("tag", ix))
+                    .cursor_pointer()
+                    .when(row_selected, |this| this.bg(cx.theme().list_active))
+                    .on_click(cx.listener({
+                        let row = RefRow::Tag(t.name.clone());
+                        move |this, _, _, cx| this.select_ref(row.clone(), cx)
+                    }))
+                    .test_id(|| format!("tag-row:{}", t.name))
+                    .a11y_row(|| format!("Tag {}", t.name), row_selected)
+                    .group("row")
                     .px_3()
-                    .py_1()
+                    .py_1p5()
                     .gap_2()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(muted)
-                    .child("Worktrees")
-                    .child(snapshot.worktrees.len().to_string()),
-            );
-            for (ix, w) in snapshot.worktrees.iter().enumerate() {
+                    .items_center()
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(Icon::new(Lucide::Tag).xsmall())
+                    .child(div().text_sm().flex_none().child(t.name.clone()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(t.subject.clone()),
+                    )
+                    .when(t.annotated, |this| {
+                        this.child(Tag::secondary().xsmall().child("annotated"))
+                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_none()
+                            .child(t.target[..t.target.len().min(7)].to_string()),
+                    )
+                    .child(
+                        Button::new(("tag-menu", ix))
+                            .a11y_name(|| format!("Actions for tag {}", t.name))
+                            .when(!menu_buttons, |b| b.hidden())
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::Ellipsis)
+                            .dropdown_menu(row_menu.build()),
+                    )
+                    .context_menu(row_menu.build())
+                    .into_any_element()
+            }
+            RefListRow::Worktree(ix) => {
+                let w = &snapshot.worktrees[ix];
+
                 let path = w.path.clone();
                 let is_this =
                     Some(path.as_path()) == self.active_project().map(|p| p.path.as_path());
@@ -588,141 +799,100 @@ impl Osier {
                             }),
                     )
                 });
-                list = list.child(
-                    h_flex()
-                        .id(("worktree", ix))
-                        .a11y_item(|| format!("Worktree {}", crate::format::tilde(&w.path)))
-                        .px_3()
-                        .py_1p5()
-                        .gap_2()
-                        .items_center()
-                        .hover(|this| this.bg(cx.theme().list_hover))
-                        .child(Icon::new(Lucide::FolderTree).xsmall())
-                        .child(
-                            div()
-                                .text_sm()
-                                .flex_none()
-                                .child(w.branch.clone().unwrap_or_else(|| "detached".into())),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(crate::format::tilde(&w.path)),
-                        )
-                        .when(is_this, |this| {
-                            this.child(Tag::primary().xsmall().child("this"))
-                        })
-                        .when(w.is_main && !is_this, |this| {
-                            this.child(Tag::secondary().xsmall().child("main"))
-                        })
-                        .when(w.locked, |this| {
-                            this.child(Tag::warning().xsmall().child("locked"))
-                        })
-                        .when(w.prunable, |this| {
-                            this.child(Tag::danger().xsmall().child("missing"))
-                        })
-                        .child(
-                            Button::new(("worktree-menu", ix))
-                                .a11y_name(|| {
-                                    format!(
-                                        "Actions for worktree {}",
-                                        crate::format::tilde(&w.path)
-                                    )
-                                })
-                                .when(!menu_buttons, |b| b.hidden())
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Ellipsis)
-                                .dropdown_menu(row_menu.build()),
-                        )
-                        .context_menu(row_menu.build()),
-                );
-            }
-        }
 
-        // Submodules: path, where it points, whether it is checked out.
-        if !snapshot.submodules.is_empty() {
-            list = list.child(
                 h_flex()
+                    .id(("worktree", ix))
+                    .a11y_item(|| format!("Worktree {}", crate::format::tilde(&w.path)))
                     .px_3()
-                    .py_1()
+                    .py_1p5()
                     .gap_2()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(muted)
-                    .child("Submodules")
-                    .child(snapshot.submodules.len().to_string())
-                    .child(div().flex_1())
+                    .items_center()
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(Icon::new(Lucide::FolderTree).xsmall())
                     .child(
-                        Button::new("submodules-update-all")
-                            .test_id("submodules-update-all")
+                        div()
+                            .text_sm()
+                            .flex_none()
+                            .child(w.branch.clone().unwrap_or_else(|| "detached".into())),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(crate::format::tilde(&w.path)),
+                    )
+                    .when(is_this, |this| {
+                        this.child(Tag::primary().xsmall().child("this"))
+                    })
+                    .when(w.is_main && !is_this, |this| {
+                        this.child(Tag::secondary().xsmall().child("main"))
+                    })
+                    .when(w.locked, |this| {
+                        this.child(Tag::warning().xsmall().child("locked"))
+                    })
+                    .when(w.prunable, |this| {
+                        this.child(Tag::danger().xsmall().child("missing"))
+                    })
+                    .child(
+                        Button::new(("worktree-menu", ix))
+                            .a11y_name(|| {
+                                format!("Actions for worktree {}", crate::format::tilde(&w.path))
+                            })
+                            .when(!menu_buttons, |b| b.hidden())
                             .ghost()
                             .xsmall()
-                            .label("Update all")
-                            .tooltip("git submodule update --init --recursive")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.update_submodules(Vec::new(), window, cx)
-                            })),
-                    ),
-            );
-            for (ix, s) in snapshot.submodules.iter().enumerate() {
-                let path = s.path.clone();
-                list = list.child(
-                    h_flex()
-                        .id(("submodule", ix))
-                        .px_3()
-                        .py_1p5()
-                        .gap_2()
-                        .items_center()
-                        .hover(|this| this.bg(cx.theme().list_hover))
-                        .child(Icon::new(Lucide::Package).xsmall())
-                        .child(div().text_sm().flex_none().child(s.path.clone()))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(s.url.clone()),
-                        )
-                        .child(match &s.head {
-                            Some(h) => Tag::secondary()
-                                .xsmall()
-                                .child(h[..h.len().min(7)].to_string()),
-                            None => Tag::warning().xsmall().child("not initialised"),
-                        })
-                        .child(
-                            Button::new(("submodule-update", ix))
-                                .ghost()
-                                .xsmall()
-                                .label("Update")
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.update_submodules(vec![path.clone()], window, cx)
-                                })),
-                        ),
-                );
+                            .icon(Lucide::Ellipsis)
+                            .dropdown_menu(row_menu.build()),
+                    )
+                    .context_menu(row_menu.build())
+                    .into_any_element()
             }
-        }
+            RefListRow::Submodule(ix) => {
+                let s = &snapshot.submodules[ix];
 
-        // Remotes with their URLs and a menu.
-        if !snapshot.remotes.is_empty() {
-            list = list.child(
+                let path = s.path.clone();
+
                 h_flex()
+                    .id(("submodule", ix))
                     .px_3()
-                    .py_1()
+                    .py_1p5()
                     .gap_2()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(muted)
-                    .child("Remotes")
-                    .child(snapshot.remotes.len().to_string()),
-            );
-            for (ix, r) in snapshot.remotes.iter().enumerate() {
+                    .items_center()
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(Icon::new(Lucide::Package).xsmall())
+                    .child(div().text_sm().flex_none().child(s.path.clone()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(s.url.clone()),
+                    )
+                    .child(match &s.head {
+                        Some(h) => Tag::secondary()
+                            .xsmall()
+                            .child(h[..h.len().min(7)].to_string()),
+                        None => Tag::warning().xsmall().child("not initialised"),
+                    })
+                    .child(
+                        Button::new(("submodule-update", ix))
+                            .ghost()
+                            .xsmall()
+                            .label("Update")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.update_submodules(vec![path.clone()], window, cx)
+                            })),
+                    )
+                    .into_any_element()
+            }
+            RefListRow::Remote(ix) => {
+                let r = &snapshot.remotes[ix];
+
                 let name = r.name.clone();
                 let url = r.fetch_url.clone();
                 let weak = weak.clone();
@@ -758,57 +928,23 @@ impl Osier {
                     )
                 });
                 let row_selected = selected_ref.as_ref() == Some(&RefRow::Remote(r.name.clone()));
-                list = list.child(
-                    h_flex()
-                        .id(("remote", ix))
-                        .a11y_row(|| format!("Remote {}", r.name), row_selected)
-                        .cursor_pointer()
-                        .when(row_selected, |this| this.bg(cx.theme().list_active))
-                        .on_click(cx.listener({
-                            let row = RefRow::Remote(r.name.clone());
-                            move |this, _, _, cx| this.select_ref(row.clone(), cx)
-                        }))
-                        .px_3()
-                        .py_1p5()
-                        .gap_2()
-                        .items_center()
-                        .hover(|this| this.bg(cx.theme().list_hover))
-                        .child(Icon::new(Lucide::Globe).xsmall())
-                        .child(div().text_sm().flex_none().child(r.name.clone()))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(r.fetch_url.clone()),
-                        )
-                        .child(
-                            Button::new(("remote-menu", ix))
-                                .a11y_name(|| format!("Actions for remote {}", r.name))
-                                .when(!menu_buttons, |b| b.hidden())
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Ellipsis)
-                                .dropdown_menu(row_menu.build()),
-                        )
-                        .context_menu(row_menu.build()),
-                );
-            }
-        }
 
-        v_flex()
-            .size_full()
-            .child(
                 h_flex()
+                    .id(("remote", ix))
+                    .a11y_row(|| format!("Remote {}", r.name), row_selected)
+                    .cursor_pointer()
+                    .when(row_selected, |this| this.bg(cx.theme().list_active))
+                    .on_click(cx.listener({
+                        let row = RefRow::Remote(r.name.clone());
+                        move |this, _, _, cx| this.select_ref(row.clone(), cx)
+                    }))
                     .px_3()
-                    .py_2()
+                    .py_1p5()
                     .gap_2()
                     .items_center()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(div().text_sm().font_medium().flex_none().child("Branches"))
+                    .hover(|this| this.bg(cx.theme().list_hover))
+                    .child(Icon::new(Lucide::Globe).xsmall())
+                    .child(div().text_sm().flex_none().child(r.name.clone()))
                     .child(
                         div()
                             .text_xs()
@@ -816,44 +952,20 @@ impl Osier {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .child(format!("{} local, {} remote", local.len(), remote.len())),
+                            .child(r.fetch_url.clone()),
                     )
                     .child(
-                        Button::new("add-worktree")
-                            .test_id("add-worktree")
+                        Button::new(("remote-menu", ix))
+                            .a11y_name(|| format!("Actions for remote {}", r.name))
+                            .when(!menu_buttons, |b| b.hidden())
                             .ghost()
                             .xsmall()
-                            .icon(Lucide::FolderTree)
-                            .label("Worktree")
-                            .tooltip("Add a worktree")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_add_worktree(window, cx)
-                            })),
+                            .icon(Lucide::Ellipsis)
+                            .dropdown_menu(row_menu.build()),
                     )
-                    .child(
-                        Button::new("add-remote")
-                            .test_id("add-remote")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::Globe)
-                            .label("Add remote")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_add_remote(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("new-branch")
-                            .test_id("new-branch")
-                            .outline()
-                            .xsmall()
-                            .icon(Lucide::GitBranchPlus)
-                            .label("New branch")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_new_branch(None, window, cx)
-                            })),
-                    ),
-            )
-            .child(list)
-            .into_any_element()
+                    .context_menu(row_menu.build())
+                    .into_any_element()
+            }
+        }
     }
 }
