@@ -84,7 +84,8 @@ Then:
   `OSIER_PREFIX=/tmp/osier-release XDG_DATA_HOME=/tmp/osier-release/share sh install.sh`,
   then `/tmp/osier-release/bin/osier --version`.
 - From an older script install, `osier --update --check` reports the new version.
-- Tidy the generated release notes on GitHub with the CHANGELOG section if they need it.
+- The release notes list every commit by type (`scripts/release-notes.sh`), then the pull
+  requests. Add the CHANGELOG section on GitHub if they need more.
 - If `site/` changed, the Pages workflow has deployed the website.
 
 ## Notes

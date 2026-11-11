@@ -6,6 +6,11 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- GitHub release notes list every commit in the release, grouped by type, above the list of
+  pull requests.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added
