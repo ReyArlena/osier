@@ -17,6 +17,7 @@ mod dialog_hint;
 mod dialog_notice;
 mod dms_cheatsheet;
 mod edit_pane;
+mod editor_hover;
 mod fade;
 mod format;
 mod graph;

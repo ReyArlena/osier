@@ -6,6 +6,11 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The line under the pointer is highlighted in every code editor: the file viewer, the edit
+  pane and the three panes of the merge tool.
+
 ### Changed
 
 - GitHub release notes list every commit in the release, grouped by type, above the list of
