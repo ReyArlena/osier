@@ -568,6 +568,7 @@ impl Osier {
                     .map(|s| s.stashes.iter().map(|s| s.oid.clone()).collect())
                     .unwrap_or_default();
                 if let Some(oid) = step(&rows, self.stash_selected.as_ref(), delta) {
+                    self.stashes_list.reveal_selection();
                     self.select_stash(oid, cx);
                     return;
                 }

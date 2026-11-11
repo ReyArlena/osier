@@ -491,6 +491,30 @@ fn ui_branches_list_draws_rows_on_screen_and_follows_the_keyboard(cx: &mut TestA
 }
 
 #[gpui::test]
+fn ui_stash_list_draws_rows_on_screen_and_follows_the_keyboard(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    for i in 0..40 {
+        repo.write("a.txt", &format!("{i}\n"));
+        repo.git(["stash", "-q"]);
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-stashes");
+    assert!(h.bounds(cx, "stash-row:0").is_some());
+    assert!(
+        h.bounds(cx, "stash-row:39").is_none(),
+        "rows below the fold are not built"
+    );
+
+    h.click(cx, "stash-row:0");
+    h.keys(cx, &["down"; 39].join(" "));
+    assert!(
+        h.bounds(cx, "stash-row:39").is_some(),
+        "the selected stash scrolled into view"
+    );
+}
+
+#[gpui::test]
 fn ui_branch_tag_and_stash_rows_select_and_take_menu_keys(cx: &mut TestAppContext) {
     use crate::app::row_actions::RefRow;
     let repo = TempRepo::new();

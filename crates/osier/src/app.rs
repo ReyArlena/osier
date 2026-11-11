@@ -392,6 +392,10 @@ pub struct Osier {
     pub(crate) command_log_list: crate::lazy_list::LazyList,
     /// The bottom panel's notification list.
     pub(crate) notices_list: crate::lazy_list::LazyList,
+    /// The Stashes tab's list.
+    pub(crate) stashes_list: crate::lazy_list::LazyList,
+    /// The Patches tab's list.
+    pub(crate) patches_list: crate::lazy_list::LazyList,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -669,6 +673,8 @@ impl Osier {
             reflog_list: Default::default(),
             command_log_list: Default::default(),
             notices_list: Default::default(),
+            stashes_list: Default::default(),
+            patches_list: Default::default(),
             _subscriptions: vec![
                 message_subscription,
                 filter_subscription,
