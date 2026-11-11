@@ -23,8 +23,19 @@ impl Osier {
         cx.refresh_windows();
     }
 
+    /// Install how long toasts stay. The next one raised uses it.
+    pub(crate) fn apply_toast_time(&self, cx: &mut App) {
+        let seconds = self
+            .settings
+            .appearance
+            .toast_seconds
+            .min(crate::notices::TOAST_SECONDS_MAX);
+        cx.set_global(crate::notices::ToastTime(seconds));
+    }
+
     pub(crate) fn apply_appearance(&mut self, cx: &mut App) {
         self.apply_tooltip_delay(cx);
+        self.apply_toast_time(cx);
         self.apply_motion(cx);
         use crate::themes::{DUX_DARK, DUX_LIGHT, ThemeStore};
         let a = &self.settings.appearance;

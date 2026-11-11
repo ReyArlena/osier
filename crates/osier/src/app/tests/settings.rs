@@ -138,6 +138,84 @@ fn higher_contrast_strengthens_selections_and_switches_back_cleanly(cx: &mut Tes
     assert_eq!(colors(&h, cx), normal, "off is the theme as it was");
 }
 
+/// How many toasts are up, after letting `ms` pass in small steps (the toast list counts
+/// its own time down in ticks).
+fn toasts_after(h: &Harness, cx: &mut TestAppContext, ms: u64) -> usize {
+    use gpui_kit::component::WindowExt as _;
+    for _ in 0..ms / 50 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(50));
+        cx.run_until_parked();
+    }
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = count.clone();
+    h.act(cx, move |_, window, cx| {
+        seen.set(window.notifications(cx).len())
+    });
+    count.get()
+}
+
+#[gpui::test]
+fn toast_duration_follows_the_setting(cx: &mut TestAppContext) {
+    use crate::notices::{Notice, ToastTime, WindowNoticeExt as _};
+    use gpui_kit::component::WindowExt as _;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    let h = Harness::open(cx, &repo);
+    let raise = |h: &Harness, cx: &mut TestAppContext| {
+        h.act(cx, |_, window, cx| window.push_notice("Saved", cx));
+    };
+    let set = |h: &Harness, cx: &mut TestAppContext, seconds: u32| {
+        h.act(cx, move |o, _, cx| {
+            o.settings.appearance.toast_seconds = seconds;
+            o.apply_toast_time(cx);
+        });
+    };
+    h.act(cx, |_, window, cx| window.clear_notifications(cx));
+    assert_eq!(toasts_after(&h, cx, 1000), 0);
+
+    // The default: five seconds.
+    assert_eq!(cx.update(|cx| ToastTime::get(cx)), 5);
+    raise(&h, cx);
+    assert_eq!(toasts_after(&h, cx, 3000), 1, "still up after 3 s");
+    assert_eq!(toasts_after(&h, cx, 3500), 0, "gone after 5 s");
+
+    // Shorter.
+    set(&h, cx, 1);
+    raise(&h, cx);
+    assert_eq!(toasts_after(&h, cx, 500), 1, "still up after half a second");
+    assert_eq!(toasts_after(&h, cx, 1500), 0, "gone after 1 s");
+
+    // Longer than the kit's own five.
+    set(&h, cx, 8);
+    raise(&h, cx);
+    assert_eq!(toasts_after(&h, cx, 6500), 1, "still up after 6.5 s");
+    assert_eq!(toasts_after(&h, cx, 2500), 0, "gone after 8 s");
+
+    // Until closed.
+    set(&h, cx, 0);
+    raise(&h, cx);
+    assert_eq!(toasts_after(&h, cx, 30_000), 1, "stays");
+    h.act(cx, |_, window, cx| window.clear_notifications(cx));
+    assert_eq!(toasts_after(&h, cx, 1000), 0);
+
+    // One with a button stays whatever the time.
+    set(&h, cx, 1);
+    h.act(cx, |_, window, cx| {
+        let mut notice = Notice::error("Could not push");
+        notice.command_log = true;
+        window.push_notice(notice, cx)
+    });
+    assert_eq!(toasts_after(&h, cx, 5000), 1, "the one with a button stays");
+
+    // A hand-written time is limited.
+    set(&h, cx, 99_999);
+    assert_eq!(
+        cx.update(|cx| ToastTime::get(cx)),
+        crate::notices::TOAST_SECONDS_MAX
+    );
+}
+
 #[gpui::test]
 fn tooltip_delay_defaults_to_at_once_and_applies_live(cx: &mut TestAppContext) {
     let repo = TempRepo::new();

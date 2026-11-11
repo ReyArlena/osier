@@ -87,6 +87,10 @@ All notable changes to Osier are documented here. The format follows
   stage checkbox, the per-row action menus and buttons that repeat on every row ("Checkout
   main", "Apply stash@{0}") are named after what they act on, and icon-only buttons (close
   panel, diff settings) have names too.
+- Settings > Appearance > Notifications > Toast duration (`appearance.toast_seconds`, 5 by
+  default): how long a notification stays in the corner before it slides away, from 1 to 30
+  seconds, or until it is closed. One with a button still stays until closed. A time other
+  than 5 seconds does not pause while the pointer is over the notification.
 
 ### Changed
 

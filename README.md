@@ -233,6 +233,7 @@ light_theme = "Catppuccin Latte"
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
+toast_seconds = 5             # how long a notification stays in the corner (1 to 30; 0 = until closed)
 animations = "system"         # system | on | off: dialogs, menus and toasts animate in, spinners turn
 animation_ms = 180            # how long a dialog fades in (60 to 400); switches and tabs scale with it
 

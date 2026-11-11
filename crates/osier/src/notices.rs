@@ -17,6 +17,57 @@ use crate::test_ids::TestId as _;
 /// Oldest notices are dropped past this many.
 const CAP: usize = 300;
 
+/// How long gpui-kit keeps a toast up, in seconds. Fixed in the kit: any other time is
+/// counted here (see `push_notice`).
+pub(crate) const KIT_TOAST_SECONDS: u32 = 5;
+/// The longest `appearance.toast_seconds` is taken as.
+pub(crate) const TOAST_SECONDS_MAX: u32 = 30;
+/// The settings slider runs from 1 second to one stop past the longest time, and that last
+/// stop means "until closed" (0 in the config).
+pub(crate) const TOAST_SLIDER_MAX: u32 = TOAST_SECONDS_MAX + 1;
+
+/// How long a toast stays before it slides away (`appearance.toast_seconds`), in seconds; 0
+/// keeps it until it is closed. Installed by `Osier::apply_toast_time`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ToastTime(pub u32);
+
+impl Global for ToastTime {}
+
+impl ToastTime {
+    pub(crate) fn get(cx: &App) -> u32 {
+        cx.try_global::<Self>().map_or(KIT_TOAST_SECONDS, |t| t.0)
+    }
+
+    /// Where the settings slider sits for a time in seconds.
+    pub(crate) fn slider_stop(seconds: u32) -> u32 {
+        match seconds {
+            0 => TOAST_SLIDER_MAX,
+            s => s.min(TOAST_SECONDS_MAX),
+        }
+    }
+
+    /// The time in seconds for a stop of the settings slider.
+    pub(crate) fn from_slider_stop(stop: u32) -> u32 {
+        if stop >= TOAST_SLIDER_MAX {
+            0
+        } else {
+            stop.max(1)
+        }
+    }
+
+    /// The label Settings shows for a time: "5 seconds", "Until closed".
+    pub(crate) fn label(seconds: u32) -> String {
+        match seconds {
+            0 => "Until closed".into(),
+            1 => "1 second".into(),
+            n => format!("{n} seconds"),
+        }
+    }
+}
+
+/// Names the toasts whose time is counted here, so they can be closed by their notice id.
+struct TimedToast;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NoticeKind {
     Info,
@@ -208,7 +259,29 @@ impl WindowNoticeExt for Window {
         let log = cx.default_global::<NoticeLog>();
         let notice = log.record(notice.into());
         let owner = log.owner.clone();
-        self.push_notification(notice.toast(owner.clone()), cx);
+        let mut toast = notice.toast(owner.clone());
+        // One with a button stays until it is closed whatever the setting. For the rest the
+        // kit's own timer is fixed, so a time other than its own is counted here: the toast
+        // goes up as one that stays, and is closed by its id when the time is up. (The kit's
+        // timer pauses while the pointer is over the toasts; this one does not.)
+        let seconds = ToastTime::get(cx);
+        if !notice.command_log && seconds != KIT_TOAST_SECONDS {
+            let key = notice.id as usize;
+            toast = toast.autohide(false).id1::<TimedToast>(key);
+            if seconds > 0 {
+                let window = self.window_handle();
+                cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(u64::from(seconds)))
+                        .await;
+                    let _ = window.update(cx, |_, window, cx| {
+                        window.remove_notification1::<TimedToast>(key, cx)
+                    });
+                })
+                .detach();
+            }
+        }
+        self.push_notification(toast, cx);
         // The panel and the title-bar badge live on the app view. Deferred: this may run
         // inside one of its own updates.
         if let Some(owner) = owner {
@@ -221,7 +294,24 @@ impl WindowNoticeExt for Window {
 
 #[cfg(test)]
 mod tests {
-    use super::{CAP, Notice, NoticeKind, NoticeLog};
+    use super::{CAP, Notice, NoticeKind, NoticeLog, TOAST_SLIDER_MAX, ToastTime};
+
+    #[test]
+    fn the_last_slider_stop_means_until_closed() {
+        assert_eq!(ToastTime::slider_stop(5), 5);
+        assert_eq!(ToastTime::slider_stop(0), TOAST_SLIDER_MAX);
+        assert_eq!(
+            ToastTime::slider_stop(999),
+            30,
+            "a hand-written time is limited"
+        );
+        assert_eq!(ToastTime::from_slider_stop(TOAST_SLIDER_MAX), 0);
+        assert_eq!(ToastTime::from_slider_stop(12), 12);
+        assert_eq!(ToastTime::from_slider_stop(0), 1);
+        assert_eq!(ToastTime::label(0), "Until closed");
+        assert_eq!(ToastTime::label(1), "1 second");
+        assert_eq!(ToastTime::label(30), "30 seconds");
+    }
 
     #[test]
     fn plain_text_is_an_info_notice() {

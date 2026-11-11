@@ -112,6 +112,9 @@ pub struct Appearance {
     pub row_menu_buttons: bool,
     /// How long the pointer rests on something before its tooltip shows, in milliseconds.
     pub tooltip_delay_ms: u32,
+    /// How long a notification stays in the corner before it slides away, in seconds. 0
+    /// keeps it until it is closed.
+    pub toast_seconds: u32,
     /// Selections, hovers and the sidebar highlight in a stronger tint of the theme's
     /// primary colour (like the switches), for more contrast. Off: the theme as designed.
     pub high_contrast: bool,
@@ -173,6 +176,7 @@ impl Default for Appearance {
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
             tooltip_delay_ms: 0,
+            toast_seconds: 5,
             high_contrast: false,
             syntax_contrast: true,
             show_background_tasks: false,
@@ -512,6 +516,9 @@ mod tests {
         }
         assert!(toml::from_str::<Settings>("[appearance]\nanimations = \"fast\"\n").is_err());
         assert_eq!(Settings::default().appearance.animation_ms, 180);
+        let s: Settings = toml::from_str("[appearance]\ntoast_seconds = 2\n").unwrap();
+        assert_eq!(s.appearance.toast_seconds, 2);
+        assert_eq!(Settings::default().appearance.toast_seconds, 5);
         let s: Settings = toml::from_str("[appearance]\nanimation_ms = 120\n").unwrap();
         assert_eq!(s.appearance.animation_ms, 120);
     }

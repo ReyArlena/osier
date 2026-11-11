@@ -332,6 +332,53 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
         )
         .group(
             SettingGroup::new().title("Lists").item(
+        .group(
+            SettingGroup::new().title("Notifications").item(
+                SettingItem::new(
+                    "Toast duration",
+                    SettingField::render({
+                        let v = view.clone();
+                        move |options, _, cx| {
+                            let o = v.read(cx);
+                            let seconds = crate::notices::ToastTime::from_slider_stop(
+                                crate::notices::ToastTime::slider_stop(
+                                    o.settings.appearance.toast_seconds,
+                                ),
+                            );
+                            let slider = o.toast_time.clone();
+                            // The same slider length as "Animation length"; the wider value
+                            // column fits "Until closed".
+                            h_flex()
+                                .w(px(292.))
+                                .gap_3()
+                                .items_center()
+                                .child(
+                                    div().flex_1().child(
+                                        gpui_kit::component::slider::Slider::new(&slider)
+                                            .accessibility_label("Toast duration")
+                                            .disabled(options.is_disabled()),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .w(px(88.))
+                                        .flex_none()
+                                        .text_right()
+                                        .whitespace_nowrap()
+                                        .child(crate::notices::ToastTime::label(seconds)),
+                                )
+                        }
+                    }),
+                )
+                .description(
+                    "How long a notification stays in the corner before it slides away, up to \
+                     30 seconds, or until it is closed (the far right). One with a button \
+                     always stays until it is closed, and every notification can be read later \
+                     in the Notifications panel. Default: 5 seconds.",
+                ),
+            ),
+        )
                 SettingItem::new(
                     "Show menu buttons on rows",
                     SettingField::switch(

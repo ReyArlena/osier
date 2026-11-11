@@ -361,6 +361,10 @@ impl Osier {
                 ) as f32;
                 self.animation_length
                     .update(cx, |s, cx| s.set_value(animation_ms, window, cx));
+                let toast_stop =
+                    crate::notices::ToastTime::slider_stop(self.settings.appearance.toast_seconds);
+                self.toast_time
+                    .update(cx, |s, cx| s.set_value(toast_stop as f32, window, cx));
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
