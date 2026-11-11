@@ -1003,6 +1003,42 @@ fn ui_hunk_checkbox_and_roll_back_in_the_gutter(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn ui_roll_back_sits_above_the_checkbox_for_one_kind_changes(cx: &mut TestAppContext) {
+    // Hunks far enough apart to stay separate: three lines added, one added, one removed,
+    // three removed.
+    let base: String = (1..=60).map(|n| format!("line {n}\n")).collect();
+    let mut work: Vec<String> = base.lines().map(str::to_owned).collect();
+    work.drain(49..52); // lines 50-52 removed
+    work.remove(39); // line 40 removed
+    work.insert(25, "one added".into()); // after line 25
+    for (ix, text) in ["added a", "added b", "added c"].into_iter().enumerate() {
+        work.insert(5 + ix, text.into()); // after line 5
+    }
+    let repo = TempRepo::new();
+    repo.commit_file("f.txt", &base, "base");
+    repo.write("f.txt", &(work.join("\n") + "\n"));
+    repo.write("new.txt", "unversioned\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:f.txt");
+    for hix in 0..4 {
+        let revert = h
+            .bounds(cx, &format!("hunk-revert:{hix}"))
+            .unwrap_or_else(|| panic!("hunk {hix}: revert arrow"));
+        let check = h
+            .bounds(cx, &format!("hunk-check:{hix}"))
+            .unwrap_or_else(|| panic!("hunk {hix}: checkbox"));
+        assert!(
+            revert.origin.y < check.origin.y,
+            "hunk {hix}: arrow above the checkbox"
+        );
+    }
+    // An unversioned file: no hunk controls, its checkbox adds it.
+    h.click(cx, "change-row:unversioned:new.txt");
+    assert!(h.bounds(cx, "hunk-check:0").is_none());
+    assert!(h.bounds(cx, "hunk-revert:0").is_none());
+}
+
+#[gpui::test]
 fn ui_rolling_back_a_new_file_asks_to_trash_it(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");

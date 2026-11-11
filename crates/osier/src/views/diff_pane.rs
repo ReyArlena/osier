@@ -280,99 +280,9 @@ impl Osier {
                 && let Some(staging) = self.diff_staging.clone()
             {
                 view = self.staging_gutter(view, path.clone(), staging, cx);
-            } else if let Some((path, a)) = &area
-                && !HunkAction::for_area(*a).is_empty()
-                && let Some(file) = self.diff_file_model(path)
-            {
-                // One marker per hunk, on its first line, opening a small menu.
-                let markers: Vec<DiffGutterMarker> = file
-                    .hunks
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, h)| {
-                        let position = if h.new_lines > 0 {
-                            DiffLinePosition::new(
-                                path.clone(),
-                                DiffSide::Modified,
-                                h.new_start as usize,
-                            )
-                        } else {
-                            DiffLinePosition::new(
-                                path.clone(),
-                                DiffSide::Original,
-                                h.old_start as usize,
-                            )
-                        };
-                        // Only unversioned files get here (changed files have the
-                        // checkbox gutter): their hunks can be staged.
-                        DiffGutterMarker::new(("hunk", ix), position).with_label("stage")
-                    })
-                    .collect();
-                let model = self.diff_model.clone();
-                let weak = cx.entity().downgrade();
-                let actions = HunkAction::for_area(*a);
-                let path = path.clone();
-                view = view
-                    .gutter_markers(markers)
-                    .render_gutter_marker(move |marker, _, _| {
-                        let line = marker.position().line() as u32;
-                        let side = marker.position().side();
-                        let hunk_ix = model
-                            .iter()
-                            .find(|f| f.path == *marker.position().path())
-                            .and_then(|f| {
-                                f.hunks.iter().position(|h| {
-                                    (h.new_lines > 0
-                                        && side == DiffSide::Modified
-                                        && h.new_start == line)
-                                        || (h.new_lines == 0
-                                            && side == DiffSide::Original
-                                            && h.old_start == line)
-                                })
-                            });
-                        // An icon, not a bare "+" or "−": next to the diff's own +/- column
-                        // a text sign reads as part of the line.
-                        let icon = if marker.label().as_ref() == "unstage" {
-                            Lucide::SquareMinus
-                        } else {
-                            Lucide::SquarePlus
-                        };
-                        let button = Button::new(marker.id().clone())
-                            .ghost()
-                            .xsmall()
-                            .icon(icon)
-                            .tooltip("Hunk actions");
-                        let Some(hunk_ix) = hunk_ix else {
-                            return button.into_any_element();
-                        };
-                        let weak = weak.clone();
-                        let path = path.clone();
-                        button
-                            .dropdown_menu(move |mut menu, _, _| {
-                                for action in actions {
-                                    let weak = weak.clone();
-                                    let path = path.clone();
-                                    let action = *action;
-                                    menu = menu.item(
-                                        PopupMenuItem::new(format!("{} hunk", action.label()))
-                                            .on_click(move |_, window, cx| {
-                                                let _ = weak.update(cx, |this, cx| {
-                                                    this.hunk_action(
-                                                        path.clone(),
-                                                        hunk_ix,
-                                                        action,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                });
-                                            }),
-                                    );
-                                }
-                                menu
-                            })
-                            .into_any_element()
-                    });
             }
+            // An unversioned file has no hunk controls: its diff is one all-added change,
+            // and the file's checkbox adds it (selected lines can still be staged).
             view.into_any_element()
         };
 
@@ -1102,10 +1012,11 @@ impl Osier {
                         .push(DiffDecoration::new(line_range(l.kind, n)).with_background(tint));
                 }
             }
-            // Like PhpStorm: the checkbox on the change's first added (green) line, the
-            // roll-back arrow on its first removed (red) line. One control fits a row, so a
-            // change with only one kind of line puts the other control on that kind's second
-            // line, or on the context line just above the change.
+            // Like PhpStorm: the roll-back arrow on the change's first removed (red) line,
+            // the checkbox on its first added (green) line, so the arrow is always above the
+            // checkbox. One control fits a row, so a change with only one kind of line uses
+            // that kind's first two lines; a one-line change borrows the context line above
+            // (additions) or below (removals), or the other side when the file ends there.
             let at = |l: &osier_git::diff::Line| match l.kind {
                 LineKind::Removed => l
                     .old_no
@@ -1115,22 +1026,38 @@ impl Osier {
                     .map(|n| DiffLinePosition::new(path.clone(), DiffSide::Modified, n as usize)),
             };
             let of_kind = |kind: LineKind| h.lines.iter().filter(move |l| l.kind == kind);
-            let first_change = h.lines.iter().position(|l| l.kind != LineKind::Context);
-            let above = first_change
+            let changed = |l: &&osier_git::diff::Line| l.kind != LineKind::Context;
+            let above = h
+                .lines
+                .iter()
+                .position(|l| changed(&l))
                 .and_then(|ix| ix.checked_sub(1))
                 .and_then(|ix| at(&h.lines[ix]));
+            let below = h
+                .lines
+                .iter()
+                .rposition(|l| changed(&l))
+                .and_then(|ix| h.lines.get(ix + 1))
+                .and_then(at);
             let added: Vec<_> = of_kind(LineKind::Added).filter_map(&at).take(2).collect();
             let removed: Vec<_> = of_kind(LineKind::Removed).filter_map(&at).take(2).collect();
-            let (check_at, revert_at) = match (added.first(), removed.first()) {
-                (Some(a), Some(r)) => (Some(a.clone()), Some(r.clone())),
-                (Some(a), None) => (
-                    Some(a.clone()),
-                    added.get(1).cloned().or_else(|| above.clone()),
-                ),
-                (None, Some(r)) => (
-                    removed.get(1).cloned().or_else(|| above.clone()),
-                    Some(r.clone()),
-                ),
+            // (arrow, checkbox), top to bottom.
+            let one_kind = |lines: &[DiffLinePosition], borrowed_above: bool| match lines {
+                [first, second, ..] => (Some(first.clone()), Some(second.clone())),
+                [only] => match (borrowed_above, &above, &below) {
+                    (true, Some(a), _) => (Some(a.clone()), Some(only.clone())),
+                    (false, _, Some(b)) => (Some(only.clone()), Some(b.clone())),
+                    (_, _, Some(b)) => (Some(only.clone()), Some(b.clone())),
+                    (_, Some(a), _) => (Some(a.clone()), Some(only.clone())),
+                    // A one-line file: the checkbox alone; the file's own roll back remains.
+                    _ => (None, Some(only.clone())),
+                },
+                [] => (None, None),
+            };
+            let (revert_at, check_at) = match (added.first(), removed.first()) {
+                (Some(a), Some(r)) => (Some(r.clone()), Some(a.clone())),
+                (Some(_), None) => one_kind(&added, true),
+                (None, Some(_)) => one_kind(&removed, false),
                 (None, None) => (None, None),
             };
             let check = match staging.hunk_check(hix) {
