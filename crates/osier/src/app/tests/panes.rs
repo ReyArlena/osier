@@ -237,10 +237,10 @@ fn ui_each_tab_keeps_its_own_right_pane(cx: &mut TestAppContext) {
     let h = Harness::open(cx, &repo);
     assert_eq!(h.read(cx, |o, _| o.tab), Tab::Changes);
     // Changes starts on its first change; pick the second.
-    h.click(cx, "change-row:unstaged:b.txt");
+    h.click(cx, "change-row:changes:b.txt");
     let b = Selection::File {
         path: "b.txt".into(),
-        area: Area::Unstaged,
+        area: Area::Changed,
     };
     assert_eq!(selection(&h, cx), b);
     // Log starts on the latest commit, not on Changes' file.
@@ -374,7 +374,7 @@ fn the_shown_diff_follows_edits_to_its_file_and_ignores_other_files(cx: &mut Tes
     repo.write("a.txt", "one\n");
     repo.write("b.txt", "other\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:a.txt");
+    h.click(cx, "change-row:changes:a.txt");
     let loads = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |o, _| o.diff_revision);
     let added = |h: &Harness, cx: &mut TestAppContext| {
         h.read(cx, |o, _| {
@@ -519,7 +519,7 @@ fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestA
         o.set_diff_options(opts, window, cx)
     });
     h.act(cx, |o, _, cx| {
-        o.select_file("a.txt".into(), Area::Unstaged, cx)
+        o.select_file("a.txt".into(), Area::Changed, cx)
     });
     assert_eq!(
         h.read(cx, |o, _| o.diff_files),
@@ -533,7 +533,7 @@ fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestA
         selected,
         Selection::File {
             path: "z.txt".into(),
-            area: Area::Unstaged
+            area: Area::Changed
         }
     );
 }

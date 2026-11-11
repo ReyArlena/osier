@@ -9,13 +9,13 @@ fn ui_stage_with_the_checkbox_and_commit_from_the_keyboard(cx: &mut TestAppConte
     repo.commit_file("a.txt", "one\n", "first");
     repo.write("a.txt", "two\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-stage:unstaged:a.txt");
+    h.click(cx, "change-stage:changes:a.txt");
     assert_eq!(
         repo.git(["diff", "--cached", "--name-only"]).trim(),
         "a.txt"
     );
     assert!(
-        h.bounds(cx, "change-row:staged:a.txt").is_some(),
+        h.bounds(cx, "change-row:changes:a.txt").is_some(),
         "the row moved to Staged"
     );
     h.click(cx, "commit-message");
@@ -36,14 +36,14 @@ fn ui_list_keys_select_and_stage(cx: &mut TestAppContext) {
     repo.write("a.txt", "A\n");
     repo.write("b.txt", "B\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:a.txt");
+    h.click(cx, "change-row:changes:a.txt");
     h.keys(cx, "down");
     h.read(cx, |osier, _| {
         assert_eq!(
             osier.active_project().unwrap().selection,
             Selection::File {
                 path: "b.txt".into(),
-                area: Area::Unstaged
+                area: Area::Changed
             }
         )
     });
@@ -82,59 +82,88 @@ fn three_unstaged() -> TempRepo {
     repo
 }
 
-#[gpui::test]
-fn ui_staging_the_selected_file_moves_to_the_next(cx: &mut TestAppContext) {
-    let repo = three_unstaged();
-    let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:b.txt");
-    h.click(cx, "change-stage:unstaged:b.txt");
-    assert_eq!(selected(&h, cx), file("c.txt", Area::Unstaged));
-    // The pane shows the new selection's diff, not an empty one.
-    assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
-    // Last in the list: the one above.
-    h.click(cx, "change-stage:unstaged:c.txt");
-    assert_eq!(selected(&h, cx), file("a.txt", Area::Unstaged));
-    // Only one left: follow it into Staged.
-    h.click(cx, "change-stage:unstaged:a.txt");
-    assert_eq!(selected(&h, cx), file("a.txt", Area::Staged));
-    assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+fn check_of(h: &Harness, cx: &mut TestAppContext, path: &str) -> Option<osier_git::staging::Check> {
+    h.read(cx, |o, _| o.change_check(path))
 }
 
 #[gpui::test]
-fn ui_staging_another_file_keeps_the_selection(cx: &mut TestAppContext) {
+fn ui_ticking_a_file_keeps_it_selected_in_the_one_list(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
     let repo = three_unstaged();
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:a.txt");
-    h.click(cx, "change-stage:unstaged:c.txt");
-    assert_eq!(selected(&h, cx), file("a.txt", Area::Unstaged));
-    // Stage all follows the selected file; unstaging moves on in the Staged list.
+    h.click(cx, "change-row:changes:b.txt");
+    h.click(cx, "change-stage:changes:b.txt");
+    // One list: the file stays where it is, ticked, and stays selected with its diff.
+    assert_eq!(selected(&h, cx), file("b.txt", Area::Changed));
+    assert_eq!(check_of(&h, cx, "b.txt"), Some(Check::Staged));
+    assert_eq!(h.read(cx, |o, _| o.diff_files), 1);
+    assert_eq!(
+        repo.git(["diff", "--cached", "--name-only"]).trim(),
+        "b.txt"
+    );
+    // A second click clears it.
+    h.click(cx, "change-stage:changes:b.txt");
+    assert_eq!(check_of(&h, cx, "b.txt"), Some(Check::Unstaged));
+    assert_eq!(selected(&h, cx), file("b.txt", Area::Changed));
+}
+
+#[gpui::test]
+fn ui_ticking_another_file_keeps_the_selection(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
+    let repo = three_unstaged();
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:a.txt");
+    h.click(cx, "change-stage:changes:c.txt");
+    assert_eq!(selected(&h, cx), file("a.txt", Area::Changed));
     h.act(cx, |o, w, cx| o.stage_all(w, cx));
-    assert_eq!(selected(&h, cx), file("a.txt", Area::Staged));
-    h.click(cx, "change-stage:staged:a.txt");
-    assert_eq!(selected(&h, cx), file("b.txt", Area::Staged));
+    assert_eq!(selected(&h, cx), file("a.txt", Area::Changed));
+    for f in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(check_of(&h, cx, f), Some(Check::Staged), "{f}");
+    }
 }
 
 #[gpui::test]
 fn ui_staging_a_file_open_in_the_editor_keeps_it(cx: &mut TestAppContext) {
     let repo = three_unstaged();
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:b.txt");
+    h.click(cx, "change-row:changes:b.txt");
     h.act(cx, |o, w, cx| o.open_editor(w, cx));
-    h.click(cx, "change-stage:unstaged:b.txt");
-    assert_eq!(selected(&h, cx), file("b.txt", Area::Staged));
+    h.click(cx, "change-stage:changes:b.txt");
+    assert_eq!(selected(&h, cx), file("b.txt", Area::Changed));
     assert!(h.read(cx, |o, _| o.editor.is_some()));
 }
 
 #[gpui::test]
-fn ui_selection_on_an_away_tab_follows_too(cx: &mut TestAppContext) {
+fn ui_selection_stays_on_a_staged_file_and_moves_on_when_it_is_committed(cx: &mut TestAppContext) {
     let repo = three_unstaged();
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:b.txt");
+    h.click(cx, "change-row:changes:b.txt");
     h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
     repo.git(["add", "b.txt"]);
     h.act(cx, |o, _, cx| o.refresh_active(cx));
     h.act(cx, |o, _, cx| o.set_tab(Tab::Changes, cx));
-    assert_eq!(selected(&h, cx), file("c.txt", Area::Unstaged));
+    assert_eq!(selected(&h, cx), file("b.txt", Area::Changed));
+    // Committed, it leaves the list: the selection moves to the next file.
+    repo.git(["commit", "-q", "-m", "b"]);
+    h.act(cx, |o, _, cx| o.refresh_active(cx));
+    assert_eq!(selected(&h, cx), file("c.txt", Area::Changed));
+}
+
+#[gpui::test]
+fn ui_an_added_unversioned_file_is_followed_into_changes(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.write("new.txt", "new\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:unversioned:new.txt");
+    h.click(cx, "change-stage:unversioned:new.txt");
+    assert_eq!(selected(&h, cx), file("new.txt", Area::Changed));
+    assert_eq!(check_of(&h, cx, "new.txt"), Some(Check::Staged));
+    // Unticking a newly added file makes it unversioned again.
+    h.click(cx, "change-stage:changes:new.txt");
+    assert_eq!(selected(&h, cx), file("new.txt", Area::Untracked));
+    assert!(h.bounds(cx, "change-row:unversioned:new.txt").is_some());
 }
 
 #[gpui::test]
@@ -376,7 +405,7 @@ fn ui_add_to_gitignore_from_the_changes_menu(cx: &mut TestAppContext) {
     repo.commit_file("a.txt", "a\n", "first");
     repo.write("notes.tmp", "x\n");
     let h = Harness::open(cx, &repo);
-    h.right_click(cx, "change-row:untracked:notes.tmp");
+    h.right_click(cx, "change-row:unversioned:notes.tmp");
     // Open in editor, Open in file manager, Copy path, Blame, History, Copy as patch,
     // Save to Patches, Shelve, then Add to .gitignore.
     h.keys(cx, "down down down down down down down down down enter");
@@ -424,7 +453,7 @@ fn ui_discard_from_the_changes_menu(cx: &mut TestAppContext) {
     repo.commit_file("a.txt", "a\n", "first");
     repo.write("a.txt", "changed\n");
     let h = Harness::open(cx, &repo);
-    h.right_click(cx, "change-row:unstaged:a.txt");
+    h.right_click(cx, "change-row:changes:a.txt");
     // Open in editor, Open in file manager, Copy path, Blame, History, Copy as patch,
     // Save to Patches, Shelve, Add to .gitignore, Add all *.txt files, Ignore only on this
     // machine, Untrack, then Discard changes.
@@ -527,7 +556,7 @@ fn commit_message_history_and_keyboard_staging(cx: &mut TestAppContext) {
 
     // Space on the selected file stages it, a second Space unstages it.
     h.act(cx, |osier, _, cx| {
-        osier.select_file("a.txt".into(), Area::Unstaged, cx)
+        osier.select_file("a.txt".into(), Area::Changed, cx)
     });
     h.act(cx, |osier, window, cx| {
         osier.toggle_stage_selected(window, cx)
@@ -538,7 +567,7 @@ fn commit_message_history_and_keyboard_staging(cx: &mut TestAppContext) {
         "a.txt"
     );
     h.act(cx, |osier, _, cx| {
-        osier.select_file("a.txt".into(), Area::Staged, cx)
+        osier.select_file("a.txt".into(), Area::Changed, cx)
     });
     h.act(cx, |osier, window, cx| {
         osier.toggle_stage_selected(window, cx)
@@ -548,7 +577,7 @@ fn commit_message_history_and_keyboard_staging(cx: &mut TestAppContext) {
 
     // Delete asks before discarding.
     h.act(cx, |osier, _, cx| {
-        osier.select_file("a.txt".into(), Area::Unstaged, cx)
+        osier.select_file("a.txt".into(), Area::Changed, cx)
     });
     h.act(cx, |osier, window, cx| osier.discard_selected(window, cx));
     let asked = cx
@@ -656,21 +685,18 @@ fn hunk_staging_and_discard_from_the_diff_pane(cx: &mut TestAppContext) {
             .unwrap();
         assert!(f.is_staged() && f.is_unstaged(), "partially staged");
     });
-    // Staged side shows exactly the second hunk.
-    h.act(cx, |osier, _, cx| {
-        osier.select_file("f.txt".into(), Area::Staged, cx)
-    });
+    // One diff (HEAD against the working tree) still shows both hunks; only the second is
+    // staged, and the index has exactly its change.
+    use osier_git::staging::Check;
     h.read(cx, |osier, _| {
-        let hunks = &osier.diff_model[0].hunks;
-        assert_eq!(hunks.len(), 1);
-        let added: Vec<&str> = hunks[0]
-            .lines
-            .iter()
-            .filter(|l| l.kind == osier_git::diff::LineKind::Added)
-            .map(|l| l.text.as_str())
-            .collect();
-        assert_eq!(added, ["TEN"], "only the second hunk is staged");
+        assert_eq!(osier.diff_model[0].hunks.len(), 2);
+        let staging = osier.diff_staging.as_ref().expect("staging");
+        assert_eq!(staging.hunk_check(0), Check::Unstaged);
+        assert_eq!(staging.hunk_check(1), Check::Staged);
     });
+    let index = repo.git(["show", ":f.txt"]);
+    assert!(index.contains("TEN") && !index.contains("ONE"));
+    assert_eq!(check_of(&h, cx, "f.txt"), Some(Check::Partial));
 }
 
 #[gpui::test]
@@ -727,7 +753,7 @@ fn ui_unstage_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
     repo.write("f.txt", "a\nB\nc\nd\n");
     repo.git(["add", "f.txt"]);
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:staged:f.txt");
+    h.click(cx, "change-row:changes:f.txt");
     assert!(
         h.bounds(cx, "lines-unstage").is_none(),
         "no button without a selection"
@@ -759,7 +785,7 @@ fn ui_stage_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
     repo.commit_file("f.txt", "a\nb\nc\n", "base");
     repo.write("f.txt", "a\nB\nc\nd\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:f.txt");
+    h.click(cx, "change-row:changes:f.txt");
     select_new_lines(&h, cx, "f.txt", 4);
     h.click(cx, "lines-stage");
     assert_eq!(
@@ -781,7 +807,7 @@ fn ui_line_buttons_go_when_the_press_is_released_elsewhere(cx: &mut TestAppConte
     repo.commit_file("f.txt", "a\nb\nc\n", "base");
     repo.write("f.txt", "a\nB\nc\nd\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:f.txt");
+    h.click(cx, "change-row:changes:f.txt");
     select_new_lines(&h, cx, "f.txt", 4);
     let button = h.bounds(cx, "lines-stage").unwrap().center();
     let elsewhere = h.bounds(cx, "commit-message").unwrap().center();
@@ -808,7 +834,7 @@ fn ui_discard_lines_takes_only_the_selected_lines(cx: &mut TestAppContext) {
     repo.commit_file("f.txt", "a\nb\nc\n", "base");
     repo.write("f.txt", "a\nB\nc\nd\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:f.txt");
+    h.click(cx, "change-row:changes:f.txt");
     select_new_lines(&h, cx, "f.txt", 4);
     h.click(cx, "lines-discard");
     h.click(cx, "dialog-ok");
@@ -827,4 +853,183 @@ fn ui_palette_only_commands_can_be_bound(cx: &mut TestAppContext) {
     h.keys(cx, "ctrl-alt-a");
     let staged = repo.git(["diff", "--cached", "--name-only"]);
     assert_eq!(staged.lines().collect::<Vec<_>>(), ["a.txt", "b.txt"]);
+}
+
+/// One file with two changes far apart (two hunks).
+fn two_hunk_file() -> TempRepo {
+    let repo = TempRepo::new();
+    let base: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+    repo.commit_file("f.txt", &base, "base");
+    repo.write(
+        "f.txt",
+        &base
+            .replace("line 2\n", "line two\n")
+            .replace("line 28\n", "line twenty-eight\n"),
+    );
+    repo
+}
+
+fn has_dialog(h: &Harness, cx: &mut TestAppContext) -> bool {
+    cx.update_window(h.window, |_, window, cx| {
+        use gpui_kit::component::WindowExt as _;
+        window.has_active_dialog(cx)
+    })
+    .unwrap()
+}
+
+#[gpui::test]
+fn ui_group_checkbox_ticks_all_and_a_dash_ticks_too(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
+    let repo = three_unstaged();
+    let h = Harness::open(cx, &repo);
+    // One file ticked: the group shows a dash, and clicking it ticks the rest.
+    h.click(cx, "change-stage:changes:a.txt");
+    h.click(cx, "change-check-group:changes");
+    for f in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(check_of(&h, cx, f), Some(Check::Staged), "{f}");
+    }
+    // All ticked: clicking clears them all.
+    h.click(cx, "change-check-group:changes");
+    for f in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(check_of(&h, cx, f), Some(Check::Unstaged), "{f}");
+    }
+}
+
+#[gpui::test]
+fn ui_adding_many_unversioned_files_asks_first(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let many = crate::views::changes::ADD_ALL_CONFIRM + 1;
+    for i in 0..many {
+        repo.write(&format!("new-{i:03}.txt"), "n\n");
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-check-group:unversioned");
+    assert!(has_dialog(&h, cx), "asks before adding {many} files");
+    assert!(
+        repo.git(["diff", "--cached", "--name-only"])
+            .trim()
+            .is_empty()
+    );
+    h.click(cx, "dialog-ok");
+    assert_eq!(
+        repo.git(["diff", "--cached", "--name-only"])
+            .lines()
+            .count(),
+        many
+    );
+}
+
+#[gpui::test]
+fn ui_a_few_unversioned_files_are_added_at_once(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.write("one.txt", "1\n");
+    repo.write("two.txt", "2\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-check-group:unversioned");
+    assert!(!has_dialog(&h, cx));
+    assert_eq!(
+        repo.git(["diff", "--cached", "--name-only"])
+            .lines()
+            .count(),
+        2
+    );
+    assert!(h.bounds(cx, "change-row:changes:one.txt").is_some());
+}
+
+#[gpui::test]
+fn ui_a_partly_staged_file_says_how_many_changes(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
+    let repo = two_hunk_file();
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:f.txt");
+    h.click(cx, "hunk-check:0");
+    assert_eq!(check_of(&h, cx, "f.txt"), Some(Check::Partial));
+    let counts = h.read(cx, |o, _| {
+        o.active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|s| s.partial_changes.get("f.txt").copied())
+    });
+    assert_eq!(counts, Some((1, 2)));
+    assert!(h.bounds(cx, "change-partial:f.txt").is_some());
+    // Space on the partly staged file (back in the list) ticks all of it.
+    h.click(cx, "change-row:changes:f.txt");
+    h.keys(cx, "space");
+    assert_eq!(check_of(&h, cx, "f.txt"), Some(Check::Staged));
+    assert!(h.bounds(cx, "change-partial:f.txt").is_none());
+}
+
+#[gpui::test]
+fn ui_hunk_checkbox_and_roll_back_in_the_gutter(cx: &mut TestAppContext) {
+    use osier_git::staging::Check;
+    let repo = two_hunk_file();
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:f.txt");
+    h.click(cx, "hunk-check:1");
+    h.read(cx, |o, _| {
+        let s = o.diff_staging.as_ref().expect("staging");
+        assert_eq!(s.hunk_check(0), Check::Unstaged);
+        assert_eq!(s.hunk_check(1), Check::Staged);
+    });
+    // Clicking a ticked hunk clears it.
+    h.click(cx, "hunk-check:1");
+    h.read(cx, |o, _| {
+        assert_eq!(
+            o.diff_staging.as_ref().unwrap().hunk_check(1),
+            Check::Unstaged
+        )
+    });
+    // Roll back the first hunk: asks, then puts the line back in the file and the index.
+    h.click(cx, "hunk-check:0");
+    h.click(cx, "hunk-revert:0");
+    assert!(has_dialog(&h, cx), "roll back asks first");
+    h.click(cx, "dialog-ok");
+    let work = repo.read("f.txt");
+    assert!(work.contains("line 2\n") && work.contains("line twenty-eight"));
+    let index = repo.git(["show", ":f.txt"]);
+    assert!(index.contains("line 2\n") && !index.contains("line two"));
+    h.read(cx, |o, _| {
+        assert_eq!(o.diff_staging.as_ref().unwrap().shown.hunks.len(), 1)
+    });
+}
+
+#[gpui::test]
+fn ui_rolling_back_a_new_file_asks_to_trash_it(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.write("new.txt", "new\n");
+    repo.git(["add", "new.txt"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:new.txt");
+    h.keys(cx, "delete");
+    assert!(has_dialog(&h, cx));
+    // Cancel: the system trash is not touched in tests.
+    h.click(cx, "dialog-cancel");
+    assert_eq!(repo.read("new.txt"), "new\n");
+}
+
+#[gpui::test]
+fn ui_group_checkbox_copes_with_staged_deletions_and_renames(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("keep.txt", "k\n", "keep");
+    repo.commit_file("gone.txt", "g\n", "gone");
+    repo.commit_file("old.txt", "o\n", "old");
+    repo.write("keep.txt", "changed\n");
+    // A deletion that is already staged (no file left to `git add`) and a staged rename.
+    repo.git(["rm", "-q", "gone.txt"]);
+    repo.git(["mv", "old.txt", "new.txt"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-check-group:changes");
+    assert!(
+        repo.git(["diff", "--name-only"]).trim().is_empty(),
+        "everything staged"
+    );
+    h.click(cx, "change-check-group:changes");
+    assert!(
+        repo.git(["diff", "--cached", "--name-only"])
+            .trim()
+            .is_empty(),
+        "nothing staged, the rename's old path included"
+    );
 }

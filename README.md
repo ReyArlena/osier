@@ -15,8 +15,10 @@ none of the IDE.
 
 ## Features
 
-- **Visual staging**: stage, unstage and discard whole files, single hunks or selected lines
-  from the diff; untracked files go to the trash, never `rm`.
+- **Visual staging**: one list of changes with checkboxes, like PhpStorm: tick whole files,
+  single hunks (a checkbox in the diff's gutter) or selected lines; a dash marks a partly
+  staged file or hunk, and every hunk can be rolled back. Unversioned files go to the trash,
+  never `rm`.
 - **Commit log with graph**, tags and branch labels, reflog, compare any two refs, file
   history (`log --follow`) and blame with a click through to the commit.
 - **Branches, tags, remotes, worktrees, submodules, stashes** in one place, with the usual

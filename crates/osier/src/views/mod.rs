@@ -1,7 +1,7 @@
 //! Each view is an `impl Osier` block with one `render_*` method.
 
 mod branches;
-mod changes;
+pub(crate) mod changes;
 pub(crate) mod command_log;
 mod commit_details;
 mod diff_pane;

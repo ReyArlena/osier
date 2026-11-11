@@ -47,6 +47,9 @@ pub struct Snapshot {
     /// Conflicted files whose working-tree copy still has conflict markers: "Mark resolved"
     /// is disabled for them.
     pub conflict_markers: std::collections::HashSet<String>,
+    /// For each partly staged file: how many of its changes have something staged, out of
+    /// how many ("1 of 6 changes" in the Changes list).
+    pub partial_changes: std::collections::HashMap<String, (usize, usize)>,
 }
 
 /// Ignored files for the Files tab, with the rule that ignores each one.
@@ -57,12 +60,14 @@ pub struct IgnoredFiles {
     pub rules: std::collections::HashMap<String, osier_git::files::IgnoreRule>,
 }
 
-/// Which area of the Changes tab a file lives in.
+/// Which group of the Changes tab a file lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Area {
     Conflicted,
-    Staged,
-    Unstaged,
+    /// A tracked file with changes, staged, unstaged or both: its checkbox says which
+    /// (`osier_git::staging::file_check`).
+    Changed,
+    /// Not tracked yet ("Unversioned Files").
     Untracked,
 }
 
@@ -154,6 +159,7 @@ pub struct DiffCache {
     pub state: gpui_kit::Entity<gpui_kit::component::diff::DiffState>,
     pub subscription: gpui_kit::Subscription,
     pub model: std::rc::Rc<Vec<osier_git::diff::DiffFile>>,
+    pub staging: Option<std::rc::Rc<osier_git::staging::FileStaging>>,
     pub files: usize,
     pub error: Option<String>,
     pub too_large: Option<u64>,
@@ -327,10 +333,10 @@ impl Project {
 
     /// Where `selection` lands once `new` replaces the current snapshot, so the right pane
     /// never names something the lists no longer show. Unchanged while what it points at is
-    /// still there. A Changes file that left its area (staged, unstaged, discarded,
-    /// committed) moves on to the next file in that area, or the one above when it was the
-    /// last, and follows the file into its new area when the area is now empty;
-    /// `keep_file` (an editor is open on it) always follows the file. A dropped stash moves
+    /// still there. A Changes file that moved to another group (an unversioned file that was
+    /// added, a new file that was unstaged) is followed there; one that left the list
+    /// (committed, rolled back) moves on to the next file of its group, or the one above when
+    /// it was the last. `keep_file` (an editor is open on it) only follows. A dropped stash moves
     /// on to its neighbour the same way. A working-tree file that was deleted, or a Changes
     /// file with nowhere to go, gives `Selection::None`, which the tab's default fills.
     pub fn reconcile_selection(
@@ -350,18 +356,19 @@ impl Project {
                 let next = if keep_file {
                     follow()
                 } else {
-                    old.and_then(|old| {
-                        let was: Vec<String> = ordered_changes(&old.status)
-                            .into_iter()
-                            .filter(|(_, a)| a == area)
-                            .map(|(p, _)| p)
-                            .collect();
-                        neighbour(&was, path, |p| {
-                            items.iter().any(|(q, a)| q == p && a == area)
+                    follow().or_else(|| {
+                        old.and_then(|old| {
+                            let was: Vec<String> = ordered_changes(&old.status)
+                                .into_iter()
+                                .filter(|(_, a)| a == area)
+                                .map(|(p, _)| p)
+                                .collect();
+                            neighbour(&was, path, |p| {
+                                items.iter().any(|(q, a)| q == p && a == area)
+                            })
+                            .map(|p| (p.clone(), *area))
                         })
-                        .map(|p| (p.clone(), *area))
                     })
-                    .or_else(follow)
                 };
                 next.map_or(Selection::None, |(path, area)| Selection::File {
                     path,
@@ -476,8 +483,7 @@ pub fn ordered_changes(status: &RepoStatus) -> Vec<(String, Area)> {
     status
         .conflicted()
         .map(|e| (e.path.clone(), Area::Conflicted))
-        .chain(status.staged().map(|e| (e.path.clone(), Area::Staged)))
-        .chain(status.unstaged().map(|e| (e.path.clone(), Area::Unstaged)))
+        .chain(status.changed().map(|e| (e.path.clone(), Area::Changed)))
         .chain(
             status
                 .untracked()
@@ -548,6 +554,7 @@ pub fn load_snapshot(
         .filter(|e| osier_git::ops::integrate::file_has_conflict_markers(repo, &e.path))
         .map(|e| e.path.clone())
         .collect();
+    let partial_changes = partial_changes(repo, &status);
     Ok(Snapshot {
         status: std::sync::Arc::new(status),
         branches,
@@ -567,7 +574,30 @@ pub fn load_snapshot(
         identity,
         in_progress: repo.in_progress(),
         conflict_markers,
+        partial_changes,
     })
+}
+
+/// Hunk counts of the partly staged files (`Snapshot::partial_changes`). Three diffs per file,
+/// so only the first few dozen are counted; the rest show without counts.
+fn partial_changes(
+    repo: &Repository,
+    status: &RepoStatus,
+) -> std::collections::HashMap<String, (usize, usize)> {
+    use osier_git::staging::{Check, file_check, file_staging};
+    status
+        .changed()
+        .filter(|e| file_check(e) == Some(Check::Partial))
+        .take(40)
+        .filter_map(|e| {
+            let staging = file_staging(repo, &e.path, e.orig_path.as_deref(), 3).ok()??;
+            Some((e.path.clone(), staging.hunk_counts()))
+        })
+        // Only when it says something: some changes staged and some not. A file whose staged
+        // part is not a line change (a rename) or whose one change is partly staged shows the
+        // dash alone; "0 of 1" or "1 of 1" would read as wrong.
+        .filter(|(_, (some, total))| *some > 0 && some < total)
+        .collect()
 }
 
 #[cfg(test)]

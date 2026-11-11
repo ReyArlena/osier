@@ -455,7 +455,7 @@ fn ui_context_menu_keys_fire_on_the_selected_row(cx: &mut TestAppContext) {
     repo.write("notes.tmp", "x\n");
     let h = Harness::open(cx, &repo);
     bind(cx, &[("row_add_to_gitignore", &["i"])]);
-    h.click(cx, "change-row:untracked:notes.tmp");
+    h.click(cx, "change-row:unversioned:notes.tmp");
     h.keys(cx, "i");
     let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
     assert_eq!(gitignore, "/notes.tmp\n");

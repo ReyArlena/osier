@@ -90,10 +90,12 @@ impl Osier {
                 paths: vec![path.to_string()],
                 untracked: vec![path.to_string()],
             },
-            Area::Staged => PatchSource::Staged {
+            // All of a changed file's changes against HEAD, staged or not.
+            Area::Changed => PatchSource::Worktree {
                 paths: vec![path.to_string()],
+                untracked: Vec::new(),
             },
-            Area::Unstaged | Area::Conflicted => PatchSource::Unstaged {
+            Area::Conflicted => PatchSource::Unstaged {
                 paths: vec![path.to_string()],
             },
         }

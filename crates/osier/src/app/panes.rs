@@ -214,6 +214,7 @@ impl Osier {
                     .replace(fresh_sub)
                     .unwrap_or_else(|| Self::subscribe_diff(&self.diff, cx)),
                 model: std::mem::take(&mut self.diff_model),
+                staging: self.diff_staging.take(),
                 files: self.diff_files,
                 error: self.diff_error.take(),
                 too_large: self.diff_too_large.take(),
@@ -266,6 +267,7 @@ impl Osier {
             self.diff = cache.state;
             self.diff_subscription = Some(cache.subscription);
             self.diff_model = cache.model;
+            self.diff_staging = cache.staging;
             self.diff_files = cache.files;
             self.diff_error = cache.error;
             self.diff_too_large = cache.too_large;

@@ -16,6 +16,14 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- The Changes tab is one list, like PhpStorm: each changed file shows once with a checkbox
+  that is the git index (ticked = staged, a dash = partly staged, with "N of M changes" when
+  some of its changes are staged). Conflicts and Unversioned Files keep their own groups, and
+  each group has a checkbox for all its files; adding more than 100 unversioned files at once
+  asks first. A changed file's diff is HEAD against the working tree, with a checkbox per
+  change in the gutter to stage or unstage it, a roll-back arrow that puts the change back as
+  in HEAD (staged part included, after a confirmation), and staged lines shown in a stronger
+  colour.
 - GitHub release notes list every commit in the release, grouped by type, above the list of
   pull requests.
 - Hovering list rows redraws only the part of the window under the pointer (the list, the

@@ -217,6 +217,9 @@ pub struct Osier {
     pub(crate) diff_files: usize,
     /// Our own parse of the same patch, for building hunk and line patches.
     pub(crate) diff_model: std::rc::Rc<Vec<osier_git::diff::DiffFile>>,
+    /// For a changed file in the Changes tab: which of its lines are staged
+    /// (`osier_git::staging`), behind the hunk checkboxes and the staged-line tint.
+    pub(crate) diff_staging: Option<std::rc::Rc<osier_git::staging::FileStaging>>,
     pub(crate) diff_loading: bool,
     pub(crate) diff_error: Option<String>,
     pub(crate) diff_revision: u64,
@@ -603,6 +606,7 @@ impl Osier {
             commit_branches_loading: None,
             diff_files: 0,
             diff_model: std::rc::Rc::new(Vec::new()),
+            diff_staging: None,
             diff_loading: false,
             diff_error: None,
             diff_revision: 0,

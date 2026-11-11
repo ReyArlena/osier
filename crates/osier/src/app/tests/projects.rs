@@ -516,7 +516,7 @@ fn opens_a_repository_and_selects_the_first_change(cx: &mut TestAppContext) {
             project.selection,
             Selection::File {
                 path: "a.txt".into(),
-                area: Area::Unstaged
+                area: Area::Changed
             }
         );
         assert_eq!(osier.diff_files, 1, "diff pane shows the selected file");

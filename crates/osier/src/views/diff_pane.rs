@@ -1,11 +1,13 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::diff::{Diff, DiffGutterMarker, DiffLinePosition, DiffMode, DiffSide};
+use gpui_kit::component::diff::{
+    Diff, DiffDecoration, DiffGutterMarker, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+};
 use gpui_kit::component::input::Editor;
 use gpui_kit::component::text::TextView;
 
 use crate::viewer::Viewer;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
@@ -41,9 +43,8 @@ impl Osier {
                 Lucide::FileDiff,
                 path.clone(),
                 Some(match area {
-                    Area::Staged => Tag::success().xsmall().child("staged"),
-                    Area::Unstaged => Tag::warning().xsmall().child("unstaged"),
-                    Area::Untracked => Tag::secondary().xsmall().child("untracked"),
+                    Area::Changed => Tag::warning().xsmall().child("changed"),
+                    Area::Untracked => Tag::secondary().xsmall().child("unversioned"),
                     Area::Conflicted => Tag::danger().xsmall().child("conflict"),
                 }),
             ),
@@ -275,7 +276,11 @@ impl Osier {
             let mut view = Diff::new(&self.diff)
                 .line_number(self.settings.diff.line_numbers)
                 .soft_wrap(self.settings.diff.soft_wrap);
-            if let Some((path, a)) = &area
+            if let Some((path, Area::Changed)) = &area
+                && let Some(staging) = self.diff_staging.clone()
+            {
+                view = self.staging_gutter(view, path.clone(), staging, cx);
+            } else if let Some((path, a)) = &area
                 && !HunkAction::for_area(*a).is_empty()
                 && let Some(file) = self.diff_file_model(path)
             {
@@ -298,10 +303,9 @@ impl Osier {
                                 h.old_start as usize,
                             )
                         };
-                        DiffGutterMarker::new(("hunk", ix), position).with_label(match a {
-                            Area::Staged => "unstage",
-                            _ => "stage",
-                        })
+                        // Only unversioned files get here (changed files have the
+                        // checkbox gutter): their hunks can be staged.
+                        DiffGutterMarker::new(("hunk", ix), position).with_label("stage")
                     })
                     .collect();
                 let model = self.diff_model.clone();
@@ -1047,5 +1051,171 @@ impl Osier {
                 }
             }
         }
+    }
+}
+
+impl Osier {
+    /// A changed file's diff (HEAD against the working tree): per hunk a checkbox (ticked,
+    /// empty or a dash, from `osier_git::staging`) on its first row and a roll-back arrow on its
+    /// second, and every staged line in a stronger shade of its change colour.
+    fn staging_gutter(
+        &self,
+        view: Diff,
+        path: String,
+        staging: std::rc::Rc<osier_git::staging::FileStaging>,
+        cx: &mut Context<Self>,
+    ) -> Diff {
+        use osier_git::diff::LineKind;
+        use osier_git::staging::Check;
+
+        // Staged lines: their own change colour, stronger (like PhpStorm's included changes).
+        let (added_tint, removed_tint) = (
+            cx.theme().success.opacity(0.28),
+            cx.theme().danger.opacity(0.28),
+        );
+        let line_range = |kind: LineKind, n: u32| {
+            let side = if kind == LineKind::Removed {
+                DiffSide::Original
+            } else {
+                DiffSide::Modified
+            };
+            DiffLineRange::new(path.clone(), side, n as usize, n as usize)
+        };
+        let mut decorations = Vec::new();
+        let mut markers = Vec::new();
+        for (hix, h) in staging.shown.hunks.iter().enumerate() {
+            for (lix, l) in h.lines.iter().enumerate() {
+                if staging.line_staged(hix, lix) == Some(true)
+                    && let Some(n) = if l.kind == LineKind::Removed {
+                        l.old_no
+                    } else {
+                        l.new_no
+                    }
+                {
+                    let tint = if l.kind == LineKind::Removed {
+                        removed_tint
+                    } else {
+                        added_tint
+                    };
+                    decorations
+                        .push(DiffDecoration::new(line_range(l.kind, n)).with_background(tint));
+                }
+            }
+            // The hunk's first and second rows, on the side that has them.
+            let row = |offset: u32| {
+                if h.new_lines > offset {
+                    Some(DiffLinePosition::new(
+                        path.clone(),
+                        DiffSide::Modified,
+                        (h.new_start + offset) as usize,
+                    ))
+                } else if h.old_lines > offset {
+                    Some(DiffLinePosition::new(
+                        path.clone(),
+                        DiffSide::Original,
+                        (h.old_start + offset) as usize,
+                    ))
+                } else {
+                    None
+                }
+            };
+            let check = match staging.hunk_check(hix) {
+                Check::Staged => "staged",
+                Check::Unstaged => "unstaged",
+                Check::Partial => "partial",
+            };
+            if let Some(first) = row(0) {
+                markers.push(DiffGutterMarker::new(("hunk-check", hix), first).with_label(check));
+            }
+            if let Some(second) = row(1) {
+                markers
+                    .push(DiffGutterMarker::new(("hunk-revert", hix), second).with_label("revert"));
+            }
+        }
+        let weak = cx.entity().downgrade();
+        view.decorations(decorations)
+            .gutter_markers(markers)
+            .render_gutter_marker(move |marker, _, _| {
+                let ElementId::NamedInteger(kind, hix) = marker.id().clone() else {
+                    return div().into_any_element();
+                };
+                let hix = hix as usize;
+                let act = {
+                    let (weak, path) = (weak.clone(), path.clone());
+                    move |action: HunkAction| {
+                        let (weak, path) = (weak.clone(), path.clone());
+                        move |window: &mut Window, cx: &mut App| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.hunk_action(path.clone(), hix, action, window, cx)
+                            });
+                        }
+                    }
+                };
+                if kind.as_ref() == "hunk-revert" {
+                    let revert = act(HunkAction::Discard);
+                    return Button::new(marker.id().clone())
+                        .test_id(|| format!("hunk-revert:{hix}"))
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::Undo2)
+                        .tooltip("Roll back this change")
+                        .on_click(move |_, window, cx| revert(window, cx))
+                        .into_any_element();
+                }
+                let label = marker.label().clone();
+                let staged = label.as_ref() == "staged";
+                let toggle = act(if staged {
+                    HunkAction::Unstage
+                } else {
+                    HunkAction::Stage
+                });
+                let (stage, unstage, revert) = (
+                    act(HunkAction::Stage),
+                    act(HunkAction::Unstage),
+                    act(HunkAction::Discard),
+                );
+                div()
+                    .id(marker.id().clone())
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        crate::checkbox::Checkbox::new(("hunk-checkbox", hix))
+                            .test_id(|| format!("hunk-check:{hix}"))
+                            .accessibility_label(if staged {
+                                "Unstage this change"
+                            } else {
+                                "Stage this change"
+                            })
+                            .small()
+                            .checked(staged)
+                            .indeterminate(label.as_ref() == "partial")
+                            .on_click(move |_, window, cx| {
+                                cx.stop_propagation();
+                                toggle(window, cx)
+                            }),
+                    )
+                    .context_menu(move |menu, _, _| {
+                        let (stage, unstage, revert) =
+                            (stage.clone(), unstage.clone(), revert.clone());
+                        menu.item(
+                            PopupMenuItem::new("Stage this change")
+                                .disabled(staged)
+                                .on_click(move |_, window, cx| stage(window, cx)),
+                        )
+                        .item(
+                            PopupMenuItem::new("Unstage this change")
+                                .disabled(label.as_ref() == "unstaged")
+                                .on_click(move |_, window, cx| unstage(window, cx)),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Roll back this change…")
+                                .on_click(move |_, window, cx| revert(window, cx)),
+                        )
+                    })
+                    .into_any_element()
+            })
     }
 }

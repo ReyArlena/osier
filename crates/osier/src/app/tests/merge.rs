@@ -382,7 +382,7 @@ fn ui_conflicts_default_to_three_way_and_other_files_keep_their_layout(cx: &mut 
         assert_eq!(o.settings.diff.mode, Mode::Unified);
     });
     h.act(cx, |o, _, cx| {
-        o.select_file("a.txt".into(), Area::Unstaged, cx)
+        o.select_file("a.txt".into(), Area::Changed, cx)
     });
     // 3-way is only for conflicts: disabled here, so a click changes nothing.
     h.click(cx, "three-way");

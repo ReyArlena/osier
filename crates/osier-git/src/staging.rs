@@ -62,6 +62,8 @@ pub fn file_check(entry: &StatusEntry) -> Option<Check> {
 pub struct FileStaging {
     /// What is shown: HEAD (or the empty tree on an unborn branch) against the working tree.
     pub shown: DiffFile,
+    /// `shown` as unified diff text, for viewers that parse patches themselves.
+    pub shown_text: String,
     /// HEAD -> index; `None` when nothing is staged.
     staged: Option<DiffFile>,
     /// Index -> working tree; `None` when nothing is unstaged.
@@ -162,15 +164,27 @@ fn one_file(
     paths: &[&str],
     context: u32,
 ) -> Result<Option<DiffFile>> {
+    Ok(one_file_text(repo, target, paths, context)?.0)
+}
+
+/// [`one_file`], with the diff's text.
+fn one_file_text(
+    repo: &Repository,
+    target: DiffTarget,
+    paths: &[&str],
+    context: u32,
+) -> Result<(Option<DiffFile>, String)> {
     let mut options = DiffOptions::new(target);
     options.context_lines = context;
     options.paths = paths.iter().map(|p| p.to_string()).collect();
-    let files = parse(&patch_text(repo, &options)?)?;
+    let text = patch_text(repo, &options)?;
+    let files = parse(&text)?;
     // A rename lists both paths; the file of interest is the one that ends at `paths[0]`.
-    Ok(files
+    let file = files
         .into_iter()
         .find(|f| f.path == paths[0])
-        .filter(|f| !f.hunks.is_empty() || f.binary))
+        .filter(|f| !f.hunks.is_empty() || f.binary);
+    Ok((file, text))
 }
 
 /// Context lines of the two diffs the patches are built from: their hunks only need to be
@@ -192,7 +206,9 @@ pub fn file_staging(
         Some(_) => "HEAD".to_string(),
         None => empty_tree(repo)?,
     };
-    let Some(shown) = one_file(repo, DiffTarget::WorktreeTo(base), &paths, context)? else {
+    let (Some(shown), shown_text) =
+        one_file_text(repo, DiffTarget::WorktreeTo(base), &paths, context)?
+    else {
         return Ok(None);
     };
     let staged = one_file(repo, DiffTarget::Staged, &paths, PATCH_CONTEXT)?;
@@ -227,6 +243,7 @@ pub fn file_staging(
     });
     Ok(Some(FileStaging {
         shown,
+        shown_text,
         staged,
         unstaged,
         marks,

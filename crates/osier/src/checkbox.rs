@@ -54,6 +54,14 @@ impl Checkbox {
         self
     }
 
+    /// The dash: neither ticked nor clear. A click ticks it.
+    pub(crate) fn indeterminate(mut self, indeterminate: bool) -> Self {
+        if indeterminate {
+            self.state = CheckboxState::Indeterminate;
+        }
+        self
+    }
+
     pub(crate) fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
         self
