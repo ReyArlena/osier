@@ -50,7 +50,7 @@ pub struct Line {
     pub new_no: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineKind {
     Context,
     Added,
@@ -84,6 +84,8 @@ pub enum DiffTarget {
     Staged,
     /// Working tree against HEAD.
     WorktreeToHead,
+    /// Working tree against a commit or tree (the empty tree on an unborn branch).
+    WorktreeTo(String),
     /// Changes introduced by one commit (against its first parent, or empty tree for a root).
     Commit(String),
     /// Arbitrary `from..to` (two-dot: everything that differs between the two trees).
@@ -144,6 +146,7 @@ fn args_for(options: &DiffOptions) -> Vec<String> {
                 DiffTarget::Unstaged => {}
                 DiffTarget::Staged => args.push("--cached".into()),
                 DiffTarget::WorktreeToHead => args.push("HEAD".into()),
+                DiffTarget::WorktreeTo(rev) => args.push(rev.clone()),
                 DiffTarget::Range { from, to } => args.push(format!("{from}..{to}")),
                 DiffTarget::SinceMergeBase { from, to } => args.push(format!("{from}...{to}")),
                 DiffTarget::Commit(_) => {}
