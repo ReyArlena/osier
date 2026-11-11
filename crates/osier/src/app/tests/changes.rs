@@ -966,6 +966,14 @@ fn ui_hunk_checkbox_and_roll_back_in_the_gutter(cx: &mut TestAppContext) {
     let repo = two_hunk_file();
     let h = Harness::open(cx, &repo);
     h.click(cx, "change-row:changes:f.txt");
+    // Like PhpStorm: the roll-back arrow on the change's removed (red) line, the checkbox on
+    // its added (green) line just below it.
+    let revert = h.bounds(cx, "hunk-revert:0").expect("revert arrow");
+    let check = h.bounds(cx, "hunk-check:0").expect("checkbox");
+    assert!(
+        revert.origin.y < check.origin.y,
+        "red line above green line"
+    );
     h.click(cx, "hunk-check:1");
     h.read(cx, |o, _| {
         let s = o.diff_staging.as_ref().expect("staging");

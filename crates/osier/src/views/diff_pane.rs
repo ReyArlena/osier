@@ -1056,8 +1056,9 @@ impl Osier {
 
 impl Osier {
     /// A changed file's diff (HEAD against the working tree): per hunk a checkbox (ticked,
-    /// empty or a dash, from `osier_git::staging`) on its first row and a roll-back arrow on its
-    /// second, and every staged line in a stronger shade of its change colour.
+    /// empty or a dash, from `osier_git::staging`) on its first added line and a roll-back
+    /// arrow on its first removed line, and every staged line in a stronger shade of its change
+    /// colour.
     fn staging_gutter(
         &self,
         view: Diff,
@@ -1101,35 +1102,50 @@ impl Osier {
                         .push(DiffDecoration::new(line_range(l.kind, n)).with_background(tint));
                 }
             }
-            // The hunk's first and second rows, on the side that has them.
-            let row = |offset: u32| {
-                if h.new_lines > offset {
-                    Some(DiffLinePosition::new(
-                        path.clone(),
-                        DiffSide::Modified,
-                        (h.new_start + offset) as usize,
-                    ))
-                } else if h.old_lines > offset {
-                    Some(DiffLinePosition::new(
-                        path.clone(),
-                        DiffSide::Original,
-                        (h.old_start + offset) as usize,
-                    ))
-                } else {
-                    None
-                }
+            // Like PhpStorm: the checkbox on the change's first added (green) line, the
+            // roll-back arrow on its first removed (red) line. One control fits a row, so a
+            // change with only one kind of line puts the other control on that kind's second
+            // line, or on the context line just above the change.
+            let at = |l: &osier_git::diff::Line| match l.kind {
+                LineKind::Removed => l
+                    .old_no
+                    .map(|n| DiffLinePosition::new(path.clone(), DiffSide::Original, n as usize)),
+                _ => l
+                    .new_no
+                    .map(|n| DiffLinePosition::new(path.clone(), DiffSide::Modified, n as usize)),
+            };
+            let of_kind = |kind: LineKind| h.lines.iter().filter(move |l| l.kind == kind);
+            let first_change = h.lines.iter().position(|l| l.kind != LineKind::Context);
+            let above = first_change
+                .and_then(|ix| ix.checked_sub(1))
+                .and_then(|ix| at(&h.lines[ix]));
+            let added: Vec<_> = of_kind(LineKind::Added).filter_map(&at).take(2).collect();
+            let removed: Vec<_> = of_kind(LineKind::Removed).filter_map(&at).take(2).collect();
+            let (check_at, revert_at) = match (added.first(), removed.first()) {
+                (Some(a), Some(r)) => (Some(a.clone()), Some(r.clone())),
+                (Some(a), None) => (
+                    Some(a.clone()),
+                    added.get(1).cloned().or_else(|| above.clone()),
+                ),
+                (None, Some(r)) => (
+                    removed.get(1).cloned().or_else(|| above.clone()),
+                    Some(r.clone()),
+                ),
+                (None, None) => (None, None),
             };
             let check = match staging.hunk_check(hix) {
                 Check::Staged => "staged",
                 Check::Unstaged => "unstaged",
                 Check::Partial => "partial",
             };
-            if let Some(first) = row(0) {
-                markers.push(DiffGutterMarker::new(("hunk-check", hix), first).with_label(check));
-            }
-            if let Some(second) = row(1) {
+            if let Some(position) = check_at {
                 markers
-                    .push(DiffGutterMarker::new(("hunk-revert", hix), second).with_label("revert"));
+                    .push(DiffGutterMarker::new(("hunk-check", hix), position).with_label(check));
+            }
+            if let Some(position) = revert_at {
+                markers.push(
+                    DiffGutterMarker::new(("hunk-revert", hix), position).with_label("revert"),
+                );
             }
         }
         let weak = cx.entity().downgrade();
