@@ -110,6 +110,7 @@ pub(super) fn keymap_page(view: &Entity<Osier>) -> SettingPage {
                     .child(
                         div().flex_1().child(
                             gpui_kit::component::slider::Slider::new(&slider)
+                                .accessibility_label("Stop waiting for the next key after")
                                 .disabled(options.is_disabled()),
                         ),
                     )

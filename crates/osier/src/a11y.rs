@@ -11,6 +11,7 @@
 //! - a button that shows only an icon: `.tooltip(..)` (read as its description) or
 //!   `.accessibility_label("..")`, and [`A11yName::a11y_name`] when the name is built per row
 //! - a checkbox without a visible label: [`A11yName::a11y_name`]
+//! - a slider: `.accessibility_label("..")` (the text next to it is not its label)
 //! - buttons that repeat on every row with the same text ("Checkout"): [`A11yName::a11y_name`]
 //!   with what they act on ("Checkout main")
 //!
@@ -256,6 +257,20 @@ mod tests {
             problems,
             "checkboxes without a `.label(..)` need `.accessibility_label(..)` or `.a11y_name(..)`",
         );
+    }
+
+    #[test]
+    fn sliders_have_a_name() {
+        let mut problems = Vec::new();
+        for (path, code) in sources() {
+            for (at, _) in code.match_indices("Slider::new(") {
+                if !chain_methods(&code, at).contains(&"accessibility_label") && !excused(&code, at)
+                {
+                    problems.push(format!("{}:{}", path.display(), line_of(&code, at)));
+                }
+            }
+        }
+        report(problems, "sliders need `.accessibility_label(..)`");
     }
 
     #[test]

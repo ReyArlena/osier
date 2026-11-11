@@ -63,7 +63,8 @@ ourselves does not. The top of `crates/osier/src/a11y.rs` lists what needs what:
 
 - a list row (a `div` or `ListItem` with a click): `.a11y_row(|| label, selected)`, or
   `.a11y_item(|| label)` when it cannot be selected, right after its `.test_id(..)`
-- a button that shows only an icon: `.tooltip(..)` or `.accessibility_label(..)`
+- a button that shows only an icon, and every slider: `.tooltip(..)` (buttons) or
+  `.accessibility_label(..)`
 - a checkbox without a visible label, and buttons that repeat on every row with the same
   text: `.a11y_name(|| ..)` with what they act on
 

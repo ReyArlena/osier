@@ -222,6 +222,7 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                                 .child(
                                     div().flex_1().child(
                                         gpui_kit::component::slider::Slider::new(&slider)
+                                            .accessibility_label("Animation length")
                                             .disabled(off || options.is_disabled()),
                                     ),
                                 )
@@ -315,6 +316,7 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                             .child(
                                 div().flex_1().child(
                                     gpui_kit::component::slider::Slider::new(&slider)
+                                        .accessibility_label("Show tooltips after")
                                         .disabled(options.is_disabled()),
                                 ),
                             )
@@ -330,8 +332,6 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                      appears. Default: at once.",
                 ),
         )
-        .group(
-            SettingGroup::new().title("Lists").item(
         .group(
             SettingGroup::new().title("Notifications").item(
                 SettingItem::new(
@@ -379,6 +379,8 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 ),
             ),
         )
+        .group(
+            SettingGroup::new().title("Lists").item(
                 SettingItem::new(
                     "Show menu buttons on rows",
                     SettingField::switch(

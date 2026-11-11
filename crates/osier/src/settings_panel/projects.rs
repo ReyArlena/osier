@@ -196,6 +196,7 @@ pub(super) fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                             .child(
                                 div().flex_1().child(
                                     gpui_kit::component::slider::Slider::new(&slider)
+                                        .accessibility_label("Check recent projects every")
                                         .disabled(!checking || options.is_disabled()),
                                 ),
                             )
