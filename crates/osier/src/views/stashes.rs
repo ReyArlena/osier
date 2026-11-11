@@ -14,6 +14,7 @@ use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 
 impl Osier {
+    /// The Stashes tab: its rows are built only while on screen (`crate::lazy_list`).
     pub(crate) fn render_stashes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(project) = self.active_project() else {
             return self
@@ -70,135 +71,156 @@ impl Osier {
                 .child(self.empty_state("No stashes", "Stashed changes will show up here.", cx))
                 .into_any_element();
         }
-        let mut list = v_flex()
-            .flex_1()
-            .min_h_0()
-            .id("stash-list")
-            .overflow_y_scrollbar();
-        for s in &snapshot.stashes {
-            let index = s.index;
-            let message = s.message.clone();
-            let weak = cx.entity().downgrade();
-            let menu_message = message.clone();
-            let menu =
-                move |menu: gpui_kit::component::menu::PopupMenu,
-                      _: &mut Window,
-                      _: &mut Context<gpui_kit::component::menu::PopupMenu>| {
-                    let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
-                    let m = menu_message.clone();
-                    menu.item(
-                        row_actions::menu_item("Apply", row_actions::RowKind::Apply).on_click(
-                            move |_, window, cx| {
-                                let _ = w1.update(cx, |this, cx| {
-                                    this.stash_apply(index, false, window, cx)
-                                });
-                            },
-                        ),
-                    )
-                    .item(
-                        row_actions::menu_item("Pop", row_actions::RowKind::Pop).on_click(
-                            move |_, window, cx| {
-                                let _ = w2.update(cx, |this, cx| {
-                                    this.stash_apply(index, true, window, cx)
-                                });
-                            },
-                        ),
-                    )
-                    .separator()
-                    .item(
-                        row_actions::menu_item("Drop…", row_actions::RowKind::Delete).on_click(
-                            move |_, window, cx| {
-                                let _ = w3.update(cx, |this, cx| {
-                                    this.confirm_stash_drop(index, m.clone(), window, cx)
-                                });
-                            },
-                        ),
-                    )
-                };
-            list = list.child(
-                h_flex()
-                    .id(("stash", s.index))
-                    .cursor_pointer()
-                    .when(
-                        self.stash_selected.as_deref() == Some(s.oid.as_str()),
-                        |this| this.bg(cx.theme().list_active),
-                    )
-                    .on_click(cx.listener({
-                        let oid = s.oid.clone();
-                        move |this, _, _, cx| this.select_stash(oid.clone(), cx)
-                    }))
-                    .test_id(|| format!("stash-row:{}", s.index))
-                    .a11y_row(
-                        || format!("{} {}", s.selector, s.message),
-                        self.stash_selected.as_deref() == Some(s.oid.as_str()),
-                    )
-                    .group("row")
-                    .px_3()
-                    .py_1p5()
-                    .gap_2()
-                    .items_center()
-                    .hover(|this| this.bg(cx.theme().list_hover))
-                    .child(Icon::new(Lucide::Archive).xsmall())
-                    .child(div().text_xs().text_color(muted).child(s.selector.clone()))
-                    .child(
-                        div()
-                            .text_sm()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(s.message.clone()),
-                    )
-                    .child(
-                        super::relative_time_label(("stash-time", s.index), s.created_at, cx)
-                            .text_xs()
-                            .text_color(muted),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .invisible()
-                            .group_hover("row", |this| this.visible())
-                            .child(
-                                Button::new(("stash-apply", index))
-                                    .ghost()
-                                    .xsmall()
-                                    .label("Apply")
-                                    .a11y_name(|| format!("Apply {}", s.selector))
-                                    .tooltip("Apply and keep the stash")
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.stash_apply(index, false, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new(("stash-pop", index))
-                                    .ghost()
-                                    .xsmall()
-                                    .label("Pop")
-                                    .a11y_name(|| format!("Pop {}", s.selector))
-                                    .tooltip("Apply and drop the stash")
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.stash_apply(index, true, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new(("stash-drop", index))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(Lucide::Trash)
-                                    .tooltip("Drop")
-                                    .a11y_name(|| format!("Drop {}", s.selector))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.confirm_stash_drop(index, message.clone(), window, cx)
-                                    })),
-                            ),
-                    )
-                    .context_menu(menu),
-            );
-        }
+        let oids: Vec<&String> = snapshot.stashes.iter().map(|s| &s.oid).collect();
+        let selected = self
+            .stash_selected
+            .as_ref()
+            .and_then(|sel| oids.iter().position(|o| *o == sel));
+        let state = self.stashes_list.sync(&oids, selected);
+
         v_flex()
             .size_full()
             .child(header)
-            .child(list)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        crate::lazy_list::rows(
+                            state.clone(),
+                            cx.processor(|this, ix: usize, _, cx| this.render_stash_row(ix, cx)),
+                        )
+                        .size_full(),
+                    )
+                    .vertical_scrollbar(&state),
+            )
+            .into_any_element()
+    }
+
+    /// One stash row, built only while it is on screen (`crate::lazy_list`).
+    fn render_stash_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(s) = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|snap| snap.stashes.get(ix))
+        else {
+            return div().into_any_element();
+        };
+        let muted = cx.theme().muted_foreground;
+
+        let index = s.index;
+        let message = s.message.clone();
+        let weak = cx.entity().downgrade();
+        let menu_message = message.clone();
+        let menu = move |menu: gpui_kit::component::menu::PopupMenu,
+                         _: &mut Window,
+                         _: &mut Context<gpui_kit::component::menu::PopupMenu>| {
+            let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+            let m = menu_message.clone();
+            menu.item(
+                row_actions::menu_item("Apply", row_actions::RowKind::Apply).on_click(
+                    move |_, window, cx| {
+                        let _ =
+                            w1.update(cx, |this, cx| this.stash_apply(index, false, window, cx));
+                    },
+                ),
+            )
+            .item(
+                row_actions::menu_item("Pop", row_actions::RowKind::Pop).on_click(
+                    move |_, window, cx| {
+                        let _ = w2.update(cx, |this, cx| this.stash_apply(index, true, window, cx));
+                    },
+                ),
+            )
+            .separator()
+            .item(
+                row_actions::menu_item("Drop…", row_actions::RowKind::Delete).on_click(
+                    move |_, window, cx| {
+                        let _ = w3.update(cx, |this, cx| {
+                            this.confirm_stash_drop(index, m.clone(), window, cx)
+                        });
+                    },
+                ),
+            )
+        };
+
+        h_flex()
+            .id(("stash", s.index))
+            .cursor_pointer()
+            .when(
+                self.stash_selected.as_deref() == Some(s.oid.as_str()),
+                |this| this.bg(cx.theme().list_active),
+            )
+            .on_click(cx.listener({
+                let oid = s.oid.clone();
+                move |this, _, _, cx| this.select_stash(oid.clone(), cx)
+            }))
+            .test_id(|| format!("stash-row:{}", s.index))
+            .a11y_row(
+                || format!("{} {}", s.selector, s.message),
+                self.stash_selected.as_deref() == Some(s.oid.as_str()),
+            )
+            .group("row")
+            .px_3()
+            .py_1p5()
+            .gap_2()
+            .items_center()
+            .hover(|this| this.bg(cx.theme().list_hover))
+            .child(Icon::new(Lucide::Archive).xsmall())
+            .child(div().text_xs().text_color(muted).child(s.selector.clone()))
+            .child(
+                div()
+                    .text_sm()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(s.message.clone()),
+            )
+            .child(
+                super::relative_time_label(("stash-time", s.index), s.created_at, cx)
+                    .text_xs()
+                    .text_color(muted),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .invisible()
+                    .group_hover("row", |this| this.visible())
+                    .child(
+                        Button::new(("stash-apply", index))
+                            .ghost()
+                            .xsmall()
+                            .label("Apply")
+                            .a11y_name(|| format!("Apply {}", s.selector))
+                            .tooltip("Apply and keep the stash")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.stash_apply(index, false, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new(("stash-pop", index))
+                            .ghost()
+                            .xsmall()
+                            .label("Pop")
+                            .a11y_name(|| format!("Pop {}", s.selector))
+                            .tooltip("Apply and drop the stash")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.stash_apply(index, true, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new(("stash-drop", index))
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::Trash)
+                            .tooltip("Drop")
+                            .a11y_name(|| format!("Drop {}", s.selector))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.confirm_stash_drop(index, message.clone(), window, cx)
+                            })),
+                    ),
+            )
+            .context_menu(menu)
             .into_any_element()
     }
 }

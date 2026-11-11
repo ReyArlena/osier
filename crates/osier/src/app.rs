@@ -382,6 +382,20 @@ pub struct Osier {
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
+    /// The parts of the window that redraw on their own (`crate::pane`).
+    pub(crate) panes: panes::Panes,
+    /// The Branches tab's list (`crate::lazy_list`).
+    pub(crate) branches_list: crate::lazy_list::LazyList,
+    /// The Log tab's reflog list.
+    pub(crate) reflog_list: crate::lazy_list::LazyList,
+    /// The bottom panel's git command list.
+    pub(crate) command_log_list: crate::lazy_list::LazyList,
+    /// The bottom panel's notification list.
+    pub(crate) notices_list: crate::lazy_list::LazyList,
+    /// The Stashes tab's list.
+    pub(crate) stashes_list: crate::lazy_list::LazyList,
+    /// The Patches tab's list.
+    pub(crate) patches_list: crate::lazy_list::LazyList,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -654,6 +668,13 @@ impl Osier {
             prefix_timeout,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
+            panes: panes::Panes::new(&cx.entity(), cx),
+            branches_list: Default::default(),
+            reflog_list: Default::default(),
+            command_log_list: Default::default(),
+            notices_list: Default::default(),
+            stashes_list: Default::default(),
+            patches_list: Default::default(),
             _subscriptions: vec![
                 message_subscription,
                 filter_subscription,
@@ -963,7 +984,6 @@ impl Render for Osier {
                 }
             });
         }
-        let has_project = self.active.is_some();
         let merge_fills = self.diff_expanded;
         let mut root = v_flex()
             .track_focus(&self.focus_handle)
@@ -1145,13 +1165,13 @@ impl Render for Osier {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.render_title_bar(cx))
+            .child(crate::pane::live(&self.panes.title_bar))
             .child(
                 div().flex_1().min_h_0().child(
                     h_flex()
                         .size_full()
                         .when(self.sidebar_visible && !merge_fills, |this| {
-                            this.child(self.render_sidebar(window, cx))
+                            this.child(self.render_sidebar_frame(window, cx))
                         })
                         .child(
                             v_flex()
@@ -1163,7 +1183,7 @@ impl Render for Osier {
                                         div()
                                             .flex_1()
                                             .min_h_0()
-                                            .child(self.render_diff_pane(window, cx)),
+                                            .child(crate::pane::cached(&self.panes.diff, window)),
                                     )
                                 })
                                 .when(!merge_fills, |this| {
@@ -1199,18 +1219,21 @@ impl Render for Osier {
                                             .child(
                                                 resizable_panel()
                                                     .size_range(px(240.)..px(4000.))
-                                                    .child(self.render_diff_pane(window, cx)),
+                                                    .child(crate::pane::cached(
+                                                        &self.panes.diff,
+                                                        window,
+                                                    )),
                                             ),
                                     ),
                                 )
                                 })
                                 .when(self.command_log_visible, |this| {
-                                    this.child(self.render_bottom_panel(window, cx))
+                                    this.child(self.render_bottom_panel_frame(window, cx))
                                 }),
                         ),
                 ),
             )
-            .child(self.render_status_bar(has_project, cx))
+            .child(crate::pane::live(&self.panes.status_bar))
     }
 }
 

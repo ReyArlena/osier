@@ -1,6 +1,8 @@
 //! The project sidebar: scanning, the filter box and its suggestions, the pinned and recent
 //! lists, reordering.
 
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use gpui_kit::*;
@@ -112,24 +114,30 @@ impl Osier {
 
     /// Recents and scanned repositories that are not open or pinned, with their scan
     /// directory when one provides them.
+    ///
+    /// Runs on every redraw of the sidebar with hundreds of scanned repositories, so
+    /// membership is checked through hash sets: comparing paths walks their components, and
+    /// checking each repository against every listed one was most of a sidebar hover's time
+    /// (5.5 ms of a hover with ~480 projects, 2026-11-11).
     pub(crate) fn recent_matching(&self, query: &Query) -> Vec<(PathBuf, Option<PathBuf>)> {
+        // Keyed by the raw path bytes: hashing a `Path` walks its components too. The paths
+        // all come from Osier's own state and scans, so they are spelled alike.
+        let open: HashSet<&OsStr> = self
+            .state
+            .open_projects
+            .iter()
+            .map(|p| p.as_os_str())
+            .collect();
+        let pinned: HashSet<&OsStr> = self.state.pinned.iter().map(|p| p.as_os_str()).collect();
+        // Recents first, then scanned repositories that are not recents already.
+        let mut seen: HashSet<&OsStr> = HashSet::new();
         let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
-        for p in self.state.recent_not_open() {
-            if self.state.is_pinned(p) {
+        for p in self.state.recent.iter().chain(self.scanned()) {
+            let path = p.as_os_str();
+            if open.contains(path) || pinned.contains(path) || !seen.insert(path) {
                 continue;
             }
             if query.matches(p, self.other_row_status(p)) {
-                let provider =
-                    osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
-                out.push((p.clone(), provider));
-            }
-        }
-        for p in self.scanned() {
-            if !self.state.open_projects.contains(p)
-                && !self.state.is_pinned(p)
-                && !out.iter().any(|(q, _)| q == p)
-                && query.matches(p, self.other_row_status(p))
-            {
                 let provider =
                     osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
                 out.push((p.clone(), provider));

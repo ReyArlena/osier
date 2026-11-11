@@ -6,10 +6,29 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The line under the pointer is highlighted in every code editor: the file viewer, the edit
+  pane and the three panes of the merge tool.
+
 ### Changed
 
 - GitHub release notes list every commit in the release, grouped by type, above the list of
   pull requests.
+- Hovering list rows redraws only the part of the window under the pointer (the list, the
+  sidebar, the diff, the commit details and the bottom panel each redraw on their own), so
+  the hover highlight keeps up with the mouse: on the Log tab a hover now takes about a third
+  less time to draw.
+- The Branches tab builds only the rows on screen, so long lists of branches and tags stay
+  quick to hover and scroll, and moving the selection with the arrow keys scrolls it into
+  view.
+- The reflog, the Stashes and Patches tabs, the git command log and the notification list
+  also build only the rows on screen. Moving through stashes with the arrow keys scrolls the
+  selected one into view.
+- The project sidebar stays quick with hundreds of projects (scan directories): it builds
+  only the rows on screen, and listing recent and scanned projects no longer compares every
+  project with every other on each redraw. A hover over a sidebar with ~480 projects went from
+  5.5 ms to 1.9 ms to draw.
 
 ## [0.3.0] - 2026-11-11
 

@@ -136,10 +136,11 @@ impl Osier {
         } else if let Some(editor) = &self.editor {
             // No border of its own: the header's bottom border already separates it, and a
             // second line under it reads as one thick rule.
-            Editor::new(&editor.state)
-                .bordered(false)
-                .size_full()
-                .into_any_element()
+            crate::editor_hover::hover_lines(
+                Editor::new(&editor.state).bordered(false).size_full(),
+                &editor.state,
+                cx,
+            )
         } else if three_way {
             match self.merge_view(window, cx) {
                 Ok(Some(view)) => view.into_any_element(),
@@ -991,21 +992,21 @@ impl Osier {
                 )
                 .into_any_element(),
             Some(Viewer::Code { .. }) => match &editor {
-                Some(state) => Editor::new(state)
-                    .readonly(true)
-                    .bordered(false)
-                    .size_full()
-                    .into_any_element(),
+                Some(state) => crate::editor_hover::hover_lines(
+                    Editor::new(state).readonly(true).bordered(false).size_full(),
+                    state,
+                    cx,
+                ),
                 None => div().into_any_element(),
             },
             Some(Viewer::Markdown { text, .. }) => {
                 if self.markdown_as_code {
                     match &editor {
-                        Some(state) => Editor::new(state)
-                            .readonly(true)
-                            .bordered(false)
-                            .size_full()
-                            .into_any_element(),
+                        Some(state) => crate::editor_hover::hover_lines(
+                            Editor::new(state).readonly(true).bordered(false).size_full(),
+                            state,
+                            cx,
+                        ),
                         None => div().into_any_element(),
                     }
                 } else {

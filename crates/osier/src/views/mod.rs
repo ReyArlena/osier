@@ -68,20 +68,20 @@ pub(crate) fn relative_time_label(id: impl Into<ElementId>, unix: i64, cx: &App)
 }
 
 impl Osier {
+    /// The center column (shell, not a pane): list focus and keys around the tab strip and
+    /// the active tab, both panes (`crate::pane`). The Log tab adds the commit details pane.
     pub(crate) fn render_center(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let tabs = self.visible_tabs();
-        let active_ix = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
-        // Measured on the previous frame; the canvas below re-renders when it changes.
-        let tab_edges = tab_strip_edges(&self.tab_scroll);
-        let tabs_overflow = tab_edges.overflow;
-        let changes = self
-            .active_project()
-            .and_then(|p| p.snapshot.as_ref())
-            .map_or(0, |s| s.status.entries.len());
+    ) -> AnyElement {
+        let tab = crate::pane::cached(&self.panes.tab, window);
+        let body = if self.tab == Tab::Log && self.log_shows_details() {
+            let details = crate::pane::cached(&self.panes.commit_details, window);
+            self.with_commit_details(tab, details, cx)
+        } else {
+            tab
+        };
         v_flex()
             .id("center")
             .size_full()
@@ -101,6 +101,24 @@ impl Osier {
                     }
                 }),
             )
+            .child(crate::pane::live(&self.panes.tab_strip))
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
+    /// The tab strip (a pane): the in-progress bar when one is shown, then the tabs.
+    pub(crate) fn render_tab_strip(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = self.visible_tabs();
+        let active_ix = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
+        // Measured on the previous frame; the canvas below re-renders when it changes.
+        let tab_edges = tab_strip_edges(&self.tab_scroll);
+        let tabs_overflow = tab_edges.overflow;
+        let changes = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map_or(0, |s| s.status.entries.len());
+        v_flex()
+            .w_full()
             .when_some(self.in_progress(), |this, op| {
                 this.child(self.render_in_progress_bar(op, cx))
             })
@@ -179,15 +197,20 @@ impl Osier {
                     )))
                 })
             })
-            .child(div().flex_1().min_h_0().child(match self.tab {
-                Tab::Changes => self.render_changes(cx).into_any_element(),
-                Tab::Log => self.render_log(window, cx).into_any_element(),
-                Tab::Branches => self.render_branches(cx).into_any_element(),
-                Tab::Stashes => self.render_stashes(cx).into_any_element(),
-                Tab::Files => self.render_files(cx).into_any_element(),
-                Tab::Patches => self.render_patches(cx).into_any_element(),
-                Tab::Config => self.render_repo_config_tab(cx),
-            }))
+            .into_any_element()
+    }
+
+    /// The active tab's content (a pane).
+    pub(crate) fn render_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        match self.tab {
+            Tab::Changes => self.render_changes(cx).into_any_element(),
+            Tab::Log => self.render_log(window, cx).into_any_element(),
+            Tab::Branches => self.render_branches(cx).into_any_element(),
+            Tab::Stashes => self.render_stashes(cx).into_any_element(),
+            Tab::Files => self.render_files(cx).into_any_element(),
+            Tab::Patches => self.render_patches(cx).into_any_element(),
+            Tab::Config => self.render_repo_config_tab(cx),
+        }
     }
 
     /// Bar shown while a merge, rebase, cherry-pick or revert waits for the user.
