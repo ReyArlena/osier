@@ -55,7 +55,7 @@ gpui-pre = { version = "=0.3.11", optional = true, default-features = false }
 # The desktop's light/dark preference, read directly so "no preference" can be told apart from
 # "prefer light" (gpui reports both as light). Same crate and features gpui's Linux platform uses.
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
+ashpd = { version = "0.14", default-features = false, features = ["async-io", "settings"] }
 futures-util = { version = "0.3", default-features = false }
 
 [features]
