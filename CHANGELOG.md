@@ -17,6 +17,8 @@ All notable changes to Osier are documented here. The format follows
 - The Branches tab builds only the rows on screen, so long lists of branches and tags stay
   quick to hover and scroll, and moving the selection with the arrow keys scrolls it into
   view.
+- The reflog, the git command log and the notification list also build only the rows on
+  screen.
 
 ## [0.3.0] - 2026-11-11
 

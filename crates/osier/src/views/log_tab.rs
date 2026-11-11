@@ -594,108 +594,16 @@ impl Osier {
             .into_any_element()
     }
 
+    /// The reflog, in place of the Log list: its rows are built only while on screen.
     fn render_reflog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let menu_buttons = self.settings.appearance.row_menu_buttons;
         use gpui_kit::component::scroll::ScrollableElement as _;
         let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let mono = cx.theme().mono_font_family.clone();
-        let owner = cx.entity().downgrade();
-        let mut list = v_flex()
-            .flex_1()
-            .min_h_0()
-            .id("reflog-list")
-            .overflow_y_scrollbar();
-        for (ix, e) in snapshot.reflog.iter().enumerate() {
-            let hash = e.hash.clone();
-            let o = owner.clone();
-            let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
-                let (h1, h2, h3, h4) = (hash.clone(), hash.clone(), hash.clone(), hash.clone());
-                let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
-                menu.item(PopupMenuItem::new("Check out (detached)").on_click(
-                    move |_, window, cx| {
-                        let _ =
-                            o1.update(cx, |this, cx| this.checkout_commit(h1.clone(), window, cx));
-                    },
-                ))
-                .item(
-                    PopupMenuItem::new("New branch here…").on_click(move |_, window, cx| {
-                        let _ = o2.update(cx, |this, cx| {
-                            this.prompt_new_branch(Some(h2.clone()), window, cx)
-                        });
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("Reset current branch here (hard)…").on_click(
-                        move |_, window, cx| {
-                            let _ = o3.update(cx, |this, cx| {
-                                this.confirm_reset(h3.clone(), ResetMode::Hard, window, cx)
-                            });
-                        },
-                    ),
-                )
-                .separator()
-                .item(
-                    PopupMenuItem::new("Copy hash").on_click(move |_, window, cx| {
-                        let _ = o4.update(cx, |this, cx| {
-                            this.copy_to_clipboard(h4.clone(), window, cx)
-                        });
-                    }),
-                )
-            });
-            list = list.child(
-                h_flex()
-                    .id(("reflog", ix))
-                    .a11y_item(|| format!("{} {}", e.selector, e.message))
-                    .px_3()
-                    .py_1p5()
-                    .gap_3()
-                    .items_center()
-                    .hover(|this| this.bg(cx.theme().list_hover))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .w(px(80.))
-                            .flex_none()
-                            .child(e.selector.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(e.message.clone()),
-                    )
-                    .child(
-                        super::relative_time_label(("reflog-time", ix), e.at, cx)
-                            .text_xs()
-                            .text_color(muted)
-                            .flex_none(),
-                    )
-                    .child(
-                        div()
-                            .font_family(mono.clone())
-                            .text_xs()
-                            .text_color(muted)
-                            .flex_none()
-                            .child(e.hash[..7].to_string()),
-                    )
-                    .child(
-                        Button::new(("reflog-menu", ix))
-                            .a11y_name(|| format!("Actions for {}", e.selector))
-                            .when(!menu_buttons, |b| b.hidden())
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::Ellipsis)
-                            .dropdown_menu(row_menu.build()),
-                    )
-                    .context_menu(row_menu.build()),
-            );
-        }
+        let hashes: Vec<&String> = snapshot.reflog.iter().map(|e| &e.hash).collect();
+        let state = self.reflog_list.sync(&hashes, None);
+
         v_flex()
             .size_full()
             .child(
@@ -726,7 +634,121 @@ impl Osier {
                             })),
                     ),
             )
-            .child(list)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        crate::lazy_list::rows(
+                            state.clone(),
+                            cx.processor(|this, ix: usize, _, cx| this.render_reflog_row(ix, cx)),
+                        )
+                        .size_full(),
+                    )
+                    .vertical_scrollbar(&state),
+            )
+            .into_any_element()
+    }
+
+    /// One reflog row, built only while it is on screen (`crate::lazy_list`).
+    fn render_reflog_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let menu_buttons = self.settings.appearance.row_menu_buttons;
+        let Some(e) = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|s| s.reflog.get(ix))
+        else {
+            return div().into_any_element();
+        };
+        let muted = cx.theme().muted_foreground;
+        let mono = cx.theme().mono_font_family.clone();
+        let owner = cx.entity().downgrade();
+
+        let hash = e.hash.clone();
+        let o = owner.clone();
+        let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
+            let (h1, h2, h3, h4) = (hash.clone(), hash.clone(), hash.clone(), hash.clone());
+            let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
+            menu.item(
+                PopupMenuItem::new("Check out (detached)").on_click(move |_, window, cx| {
+                    let _ = o1.update(cx, |this, cx| this.checkout_commit(h1.clone(), window, cx));
+                }),
+            )
+            .item(
+                PopupMenuItem::new("New branch here…").on_click(move |_, window, cx| {
+                    let _ = o2.update(cx, |this, cx| {
+                        this.prompt_new_branch(Some(h2.clone()), window, cx)
+                    });
+                }),
+            )
+            .item(
+                PopupMenuItem::new("Reset current branch here (hard)…").on_click(
+                    move |_, window, cx| {
+                        let _ = o3.update(cx, |this, cx| {
+                            this.confirm_reset(h3.clone(), ResetMode::Hard, window, cx)
+                        });
+                    },
+                ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new("Copy hash").on_click(move |_, window, cx| {
+                    let _ = o4.update(cx, |this, cx| {
+                        this.copy_to_clipboard(h4.clone(), window, cx)
+                    });
+                }),
+            )
+        });
+
+        h_flex()
+            .id(("reflog", ix))
+            .test_id(|| format!("reflog-row:{ix}"))
+            .a11y_item(|| format!("{} {}", e.selector, e.message))
+            .px_3()
+            .py_1p5()
+            .gap_3()
+            .items_center()
+            .hover(|this| this.bg(cx.theme().list_hover))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .w(px(80.))
+                    .flex_none()
+                    .child(e.selector.clone()),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(e.message.clone()),
+            )
+            .child(
+                super::relative_time_label(("reflog-time", ix), e.at, cx)
+                    .text_xs()
+                    .text_color(muted)
+                    .flex_none(),
+            )
+            .child(
+                div()
+                    .font_family(mono.clone())
+                    .text_xs()
+                    .text_color(muted)
+                    .flex_none()
+                    .child(e.hash[..7].to_string()),
+            )
+            .child(
+                Button::new(("reflog-menu", ix))
+                    .a11y_name(|| format!("Actions for {}", e.selector))
+                    .when(!menu_buttons, |b| b.hidden())
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Ellipsis)
+                    .dropdown_menu(row_menu.build()),
+            )
+            .context_menu(row_menu.build())
             .into_any_element()
     }
 }

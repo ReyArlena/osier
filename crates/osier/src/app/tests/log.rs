@@ -581,3 +581,22 @@ fn tags_compare_picks_and_view_at_head(cx: &mut TestAppContext) {
         other => panic!("unexpected viewer {other:?}"),
     });
 }
+
+#[gpui::test]
+fn ui_reflog_lists_entries_and_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    for i in 0..120 {
+        repo.commit_file("a.txt", &format!("{i}\n"), &format!("commit {i}"));
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-log");
+    h.click(cx, "toggle-reflog");
+    assert!(h.bounds(cx, "reflog-row:0").is_some(), "newest entry drawn");
+    assert!(
+        h.bounds(cx, "reflog-row:119").is_none(),
+        "entries below the fold are not built"
+    );
+    h.click(cx, "close-reflog");
+    assert!(h.bounds(cx, "reflog-row:0").is_none());
+    assert!(h.bounds(cx, "log-row:0").is_some());
+}
