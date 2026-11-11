@@ -69,10 +69,15 @@ fn run_window<V: Render + 'static>(
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 cx.new(|cx| build(window, cx))
             });
-            if let Err(error) = opened {
-                eprintln!("osier: cannot open a window: {error}");
-                std::process::exit(2);
-            }
+            let _window = match opened {
+                Ok((window, _)) => window,
+                Err(error) => {
+                    eprintln!("osier: cannot open a window: {error}");
+                    std::process::exit(2);
+                }
+            };
+            #[cfg(feature = "profiler")]
+            crate::profiling::start(_window, cx);
             cx.on_window_closed(move |cx, _| {
                 if cx.windows().is_empty() {
                     std::process::exit(closed_code);
