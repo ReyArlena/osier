@@ -1,30 +1,35 @@
 //! The settings sheet, built on gpui-kit's `Settings` component. Fields read from and write
 //! to `Osier::settings` through the entity; every write saves `config.toml` and re-applies.
+//! One child module per page; this file holds the sheet, the shared helpers and `SettingsTarget`.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
+use gpui_kit::component::group_box::GroupBoxVariant;
 use gpui_kit::component::setting::{
-    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
-    Settings as SettingsView,
+    SelectIndex, SettingGroup, SettingItem, SettingPage, Settings as SettingsView,
 };
-use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, h_flex, v_flex,
-};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::*;
 use osier_config::Settings;
-use osier_config::settings::ThemeMode;
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::runtime_info::RuntimeInfo;
 use crate::test_ids::TestId as _;
-use crate::themes::ThemeStore;
+
+mod about;
+mod accounts;
+mod appearance;
+mod diff;
+mod editors;
+mod git;
+mod keymap;
+mod projects;
 
 fn get<T: 'static>(
     view: &Entity<Osier>,
@@ -72,6 +77,41 @@ fn kv(label: &str, value: impl Into<SharedString>, cx: &App) -> impl IntoElement
                 .text_sm()
                 .font_family(cx.theme().mono_font_family.clone())
                 .child(value.into()),
+        )
+}
+
+/// The settings title bar: the app's chrome colour (like the main title bar), the page
+/// area below stays the content colour, so the two read as separate surfaces.
+fn header(radius: Pixels, root_focus: FocusHandle, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    h_flex()
+        .flex_none()
+        .h(px(48.))
+        .pl_4()
+        .pr_2()
+        .gap_2()
+        .items_center()
+        .bg(theme.title_bar)
+        .border_b_1()
+        .border_color(theme.border)
+        .rounded_t(radius)
+        .child(
+            Icon::new(Lucide::Settings)
+                .small()
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().flex_1().font_semibold().child("Settings"))
+        .child(
+            Button::new("settings-close")
+                .test_id("settings-close")
+                .ghost()
+                .small()
+                .icon(Lucide::X)
+                .tooltip("Close")
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    root_focus.focus(window, cx);
+                }),
         )
 }
 
@@ -131,59 +171,101 @@ impl Osier {
     ) {
         self.settings_target = target;
         self.load_gh_accounts(cx);
-        self.ssh_status = Some(osier_auth::ssh::status());
+        // `ssh-add -l` is a process: in the background, so a slow agent cannot hold up the
+        // dialog. The Accounts page shows the last answer (or "checking…") until it is back.
+        cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_spawn(async { osier_auth::ssh::status() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.ssh_status = Some(status);
+                this.redraw_settings(cx);
+            });
+        })
+        .detach();
         if self.git_version.is_none() {
             self.git_version = osier_git::GitVersion::detect(&self.runner)
                 .ok()
                 .map(|v| v.to_string());
         }
-        // Asks the package managers who owns the binary; once per run is enough.
-        let _ = self.install_route();
+        self.detect_install_route(cx);
+        self.detect_editors(cx);
         let view = cx.entity();
+        let redraw = self.settings_redraw.clone();
         let focus = self.settings_focus.clone();
         let root_focus = self.focus_handle.clone();
-        window.open_dialog(cx, move |dialog, window, _| {
+        window.open_app_dialog(cx, move |dialog, window, _| {
             // Sized from the window each time the layer is built, so it follows resizes.
             let viewport = window.viewport_size();
             let width = (viewport.width * 0.9).min(px(1100.));
             let height = (viewport.height * 0.8).min(px(820.));
+            let (view, focus, redraw) = (view.clone(), focus.clone(), redraw.clone());
+            let close_focus = root_focus.clone();
             let root_focus = root_focus.clone();
-            let (view, focus) = (view.clone(), focus.clone());
             dialog
-                .title("Settings")
                 .w(width)
                 .centered()
+                // No padding and no stock title: the header bar and the settings sidebar run
+                // to the dialog's edges, like the title bar and sidebar of the main window.
+                .p_0()
+                .close_button(false)
                 .overlay_closable(true)
                 // Put focus back on the app so shortcuts keep working after closing.
                 .on_close(move |_, window, cx| root_focus.focus(window, cx))
                 .content(move |content, window, cx| {
+                    // Registers the read, so `redraw_settings` reaches this dialog.
+                    redraw.read(cx);
                     let pages = pages(&view, window, cx);
+                    // Inside the dialog's 1px border, so one pixel less than its radius.
+                    let radius = (cx.theme().radius_lg - px(1.)).max(px(0.));
+                    let mut sidebar_style = StyleRefinement::default();
+                    sidebar_style = sidebar_style.rounded_bl(radius);
+                    let settings = SettingsView::new("osier-settings")
+                        .with_group_variant(GroupBoxVariant::Fill)
+                        .sidebar_style(&sidebar_style)
+                        .pages(pages);
+                    let settings = match target {
+                        Some(t) => settings.default_selected_index(SelectIndex {
+                            page_ix: t.page,
+                            group_ix: Some(t.group),
+                        }),
+                        None => settings,
+                    };
                     content.child(
-                        div()
+                        v_flex()
                             .w_full()
                             .h(height)
-                            .track_focus(&focus)
-                            .key_context("OsierSettings")
-                            .on_action({
-                                let focus = focus.clone();
-                                // `/`: the settings page's own search box. It lives inside
-                                // gpui-kit's component, out of reach, but it is the first tab
-                                // stop after this container.
-                                move |_: &crate::app::FocusSettingsSearch, window, cx| {
-                                    focus.focus(window, cx);
-                                    window.focus_next(cx);
-                                }
-                            })
                             .test_id("settings-dialog")
-                            .child(match target {
-                                Some(t) => SettingsView::new("osier-settings")
-                                    .pages(pages)
-                                    .default_selected_index(SelectIndex {
-                                        page_ix: t.page,
-                                        group_ix: Some(t.group),
-                                    }),
-                                None => SettingsView::new("osier-settings").pages(pages),
-                            }),
+                            .child(header(radius, close_focus.clone(), cx))
+                            .child(
+                                // The header's close button stays outside this container, so
+                                // the search box is still the first tab stop after it.
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .track_focus(&focus)
+                                    .key_context("OsierSettings")
+                                    .on_action({
+                                        // The settings shortcut again closes settings, as
+                                        // Escape does (and puts focus back on the app).
+                                        let root_focus = close_focus.clone();
+                                        move |_: &crate::app::OpenSettings, window, cx| {
+                                            window.close_dialog(cx);
+                                            root_focus.focus(window, cx);
+                                        }
+                                    })
+                                    .on_action({
+                                        let focus = focus.clone();
+                                        // `/`: the settings page's own search box. It lives
+                                        // inside gpui-kit's component, out of reach, but it
+                                        // is the first tab stop after this container.
+                                        move |_: &crate::app::FocusSettingsSearch, window, cx| {
+                                            focus.focus(window, cx);
+                                            window.focus_next(cx);
+                                        }
+                                    })
+                                    .child(settings),
+                            ),
                     )
                 })
         });
@@ -192,6 +274,34 @@ impl Osier {
         // it, so move focus in once the layer exists.
         let focus = self.settings_focus.clone();
         window.defer(cx, move |window, cx| focus.focus(window, cx));
+    }
+
+    /// Redraw the settings dialog without invalidating the cached main view: for values only
+    /// settings shows. The dialog reads `settings_redraw` while it renders, so notifying that
+    /// entity redraws the window, and the main view (which never read it) keeps its frame.
+    pub(crate) fn redraw_settings(&self, cx: &mut App) {
+        self.settings_redraw.update(cx, |_, cx| cx.notify());
+    }
+
+    /// Ask the package managers who owns the binary, once per run, in the background: a
+    /// `pacman -Qqo` takes 0.2-0.7s, which on the UI thread stalled the first settings open.
+    /// The About page shows "checking…" until it is known.
+    fn detect_install_route(&mut self, cx: &mut Context<Self>) {
+        if self.updates.route.is_some() || self.install_route_pending {
+            return;
+        }
+        self.install_route_pending = true;
+        cx.spawn(async move |this, cx| {
+            let route = cx
+                .background_spawn(async { crate::install_route::InstallRoute::detect() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.install_route_pending = false;
+                this.updates.route.get_or_insert(route);
+                this.redraw_settings(cx);
+            });
+        })
+        .detach();
     }
 
     /// Save and re-apply after any settings change (panel, config reload).
@@ -209,12 +319,26 @@ impl Osier {
     }
 
     /// Re-read `config.toml` after it changed on disk. Returns true when settings differ.
+    /// Blocking read: the file watcher goes through `poll_config`, which reads in the
+    /// background and applies with [`Osier::apply_reloaded_settings`].
+    #[cfg(test)]
     pub(crate) fn reload_settings_from_disk(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match Settings::load(&self.paths) {
+        let loaded = Settings::load(&self.paths);
+        self.apply_reloaded_settings(loaded, window, cx)
+    }
+
+    /// Take settings read from `config.toml`. Returns true when they differ from the current.
+    pub(crate) fn apply_reloaded_settings(
+        &mut self,
+        loaded: Result<Settings, osier_config::ConfigError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match loaded {
             Ok(fresh) if fresh != self.settings => {
                 let old_scan_dirs = std::mem::replace(&mut self.settings, fresh)
                     .projects
@@ -231,17 +355,27 @@ impl Osier {
                     .min(crate::app::TOOLTIP_DELAY_MAX_MS) as f32;
                 self.tooltip_delay
                     .update(cx, |s, cx| s.set_value(tooltip_ms, window, cx));
+                let animation_ms = self.settings.appearance.animation_ms.clamp(
+                    crate::system_motion::ANIMATION_MS_MIN,
+                    crate::system_motion::ANIMATION_MS_MAX,
+                ) as f32;
+                self.animation_length
+                    .update(cx, |s, cx| s.set_value(animation_ms, window, cx));
+                let toast_stop =
+                    crate::notices::ToastTime::slider_stop(self.settings.appearance.toast_seconds);
+                self.toast_time
+                    .update(cx, |s, cx| s.set_value(toast_stop as f32, window, cx));
                 self.apply_appearance(cx);
                 self.rescan_projects(cx);
                 self.reload_selection(cx);
-                window.push_notification("Settings reloaded from config.toml", cx);
+                window.push_notice("Settings reloaded from config.toml", cx);
                 cx.notify();
                 true
             }
             Ok(_) => false,
             Err(error) => {
-                window.push_notification(
-                    Notification::error(error.to_string()).title("config.toml has an error"),
+                window.push_notice(
+                    Notice::error(error.to_string()).title("config.toml has an error"),
                     cx,
                 );
                 false
@@ -249,11 +383,25 @@ impl Osier {
         }
     }
 
+    /// The tick loop's check for an outside edit of `config.toml`: read in the background,
+    /// then applied. Returns false: the redraw comes with the result.
     pub(crate) fn poll_config(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        match &self.config_watch {
-            Some(w) if w.take_dirty() => self.reload_settings_from_disk(window, cx),
-            _ => false,
+        if !self.config_watch.as_ref().is_some_and(|w| w.take_dirty()) {
+            return false;
         }
+        let paths = self.paths.clone();
+        self.in_background(
+            crate::background::READING_SETTINGS,
+            move || Settings::load(&paths),
+            |this, loaded, window, cx| {
+                if this.apply_reloaded_settings(loaded, window, cx) {
+                    cx.notify();
+                }
+            },
+            window,
+            cx,
+        );
+        false
     }
 
     pub(crate) fn add_scan_dir_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -321,7 +469,7 @@ impl Osier {
                 let open: Vec<PathBuf> = this.projects.iter().map(|p| p.path.clone()).collect();
                 this.state.recent.retain(|r| open.contains(r));
                 this.save_state();
-                window.push_notification("Recents cleared", cx);
+                window.push_notice("Recents cleared", cx);
                 cx.notify();
             },
             window,
@@ -347,7 +495,11 @@ impl Osier {
         RuntimeInfo::collect(
             Some(&self.paths),
             self.git_version.clone(),
-            self.updates.route.as_ref().map(|r| r.label()),
+            match &self.updates.route {
+                Some(route) => Some(route.label()),
+                None if self.install_route_pending => Some("checking…".into()),
+                None => None,
+            },
         )
     }
 }
@@ -394,8 +546,8 @@ fn highlight_alpha(elapsed: Duration) -> f32 {
     (1. - fade).max(0.)
 }
 
-/// A group that can be flashed by `open_settings_at`. Padding with a matching negative
-/// margin gives the tint room around the text without moving anything.
+/// A group that can be flashed by `open_settings_at`. Side padding with a matching negative
+/// margin gives the tint room around the card without moving anything.
 pub(crate) fn highlightable(
     group: SettingGroup,
     target: SettingsTarget,
@@ -407,8 +559,16 @@ pub(crate) fn highlightable(
         .settings_highlight
         .filter(|(t, _)| *t == target)
         .map_or(0., |(_, since)| highlight_alpha(since.elapsed()));
+    // Sideways only: the page already gives every group its vertical padding, and
+    // overriding it would move this group closer to its neighbours. `w_auto` instead of
+    // the group's full width, so the negative margins widen it on both sides; with full
+    // width they only shift it left and its controls end short of the other groups'.
     let pad = px(10.);
-    let group = group.p(pad).m(-pad).rounded(cx.theme().radius);
+    let group = group
+        .px(pad)
+        .mx(-pad)
+        .w_auto()
+        .rounded(cx.theme().radius_lg);
     if alpha > 0. {
         group.bg(cx.theme().primary.opacity(0.14 * alpha))
     } else {
@@ -442,1567 +602,21 @@ fn pages(view: &Entity<Osier>, window: &mut Window, cx: &mut App) -> Vec<Setting
 }
 
 fn all_pages(view: &Entity<Osier>, _window: &mut Window, cx: &mut App) -> Vec<SettingPage> {
-    vec![
-        appearance_page(view, cx),
-        diff_page(view),
-        git_page(view),
-        editors_page(view),
-        accounts_page(view, cx),
-        projects_page(view, cx),
-        keymap_page(view),
-        about_page(view, cx),
-    ]
-}
-
-/// "Dark theme" / "Light theme" heading over its card picker.
-fn theme_section(title: &'static str, view: &Entity<Osier>, dark: bool, cx: &App) -> AnyElement {
-    v_flex()
-        .w_full()
-        .gap_2()
-        .child(div().text_sm().child(title))
-        .child(crate::theme_cards::theme_picker(view, dark, cx))
-        .into_any_element()
-}
-
-fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
-    let store = ThemeStore::global(cx);
-    let dux_available = store.dux_available();
-    SettingPage::new("Appearance")
-        .icon(Icon::new(Lucide::Palette))
-        .default_open(true)
-        .resettable(true)
-        .group(SettingGroup::new().title("Theme").items(vec![
-                SettingItem::new(
-                    "Follow Dux Shell colours",
-                    SettingField::switch(
-                        {
-                            let v = view.clone();
-                            move |cx: &App| v.read(cx).dux_sync_on(cx)
-                        },
-                        {
-                            let v = view.clone();
-                            move |on: bool, cx: &mut App| {
-                                v.update(cx, |o, cx| o.set_dux_sync(on, cx))
-                            }
-                        },
-                    )
-                    .default_value(dux_available),
-                )
-                .description(if dux_available {
-                    "Take the theme from DankMaterialShell's colours and follow them live. \
-                     Turning it on sets the mode to System; the theme pickers below are off \
-                     while it is on."
-                } else {
-                    "Not detected: no dms-colors.json in the cache directory."
-                })
-                .disabled(!dux_available),
-                SettingItem::new(
-                    "Higher contrast",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.high_contrast),
-                        set(view, |o, v: bool, _| o.settings.appearance.high_contrast = v),
-                    )
-                    .default_value(false),
-                )
-                .description(
-                    "Selections, hovers and the sidebar highlight in a stronger tint of the \
-                     theme's main colour, like the switches.",
-                ),
-                SettingItem::new(
-                    "Show background tasks",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.show_background_tasks),
-                        set(view, |o, v: bool, _| {
-                            o.settings.appearance.show_background_tasks = v
-                        }),
-                    )
-                    .default_value(false),
-                )
-                .description(
-                    "A spinner in the status bar while Osier works quietly: re-reading a project after \
-                     a change, checking project status, loading GitHub lists, diffs and branch \
-                     lookups. Fetch, pull, push, clone and create always show.",
-                ),
-                SettingItem::new(
-                    "Mode",
-                    SettingField::dropdown(
-                        vec![
-                            ("dark".into(), "Dark".into()),
-                            ("light".into(), "Light".into()),
-                            ("system".into(), "System".into()),
-                        ],
-                        get(view, |o| {
-                            match o.settings.appearance.mode {
-                                ThemeMode::Dark => "dark",
-                                ThemeMode::Light => "light",
-                                ThemeMode::System => "system",
-                            }
-                            .into()
-                        }),
-                        set(view, |o, v: SharedString, _| {
-                            o.settings.appearance.mode = match v.as_ref() {
-                                "light" => ThemeMode::Light,
-                                "system" => ThemeMode::System,
-                                _ => ThemeMode::Dark,
-                            }
-                        }),
-                    )
-                    .default_value("dark".to_string()),
-                )
-                .description("System follows the desktop, or Dux Shell when its sync is on."),
-                SettingItem::new(
-                    "When the desktop has no preference",
-                    SettingField::dropdown(
-                        vec![("dark".into(), "Dark".into()), ("light".into(), "Light".into())],
-                        get(view, |o| {
-                            match o.settings.appearance.system_fallback {
-                                osier_config::settings::SystemFallback::Dark => "dark",
-                                osier_config::settings::SystemFallback::Light => "light",
-                            }
-                            .into()
-                        }),
-                        set(view, |o, v: SharedString, _| {
-                            o.settings.appearance.system_fallback = if v.as_ref() == "light" {
-                                osier_config::settings::SystemFallback::Light
-                            } else {
-                                osier_config::settings::SystemFallback::Dark
-                            }
-                        }),
-                    )
-                    .default_value("dark".to_string()),
-                )
-                .description(
-                    "System mode uses this when the desktop states no light or dark preference, \
-                     or has no settings portal.",
-                ),
-                SettingItem::render({
-                    let v = view.clone();
-                    move |_, _, cx| theme_section("Dark theme", &v, true, cx)
-                }),
-                SettingItem::render({
-                    let v = view.clone();
-                    move |_, _, cx| theme_section("Light theme", &v, false, cx)
-                }),
-            ]))
-        .group(
-            SettingGroup::new().title("Sidebar").item(
-                SettingItem::new(
-                    "Uncommitted changes",
-                    SettingField::dropdown(
-                        vec![
-                            ("icon".into(), "Icon colour".into()),
-                            ("dot".into(), "Dot".into()),
-                        ],
-                        get(view, |o| {
-                            match o.settings.appearance.changes_indicator {
-                                osier_config::settings::ChangesIndicator::Icon => "icon",
-                                osier_config::settings::ChangesIndicator::Dot => "dot",
-                            }
-                            .into()
-                        }),
-                        set(view, |o, v: SharedString, _| {
-                            o.settings.appearance.changes_indicator = if v.as_ref() == "dot" {
-                                osier_config::settings::ChangesIndicator::Dot
-                            } else {
-                                osier_config::settings::ChangesIndicator::Icon
-                            }
-                        }),
-                    )
-                    .default_value("icon".to_string()),
-                )
-                .description("How a project with uncommitted changes is marked in the sidebar."),
-            ),
-        )
-        .group(
-            SettingGroup::new()
-                .title("Tooltips")
-                .item(SettingItem::render({
-                    let v = view.clone();
-                    move |options, _, cx| {
-                        let o = v.read(cx);
-                        let ms = o
-                            .settings
-                            .appearance
-                            .tooltip_delay_ms
-                            .min(crate::app::TOOLTIP_DELAY_MAX_MS);
-                        let slider = o.tooltip_delay.clone();
-                        h_flex()
-                            .w_full()
-                            .gap_3()
-                            .items_center()
-                            .child(div().text_sm().flex_none().child("Show after"))
-                            .child(
-                                div().flex_1().child(
-                                    gpui_kit::component::slider::Slider::new(&slider)
-                                        .disabled(options.is_disabled()),
-                                ),
-                            )
-                            .child(div().text_sm().w(px(64.)).flex_none().child(if ms == 0 {
-                                "at once".to_string()
-                            } else {
-                                format!("{ms} ms")
-                            }))
-                    }
-                }))
-                .description(
-                    "How long the pointer rests on a button or control before its tooltip \
-                     appears. Default: at once.",
-                ),
-        )
-        .group(
-            SettingGroup::new().title("Lists").item(
-                SettingItem::new(
-                    "Show menu buttons on rows",
-                    SettingField::switch(
-                        get(view, |o| o.settings.appearance.row_menu_buttons),
-                        set(view, |o, v: bool, _| {
-                            o.settings.appearance.row_menu_buttons = v
-                        }),
-                    )
-                    .default_value(false),
-                )
-                .description(
-                    "Add a ... button to the end of commit, branch, tag, remote, worktree and \
-                     patch rows. Right-clicking a row opens the same menu whether this is on or \
-                     off.",
-                ),
-            ),
-        )
-        .group(
-            SettingGroup::new()
-                .title("Fonts")
-                .description("Leave empty to use the theme's fonts.")
-                .items(vec![
-                    SettingItem::new(
-                        "UI font",
-                        SettingField::input(
-                            get(view, |o| {
-                                o.settings
-                                    .appearance
-                                    .ui_font
-                                    .clone()
-                                    .unwrap_or_default()
-                                    .into()
-                            }),
-                            set(view, |o, v: SharedString, _| {
-                                o.settings.appearance.ui_font = opt_string(v)
-                            }),
-                        )
-                        .default_value(""),
-                    ),
-                    SettingItem::new(
-                        "Monospace font",
-                        SettingField::input(
-                            get(view, |o| {
-                                o.settings
-                                    .appearance
-                                    .mono_font
-                                    .clone()
-                                    .unwrap_or_default()
-                                    .into()
-                            }),
-                            set(view, |o, v: SharedString, _| {
-                                o.settings.appearance.mono_font = opt_string(v)
-                            }),
-                        )
-                        .default_value(""),
-                    ),
-                    SettingItem::new(
-                        "Font size",
-                        SettingField::number_input(
-                            NumberFieldOptions {
-                                min: 0.0,
-                                max: 40.0,
-                                step: 1.0,
-                            },
-                            get(view, |o| {
-                                f64::from(o.settings.appearance.font_size.unwrap_or(0.0))
-                            }),
-                            set(view, |o, v: f64, _| {
-                                o.settings.appearance.font_size = (v > 0.0).then_some(v as f32)
-                            }),
-                        )
-                        .default_value(0.0),
-                    )
-                    .description("0 uses the theme's size."),
-                ]),
-        )
-}
-
-fn diff_page(view: &Entity<Osier>) -> SettingPage {
-    let d = Settings::default().diff;
-    SettingPage::new("Diff")
-        .icon(Icon::new(Lucide::FileDiff))
-        .resettable(true)
-        .group(SettingGroup::new().title("Diff pane").items(vec![
-            SettingItem::new(
-                "Layout",
-                SettingField::dropdown(
-                    vec![
-                        ("unified".into(), "Unified".into()),
-                        ("split".into(), "Split".into()),
-                    ],
-                    get(view, |o| match o.settings.diff.mode {
-                        osier_config::settings::DiffMode::Split => "split".into(),
-                        osier_config::settings::DiffMode::Unified => "unified".into(),
-                    }),
-                    set(view, |o, v: SharedString, _| {
-                        o.settings.diff.mode = if v.as_ref() == "split" {
-                            osier_config::settings::DiffMode::Split
-                        } else {
-                            osier_config::settings::DiffMode::Unified
-                        }
-                    }),
-                )
-                .default_value("unified".to_string()),
-            ),
-            SettingItem::new(
-                "Conflicted files",
-                SettingField::dropdown(
-                    vec![
-                        ("three-way".into(), "3-way merge tool".into()),
-                        ("inline".into(), "Inline conflict blocks".into()),
-                    ],
-                    get(view, |o| match o.settings.diff.conflicts {
-                        osier_config::settings::ConflictView::ThreeWay => "three-way".into(),
-                        osier_config::settings::ConflictView::Inline => "inline".into(),
-                    }),
-                    set(view, |o, v: SharedString, _| {
-                        o.settings.diff.conflicts = if v.as_ref() == "inline" {
-                            osier_config::settings::ConflictView::Inline
-                        } else {
-                            osier_config::settings::ConflictView::ThreeWay
-                        }
-                    }),
-                )
-                .default_value("three-way".to_string()),
-            ),
-            SettingItem::new(
-                "Context lines",
-                SettingField::number_input(
-                    NumberFieldOptions {
-                        min: 0.0,
-                        max: 30.0,
-                        step: 1.0,
-                    },
-                    get(view, |o| f64::from(o.settings.diff.context_lines)),
-                    set(view, |o, v: f64, cx| {
-                        o.settings.diff.context_lines = v.max(0.0) as u32;
-                        o.reload_selection(cx);
-                    }),
-                )
-                .default_value(f64::from(d.context_lines)),
-            ),
-            SettingItem::new(
-                "Line numbers",
-                SettingField::switch(
-                    get(view, |o| o.settings.diff.line_numbers),
-                    set(view, |o, v: bool, _| o.settings.diff.line_numbers = v),
-                )
-                .default_value(d.line_numbers),
-            ),
-            SettingItem::new(
-                "Soft wrap",
-                SettingField::switch(
-                    get(view, |o| o.settings.diff.soft_wrap),
-                    set(view, |o, v: bool, _| o.settings.diff.soft_wrap = v),
-                )
-                .default_value(d.soft_wrap),
-            )
-            .description("Wrap long lines instead of scrolling sideways."),
-            SettingItem::new(
-                "Large file limit (MB)",
-                SettingField::number_input(
-                    NumberFieldOptions {
-                        min: 1.0,
-                        max: 500.0,
-                        step: 1.0,
-                    },
-                    get(view, |o| {
-                        o.settings.diff.large_file_bytes as f64 / (1024.0 * 1024.0)
-                    }),
-                    set(view, |o, v: f64, _| {
-                        o.settings.diff.large_file_bytes =
-                            (v.max(1.0) * 1024.0 * 1024.0) as u64
-                    }),
-                )
-                .default_value(d.large_file_bytes as f64 / (1024.0 * 1024.0)),
-            )
-            .description("Files above this size ask before rendering."),
-        ]))
-}
-
-fn git_page(view: &Entity<Osier>) -> SettingPage {
-    let defaults = Settings::default();
-    SettingPage::new("Git")
-        .icon(Icon::new(Lucide::GitBranch))
-        .resettable(true)
-        .group(SettingGroup::new().title("Log").items(vec![
-            SettingItem::new(
-                "Commits per page",
-                SettingField::number_input(
-                    NumberFieldOptions {
-                        min: 50.0,
-                        max: 10000.0,
-                        step: 50.0,
-                    },
-                    get(view, |o| o.settings.git.log_page_size as f64),
-                    set(view, |o, v: f64, _| {
-                        o.settings.git.log_page_size = v.max(50.0) as usize
-                    }),
-                )
-                .default_value(defaults.git.log_page_size as f64),
-            )
-            .description("Applies to repositories opened from now on."),
-            SettingItem::new(
-                "Show command log on startup",
-                SettingField::switch(
-                    get(view, |o| o.settings.git.show_command_log),
-                    set(view, |o, v: bool, _| o.settings.git.show_command_log = v),
-                )
-                .default_value(defaults.git.show_command_log),
-            ),
-            SettingItem::new(
-                "Branch and tag badges",
-                SettingField::dropdown(
-                    vec![
-                        ("left".into(), "Before the subject".into()),
-                        ("right".into(), "At the end of the line".into()),
-                    ],
-                    get(view, |o| {
-                        match o.settings.git.log_badges {
-                            osier_config::settings::LogBadges::Left => "left",
-                            osier_config::settings::LogBadges::Right => "right",
-                        }
-                        .into()
-                    }),
-                    set(view, |o, v: SharedString, _| {
-                        o.settings.git.log_badges = if v.as_ref() == "right" {
-                            osier_config::settings::LogBadges::Right
-                        } else {
-                            osier_config::settings::LogBadges::Left
-                        }
-                    }),
-                )
-                .default_value("left".to_string()),
-            ),
-            SettingItem::new(
-                "Commits not pushed yet",
-                SettingField::dropdown(
-                    vec![
-                        ("dim".into(), "Dim".into()),
-                        ("colour".into(), "Change colour".into()),
-                    ],
-                    get(view, |o| {
-                        match o.settings.git.log_unpushed {
-                            osier_config::settings::UnpushedStyle::Dim => "dim",
-                            osier_config::settings::UnpushedStyle::Colour => "colour",
-                        }
-                        .into()
-                    }),
-                    set(view, |o, v: SharedString, _| {
-                        o.settings.git.log_unpushed = if v.as_ref() == "colour" {
-                            osier_config::settings::UnpushedStyle::Colour
-                        } else {
-                            osier_config::settings::UnpushedStyle::Dim
-                        }
-                    }),
-                )
-                .default_value("dim".to_string()),
-            )
-            .description(
-                "How the Log graph shows commits that are on a local branch but no remote yet.",
-            ),
-        ]))
-        .group(SettingGroup::new().title("Pull").items(vec![
-            SettingItem::new(
-                "Offer to keep local copies of newly .gitignored files",
-                SettingField::switch(
-                    get(view, |o| o.settings.git.offer_keep_ignored),
-                    set(view, |o, v: bool, _| o.settings.git.offer_keep_ignored = v),
-                )
-                .default_value(defaults.git.offer_keep_ignored),
-            )
-            .description(
-                "When someone stops tracking a file and adds it to .gitignore, git deletes your \
-                 copy of that file the next time you pull. With this on, Osier lists those files \
-                 after a pull and offers to put your copies back as they were before the pull. \
-                 They stay untracked and ignored, so they do not show up as changes or get \
-                 committed again. Only files that an ignore rule now matches are offered: files \
-                 that were simply deleted stay deleted, and files still on your disk are left \
-                 alone. Pulls run outside Osier are not covered. There, run git show \
-                 ORIG_HEAD:<path> > <path> right after the pull to bring a file back.",
-            ),
-        ]))
-        .group(SettingGroup::new().title("Git config").items(vec![
-            SettingItem::new(
-                "Git config tab",
-                SettingField::switch(
-                    get(view, |o| o.settings.git.config_tab),
-                    set(view, |o, v: bool, _| o.settings.git.config_tab = v),
-                )
-                .default_value(defaults.git.config_tab),
-            )
-            .description(
-                "Show the Git config panel as a tab next to Patches. It lists the git settings \
-                 that change how a repository behaves, with the value git uses and where it \
-                 comes from. It is always available from a project's right-click menu in the \
-                 sidebar.",
-            ),
-        ]))
-        .group(SettingGroup::new().title("Prompts and viewer").items(vec![
-            SettingItem::new(
-                "Osier askpass window",
-                SettingField::switch(
-                    get(view, |o| o.settings.auth.askpass),
-                    set(view, |o, v: bool, _| o.settings.auth.askpass = v),
-                )
-                .default_value(defaults.auth.askpass),
-            )
-            .description(
-                "Route ssh passphrase and git password prompts to Osier's own window. Off uses your ssh agent and git credential helpers only.",
-            ),
-            SettingItem::new(
-                "Remote images in markdown",
-                SettingField::switch(
-                    get(view, |o| o.settings.viewer.remote_images),
-                    set(view, |o, v: bool, _| o.settings.viewer.remote_images = v),
-                )
-                .default_value(defaults.viewer.remote_images),
-            )
-            .description("Fetch http(s) images such as README badges. Off shows repository files only."),
-            SettingItem::new(
-                "Markdown files open as",
-                SettingField::dropdown(
-                    vec![
-                        ("rendered".into(), "Rendered".into()),
-                        ("code".into(), "Code".into()),
-                    ],
-                    get(view, |o| match o.settings.viewer.markdown_default {
-                        osier_config::settings::MarkdownMode::Rendered => "rendered".into(),
-                        osier_config::settings::MarkdownMode::Code => "code".into(),
-                    }),
-                    set(view, |o, v: SharedString, _| {
-                        o.settings.viewer.markdown_default = if v.as_ref() == "code" {
-                            osier_config::settings::MarkdownMode::Code
-                        } else {
-                            osier_config::settings::MarkdownMode::Rendered
-                        };
-                        // A new default makes per-type overrides that equal it redundant.
-                        let d = o.settings.viewer.markdown_default;
-                        o.settings.viewer.markdown_modes.retain(|_, m| *m != d);
-                    }),
-                )
-                .default_value("rendered".to_string()),
-            )
-            .description("The Rendered/Code toggle remembers its choice per file type on top of this."),
-        ]))
-}
-
-fn editors_page(view: &Entity<Osier>) -> SettingPage {
-    let mut options: Vec<(SharedString, SharedString)> =
-        vec![("".into(), "System default (xdg-open)".into())];
-    for (name, template) in Osier::detected_editors() {
-        options.push((template.into(), name.into()));
-    }
-    options.push(("custom".into(), "Custom command (below)".into()));
-    SettingPage::new("Editors")
-        .icon(Icon::new(Lucide::SquarePen))
-        .resettable(true)
-        .group(
-            SettingGroup::new()
-                .title("Open in editor")
-                .description(
-                    "Placeholders: {path} is the repository, {file} the file and {line} the line.",
-                )
-                .items(vec![
-                    SettingItem::new(
-                        "Editor",
-                        SettingField::dropdown(
-                            options.clone(),
-                            {
-                                let options = options.clone();
-                                get(view, move |o| {
-                                    let current =
-                                        o.settings.editor.command.clone().unwrap_or_default();
-                                    if options.iter().any(|(v, _)| v.as_ref() == current) {
-                                        current.into()
-                                    } else {
-                                        "custom".into()
-                                    }
-                                })
-                            },
-                            set(view, |o, v: SharedString, _| {
-                                if v.as_ref() != "custom" {
-                                    o.settings.editor.command = opt_string(v);
-                                }
-                            }),
-                        )
-                        .default_value(""),
-                    )
-                    .description("Editors found on PATH."),
-                    SettingItem::new(
-                        "Editor command",
-                        SettingField::input(
-                            get(view, |o| {
-                                o.settings.editor.command.clone().unwrap_or_default().into()
-                            }),
-                            set(view, |o, v: SharedString, _| {
-                                o.settings.editor.command = opt_string(v)
-                            }),
-                        )
-                        .default_value(""),
-                    )
-                    .layout(Axis::Vertical)
-                    .description("For example: zed {file}:{line}"),
-                    SettingItem::new(
-                        "Terminal command",
-                        SettingField::input(
-                            get(view, |o| {
-                                o.settings
-                                    .editor
-                                    .terminal
-                                    .clone()
-                                    .unwrap_or_default()
-                                    .into()
-                            }),
-                            set(view, |o, v: SharedString, _| {
-                                o.settings.editor.terminal = opt_string(v)
-                            }),
-                        )
-                        .default_value(""),
-                    )
-                    .layout(Axis::Vertical)
-                    .description("Empty tries common terminals. {path} is the repository."),
-                ]),
-        )
-}
-
-fn accounts_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
-    let osier = view.read(cx);
-    let mut hosts: Vec<String> = osier.gh_accounts.iter().map(|a| a.host.clone()).collect();
-    hosts.sort();
-    hosts.dedup();
-    let mut host_items = Vec::new();
-    for host in hosts {
-        let mut options: Vec<(SharedString, SharedString)> =
-            vec![("".into(), "Ask when needed".into())];
-        for a in osier.gh_accounts.iter().filter(|a| a.host == host) {
-            options.push((a.login.clone().into(), a.login.clone().into()));
-        }
-        let (h1, h2) = (host.clone(), host.clone());
-        host_items.push(
-            SettingItem::new(
-                host.clone(),
-                SettingField::dropdown(
-                    options,
-                    get(view, move |o| {
-                        o.settings
-                            .auth
-                            .default_accounts
-                            .get(&h1)
-                            .cloned()
-                            .unwrap_or_default()
-                            .into()
-                    }),
-                    set(view, move |o, v: SharedString, _| {
-                        if v.is_empty() {
-                            o.settings.auth.default_accounts.remove(&h2);
-                        } else {
-                            o.settings
-                                .auth
-                                .default_accounts
-                                .insert(h2.clone(), v.to_string());
-                        }
-                    }),
-                )
-                .default_value(""),
-            )
-            .description("Used for https remotes on this host when the project has no choice."),
-        );
-    }
-    let v1 = view.clone();
-    let v3 = view.clone();
-    let mut page = SettingPage::new("Accounts")
-        .icon(Icon::new(Lucide::KeyRound))
-        .group(
-            SettingGroup::new()
-                .title("GitHub CLI accounts")
-                .description("Detected with `gh auth status`. Tokens are read only inside Osier's credential helper, never shown.")
-                .item(SettingItem::render(move |options, _, cx| {
-                    let o = v1.read(cx);
-                    let muted = cx.theme().muted_foreground;
-                    let mut col = v_flex().gap_1().w_full();
-                    if o.gh_accounts.is_empty() {
-                        col = col.child(
-                            div().text_sm().text_color(muted).child(
-                                "No accounts. Run `gh auth login` in a terminal, then refresh.",
-                            ),
-                        );
-                    }
-                    for a in &o.gh_accounts {
-                        col = col.child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(Icon::new(Lucide::Github).xsmall())
-                                .child(div().text_sm().child(a.login.clone()))
-                                .child(div().text_xs().text_color(muted).child(a.host.clone()))
-                                .child(div().text_xs().text_color(muted).child(a.git_protocol.clone()))
-                                .when(a.active, |this| {
-                                    this.child(Tag::info().xsmall().child("gh default"))
-                                })
-                                .when(a.state != "ok" && !a.state.is_empty(), |this| {
-                                    this.child(Tag::warning().xsmall().child(a.state.clone()))
-                                }),
-                        );
-                    }
-                    let v = v1.clone();
-                    col.child(
-                        h_flex().pt_1().child(
-                            Button::new("refresh-accounts").test_id("refresh-accounts")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::RefreshCw)
-                                .label("Refresh")
-                                .on_click(move |_, _, cx| {
-                                    v.update(cx, |o, cx| o.load_gh_accounts(cx));
-                                }),
-                        ),
-                    )
-                })),
-        );
-    if !host_items.is_empty() {
-        page = page.group(
-            SettingGroup::new()
-                .title("Default account per host")
-                .items(host_items),
-        );
-    }
-    page.group(crate::project_choices::accounts_pointer(view))
-        .group(
-            SettingGroup::new()
-                .title("SSH")
-                .description("Key names only; private keys are never read.")
-                .item(SettingItem::render(move |_, _, cx| {
-                    let o = v3.read(cx);
-                    let muted = cx.theme().muted_foreground;
-                    let status = o.ssh_status.clone().unwrap_or_default();
-                    let agent = if status.agent_socket {
-                        format!(
-                            "running, {} {} loaded",
-                            status.loaded_identities.len(),
-                            if status.loaded_identities.len() == 1 { "identity" } else { "identities" }
-                        )
-                    } else {
-                        "no agent socket (SSH_AUTH_SOCK unset)".to_string()
-                    };
-                    let keys = if status.key_files.is_empty() {
-                        "none found in ~/.ssh".to_string()
-                    } else {
-                        status
-                            .key_files
-                            .iter()
-                            .filter_map(|p| p.file_name())
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
-                    v_flex()
-                        .gap_1()
-                        .w_full()
-                        .child(kv("Agent", agent, cx))
-                        .when(!status.loaded_identities.is_empty(), |this| {
-                            this.child(kv("Loaded", status.loaded_identities.join(", "), cx))
-                        })
-                        .child(kv("Keys", keys, cx))
-                        .child(
-                            div().text_xs().text_color(muted).child(
-                                "ssh remotes use these directly; the gh accounts above only apply to https remotes.",
-                            ),
-                        )
-                })),
-        )
-}
-
-fn projects_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
-    let v1 = view.clone();
-    let v2 = view.clone();
-    SettingPage::new("Projects")
-        .icon(Icon::new(Lucide::FolderGit2))
-        .group(
-            SettingGroup::new()
-                .title("Scan directories")
-                .description("Repositories found directly inside these directories are listed under Recents and cannot be removed individually.")
-                .item(SettingItem::render(move |options, _, cx| {
-                    let o = v1.read(cx);
-                    let muted = cx.theme().muted_foreground;
-                    let mut col = v_flex().gap_1().w_full();
-                    if o.settings.projects.scan_dirs.is_empty() {
-                        col = col.child(div().text_sm().text_color(muted).child("None."));
-                    }
-                    for (ix, dir) in o.settings.projects.scan_dirs.iter().enumerate() {
-                        let v = v1.clone();
-                        let d = dir.clone();
-                        col = col.child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(Icon::new(Lucide::Folder).xsmall())
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_sm()
-                                        .child(crate::format::tilde(dir)),
-                                )
-                                .child(
-                                    Button::new(("remove-scan-dir", ix))
-                                        .ghost()
-                                        .with_size(options.size())
-                                        .icon(Lucide::X)
-                                        .tooltip("Remove")
-                                        .on_click(move |_, _, cx| {
-                                            v.update(cx, |o, cx| o.remove_scan_dir(d.clone(), cx));
-                                        }),
-                                ),
-                        );
-                    }
-                    let v = v1.clone();
-                    col.child(
-                        h_flex().pt_1().child(
-                            Button::new("add-scan-dir").test_id("add-scan-dir")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::FolderPlus)
-                                .label("Add directory…")
-                                .on_click(move |_, window, cx| {
-                                    v.update(cx, |o, cx| o.add_scan_dir_prompt(window, cx));
-                                }),
-                        ),
-                    )
-                }))
-                .item(
-                    SettingItem::new(
-                        "Scan depth",
-                        SettingField::number_input(
-                            NumberFieldOptions {
-                                min: 1.0,
-                                max: 3.0,
-                                step: 1.0,
-                            },
-                            get(view, |o| f64::from(o.settings.projects.scan_depth.unwrap_or(1))),
-                            set(view, |o, v: f64, _| {
-                                o.settings.projects.scan_depth = Some(v.clamp(1.0, 3.0) as u8)
-                            }),
-                        )
-                        .default_value(1.0),
-                    )
-                    .description("1 looks at direct children only."),
-                ),
-        )
-        .group(
-            SettingGroup::new().title("Switching projects").item(
-                SettingItem::new(
-                    "When Changes is empty",
-                    SettingField::dropdown(
-                        vec![
-                            ("stay".into(), "Don't switch".into()),
-                            ("log".into(), "Log".into()),
-                            ("branches".into(), "Branches".into()),
-                            ("stashes".into(), "Stashes".into()),
-                            ("files".into(), "Files".into()),
-                            ("patches".into(), "Patches".into()),
-                        ],
-                        get(view, |o| {
-                            use osier_config::settings::EmptyChangesTab as E;
-                            match o.settings.projects.empty_changes_tab {
-                                E::Stay => "stay",
-                                E::Log => "log",
-                                E::Branches => "branches",
-                                E::Stashes => "stashes",
-                                E::Files => "files",
-                                E::Patches => "patches",
-                            }
-                            .into()
-                        }),
-                        set(view, |o, v: SharedString, _| {
-                            use osier_config::settings::EmptyChangesTab as E;
-                            o.settings.projects.empty_changes_tab = match v.as_ref() {
-                                "stay" => E::Stay,
-                                "branches" => E::Branches,
-                                "stashes" => E::Stashes,
-                                "files" => E::Files,
-                                "patches" => E::Patches,
-                                _ => E::Log,
-                            };
-                        }),
-                    )
-                    .default_value("log".to_string()),
-                )
-                .description(
-                    "When you switch to or open a project while on the Changes tab and it has \
-                     nothing to commit, show this tab instead. Switching to a project with \
-                     changes brings Changes back.",
-                ),
-            ),
-        )
-        .group(
-            highlightable(SettingGroup::new(), SettingsTarget::RECENT_STATUS, view, cx)
-                .title("Status of projects that are not open")
-                .description("Ahead/behind badges and the changes marker on pinned, recent and scanned projects.")
-                .item(
-                    SettingItem::new(
-                        "Show status",
-                        SettingField::dropdown(
-                            vec![
-                                ("never".into(), "Never".into()),
-                                ("cached".into(), "From when it was last open".into()),
-                                ("watch".into(), "Watch git (ahead/behind only)".into()),
-                                ("check".into(), "Watch git and check every N minutes".into()),
-                            ],
-                            get(view, |o| {
-                                use osier_config::settings::RecentStatusMode as M;
-                                match o.settings.projects.recent_status {
-                                    M::Never => "never",
-                                    M::Cached => "cached",
-                                    M::Watch => "watch",
-                                    M::Check => "check",
-                                }
-                                .into()
-                            }),
-                            set(view, |o, v: SharedString, _| {
-                                use osier_config::settings::RecentStatusMode as M;
-                                o.settings.projects.recent_status = match v.as_ref() {
-                                    "cached" => M::Cached,
-                                    "watch" => M::Watch,
-                                    "check" => M::Check,
-                                    _ => M::Never,
-                                };
-                            }),
-                        )
-                        .default_value("never".to_string()),
-                    )
-                    .description("Never runs nothing in the background. Watch modes use a few file watches per repository and one git process at a time."),
-                )
-                .item(SettingItem::render({
-                    let v = view.clone();
-                    move |options, _, cx| {
-                        let o = v.read(cx);
-                        let checking = o.settings.projects.recent_status
-                            == osier_config::settings::RecentStatusMode::Check;
-                        let minutes = o.settings.projects.recent_status_minutes.clamp(1, 60);
-                        let slider = o.recent_interval.clone();
-                        h_flex()
-                            .w_full()
-                            .gap_3()
-                            .items_center()
-                            .when(!checking, |this| this.opacity(0.5))
-                            .child(div().text_sm().flex_none().child("Check every"))
-                            .child(
-                                div().flex_1().child(
-                                    gpui_kit::component::slider::Slider::new(&slider)
-                                        .disabled(!checking || options.is_disabled()),
-                                ),
-                            )
-                            .child(div().text_sm().w(px(64.)).flex_none().child(if minutes == 1 {
-                                "1 minute".to_string()
-                            } else {
-                                format!("{minutes} minutes")
-                            }))
-                    }
-                }))
-                .item(SettingItem::render({
-                    let v = view.clone();
-                    move |options, _, cx| {
-                        use osier_config::settings::RecentStatusMode as M;
-                        let mode = v.read(cx).settings.projects.recent_status;
-                        let hint = match mode {
-                            M::Never => "Turn the status on to scan.",
-                            M::Cached => "One full check now; the results are cached.",
-                            M::Watch => "Re-read ahead/behind of every project now.",
-                            M::Check => "Full check of every project now; the timer restarts.",
-                        };
-                        let v = v.clone();
-                        h_flex()
-                            .w_full()
-                            .gap_3()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(hint),
-                            )
-                            .child(
-                                Button::new("scan-recent-now")
-                                    .test_id("scan-recent-now")
-                                    .outline()
-                                    .with_size(options.size())
-                                    .icon(Lucide::RefreshCw)
-                                    .label("Scan now")
-                                    .disabled(mode == M::Never || options.is_disabled())
-                                    .on_click(move |_, window, cx| {
-                                        v.update(cx, |o, cx| o.scan_recent_now(window, cx));
-                                    }),
-                            )
-                    }
-                })),
-        )
-        .group(
-            SettingGroup::new()
-                .title("Recents")
-                .item(SettingItem::render(move |options, _, cx| {
-                    let o = v2.read(cx);
-                    let n = o.state.recent_not_open().count();
-                    let v = v2.clone();
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .items_center()
-                        .gap_3()
-                        .child(div().text_sm().child(format!(
-                            "{n} recent {} not currently open",
-                            if n == 1 { "repository" } else { "repositories" }
-                        )))
-                        .child(
-                            Button::new("clear-recents").test_id("clear-recents")
-                                .outline()
-                                .with_size(options.size())
-                                .label("Clear all recents")
-                                .disabled(n == 0)
-                                .on_click(move |_, window, cx| {
-                                    v.update(cx, |o, cx| o.confirm_clear_recents(window, cx));
-                                }),
-                        )
-                })),
-        )
-        .group(crate::project_choices::group(view, cx))
-}
-
-/// About > Updates: where Osier stands against the latest release, and what can be done.
-fn updates_group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
-    use crate::install_route::InstallRoute;
-    use crate::update::Decision;
-    use crate::update_ui::{CheckState, InstallState};
-    let (v_check, v_install, v_restart, v_notes) =
-        (view.clone(), view.clone(), view.clone(), view.clone());
-    let group = SettingGroup::new()
-        .title("Updates")
-        .item(SettingItem::render(move |options, _, cx| {
-            let o = v_check.read(cx);
-            let u = &o.updates;
-            let muted = cx.theme().muted_foreground;
-            let route = u.route.clone();
-            let scriptable = matches!(route, Some(InstallRoute::Script { .. }));
-            let packaged = matches!(
-                route,
-                Some(InstallRoute::Package { .. } | InstallRoute::Flatpak)
-            );
-            let (status, latest) = match &u.check {
-                CheckState::NotChecked => ("Not checked yet.".to_string(), None),
-                CheckState::Checking => ("Checking…".to_string(), None),
-                CheckState::Failed(e) => (format!("Could not check: {e}"), None),
-                CheckState::Done { latest, decision } => (
-                    match decision {
-                        Decision::Update => {
-                            format!("{latest} is available (you have v{}).", u.current)
-                        }
-                        Decision::UpToDate => format!("Up to date ({latest})."),
-                        Decision::DevBuild => format!(
-                            "Development build (v{}); the latest release is {latest}.",
-                            u.current
-                        ),
-                        Decision::Newer => format!(
-                            "v{} is newer than the latest release ({latest}).",
-                            u.current
-                        ),
-                    },
-                    Some((latest.clone(), *decision)),
-                ),
-            };
-            let checked = o
-                .state
-                .update_check
-                .checked_at
-                .map(crate::format::relative_time);
-            let available = matches!(latest, Some((_, Decision::Update)));
-            let installing = matches!(u.install, InstallState::Installing(_));
-            let install_line = match &u.install {
-                InstallState::Idle => None,
-                InstallState::Installing(t) => Some(format!("Installing {t}…")),
-                InstallState::Installed(t) => {
-                    Some(format!("{t} is installed. Restart Osier to use it."))
-                }
-                InstallState::Failed(e) => Some(format!("Update failed: {e}")),
-            };
-            let installed = matches!(u.install, InstallState::Installed(_));
-            let refusal = route.as_ref().and_then(|r| r.update_refusal());
-            let tag = latest.as_ref().map(|(t, _)| t.clone());
-            let (vi, vr, vn) = (v_install.clone(), v_restart.clone(), v_notes.clone());
-            v_flex()
-                .test_id("updates-section")
-                .gap_2()
-                .w_full()
-                .child(div().test_id("update-status").text_sm().child(status))
-                .when_some(checked, |this, c| {
-                    this.child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(format!("Last checked {c}.")),
-                    )
-                })
-                .when_some(install_line, |this, l| {
-                    this.child(div().test_id("update-install-status").text_sm().child(l))
-                })
-                .when(available && !scriptable, |this| {
-                    this.when_some(refusal.clone(), |this, r| {
-                        this.child(div().text_sm().text_color(muted).child(r))
-                    })
-                })
-                .when(packaged, |this| {
-                    this.child(div().text_xs().text_color(muted).child(
-                        "Packages (AUR, Flathub, distribution repositories) can take a little \
-                         while to publish a new release, so an update may show here before \
-                         your package manager has it.",
-                    ))
-                })
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .flex_wrap()
-                        .child(
-                            Button::new("update-check-now")
-                                .test_id("update-check-now")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::RefreshCw)
-                                .label("Check now")
-                                .disabled(u.check == CheckState::Checking || installing)
-                                .on_click({
-                                    let v = v_check.clone();
-                                    move |_, _, cx| v.update(cx, |o, cx| o.check_for_updates(cx))
-                                }),
-                        )
-                        .child(
-                            Button::new("update-install")
-                                .test_id("update-install")
-                                .primary()
-                                .with_size(options.size())
-                                .icon(Lucide::Download)
-                                .label(match (&tag, available) {
-                                    (Some(t), true) => format!("Update to {t}"),
-                                    _ => "Update".to_string(),
-                                })
-                                .disabled(!(available && scriptable) || installing || installed)
-                                .on_click(move |_, _, cx| {
-                                    vi.update(cx, |o, cx| o.install_update(cx))
-                                }),
-                        )
-                        .when(installed, |this| {
-                            this.child(
-                                Button::new("update-restart")
-                                    .test_id("update-restart")
-                                    .primary()
-                                    .with_size(options.size())
-                                    .icon(Lucide::RotateCw)
-                                    .label("Restart now")
-                                    .on_click(move |_, window, cx| {
-                                        vr.update(cx, |o, cx| o.restart_after_update(window, cx))
-                                    }),
-                            )
-                        })
-                        .when_some(tag.clone(), |this, t| {
-                            this.child(
-                                Button::new("update-release-notes")
-                                    .test_id("update-release-notes")
-                                    .ghost()
-                                    .with_size(options.size())
-                                    .icon(Lucide::ExternalLink)
-                                    .label(format!("What's new in {t}"))
-                                    .on_click(move |_, _, cx| {
-                                        let _ = &vn;
-                                        cx.open_url(&crate::update::release_url(&t))
-                                    }),
-                            )
-                        }),
-                )
-        }))
-        .item(
-            SettingItem::new(
-                "Check for updates on startup",
-                SettingField::switch(
-                    get(view, |o| o.settings.updates.check_on_startup),
-                    set(view, |o, v: bool, _| {
-                        o.settings.updates.check_on_startup = v
-                    }),
-                )
-                .default_value(true),
-            )
-            .description(
-                "At most once a day. Shows an \"Update available\" badge in the status bar.",
-            ),
-        );
-    highlightable(group, SettingsTarget::UPDATES, view, cx)
-}
-
-fn about_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
-    let info = view.read(cx).runtime_info();
-    let text = info.to_string();
-    let config_file = view.read(cx).paths.settings_file();
-    let config_dir = view.read(cx).paths.config_dir().to_path_buf();
-    let v1 = view.clone();
-    let v2 = view.clone();
-    SettingPage::new("About")
-        .icon(Icon::new(Lucide::Info))
-        .group(updates_group(view, cx))
-        .group(
-            SettingGroup::new()
-                .title("Runtime")
-                .description("Include this block in bug reports (`osier --version --verbose` prints the same).")
-                .item(SettingItem::render(move |options, _, cx| {
-                    let text = text.clone();
-                    let mut col = v_flex().gap_1().w_full();
-                    for (label, value) in info.rows() {
-                        col = col.child(kv(label, value, cx));
-                    }
-                    col.child(
-                        h_flex().pt_1().child(
-                            Button::new("copy-runtime").test_id("copy-runtime")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::Copy)
-                                .label("Copy")
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                                }),
-                        ),
-                    )
-                })),
-        )
-        .group(
-            SettingGroup::new()
-                .title("Configuration")
-                .description("config.toml is re-read when it changes on disk, so it is safe to manage with dotfiles.")
-                .item(SettingItem::render(move |options, _, _| {
-                    let (f, d) = (config_file.clone(), config_dir.clone());
-                    let (va, vb) = (v1.clone(), v1.clone());
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new("edit-config").test_id("edit-config")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::SquarePen)
-                                .label("Edit config.toml")
-                                .on_click(move |_, window, cx| {
-                                    let f = f.clone();
-                                    va.update(cx, |o, cx| o.open_externally(&f, window, cx));
-                                }),
-                        )
-                        .child(
-                            Button::new("open-config-dir").test_id("open-config-dir")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::FolderOpen)
-                                .label("Open folder")
-                                .on_click(move |_, window, cx| {
-                                    let d = d.clone();
-                                    vb.update(cx, |o, cx| o.open_externally(&d, window, cx));
-                                }),
-                        )
-                })),
-        )
-        .group(
-            SettingGroup::new().title("Osier").item(SettingItem::render(move |options, _, cx| {
-                let _ = &v2;
-                v_flex()
-                    .gap_2()
-                    .w_full()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("A native git GUI for Linux. MIT licensed."),
-                    )
-                    .child(
-                        h_flex().gap_2().child(
-                            Button::new("repo-link").test_id("repo-link")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::Github)
-                                .label("github.com/ReyArlena/osier")
-                                .on_click(|_, _, cx| cx.open_url("https://github.com/ReyArlena/osier")),
-                        ),
-                    )
-            })),
-        )
-}
-
-fn keymap_page(view: &Entity<Osier>) -> SettingPage {
-    use crate::keymap::{Scope, actions};
-    let specs = actions();
-    let mut categories: Vec<&'static str> = Vec::new();
-    for s in &specs {
-        if !categories.contains(&s.category) {
-            categories.push(s.category);
-        }
-    }
-    let v_top = view.clone();
-    let mut page = SettingPage::new("Keymap")
-        .icon(Icon::new(Lucide::Keyboard))
-        .group(
-            SettingGroup::new()
-                .title("Key bindings")
-                .description(
-                    "Click + and press the keys to add a binding, x to remove one. Plain keys (letters, /, space) never fire while typing in a text field.",
-                )
-                .item(SettingItem::render(move |options, _, _| {
-                    let (va, vb) = (v_top.clone(), v_top.clone());
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new("keymap-edit-file")
-                                .test_id("keymap-edit-file")
-                                .outline()
-                                .with_size(options.size())
-                                .icon(Lucide::SquarePen)
-                                .label("Edit keymap.toml")
-                                .on_click(move |_, window, cx| {
-                                    va.update(cx, |o, cx| o.edit_keymap_file(window, cx));
-                                }),
-                        )
-                        .child(
-                            Button::new("keymap-reset-all")
-                                .test_id("keymap-reset-all")
-                                .outline()
-                                .with_size(options.size())
-                                .label("Reset all to defaults")
-                                .on_click(move |_, window, cx| {
-                                    vb.update(cx, |o, cx| o.reset_keymap(window, cx));
-                                }),
-                        )
-                })),
-        );
-    for category in categories {
-        let mut group = SettingGroup::new().title(category);
-        if category == "Prefix" {
-            group = group.description(
-                "Press the prefix key, then a binding's key. While it waits, the status bar shows \
-                 \"Prefix key pressed\"; Escape, a click, an unbound key or the timeout cancel \
-                 it. Each key below picks how it fires with its three buttons: No prefix (the \
-                 key alone), Prefix only (the prefix key, then the key) or Either (both work). \
-                 Keys after the prefix also work while typing in a text field.",
-            );
-        }
-        if category == "Context menus" {
-            group = group.description(
-                "Run a right-click menu entry on the selected row with a key. One key covers \
-                 every row that offers the entry; others ignore it. These keys cannot share a \
-                 key with any other binding.",
-            );
-        }
-        for spec in specs.iter().filter(|s| s.category == category) {
-            let (id, scope) = (spec.id, spec.scope);
-            let v = view.clone();
-            let mut item = SettingItem::new(
-                spec.name,
-                SettingField::render(move |options, _, cx| key_row(&v, id, options, cx)),
-            );
-            match scope {
-                Scope::List => item = item.description("In the Changes, Log and other lists"),
-                Scope::Row => {
-                    item = item.description(format!("On the selected row: {}", spec.detail))
-                }
-                Scope::Settings => item = item.description("While settings is open"),
-                Scope::App => {}
-            }
-            group = group.item(item);
-        }
-        if category == "Prefix" {
-            let v = view.clone();
-            group = group.item(SettingItem::render(move |options, _, cx| {
-                let o = v.read(cx);
-                let secs = o
-                    .settings
-                    .keys
-                    .prefix_timeout_secs
-                    .min(crate::app::PREFIX_TIMEOUT_MAX_SECS);
-                let slider = o.prefix_timeout.clone();
-                h_flex()
-                    .w_full()
-                    .gap_3()
-                    .items_center()
-                    .child(div().text_sm().flex_none().child("Stop waiting after"))
-                    .child(
-                        div().flex_1().child(
-                            gpui_kit::component::slider::Slider::new(&slider)
-                                .disabled(options.is_disabled()),
-                        ),
-                    )
-                    .child(div().text_sm().w(px(110.)).flex_none().child(match secs {
-                        0 => "never (Esc or a key)".to_string(),
-                        1 => "1 second".to_string(),
-                        n => format!("{n} seconds"),
-                    }))
-            }));
-        }
-        page = page.group(group);
-    }
-    page
-}
-
-/// No prefix / Prefix only / Either for one key, as three joined icon buttons.
-fn mode_buttons(
-    view: &Entity<Osier>,
-    id: &'static str,
-    stored: &str,
-    current: crate::keymap::KeyMode,
-) -> AnyElement {
-    use crate::keymap::{KeyMode, pretty_key, split_mode};
-    use gpui_kit::component::button::ButtonGroup;
-    let bare = pretty_key(split_mode(stored).1);
-    let info = |mode: KeyMode| match mode {
-        KeyMode::Plain => ("plain", Lucide::Key, format!("No prefix: {bare} alone")),
-        KeyMode::Prefix => (
-            "prefix",
-            Lucide::ChevronsRight,
-            format!("Prefix only: the prefix key, then {bare}"),
-        ),
-        KeyMode::Either => (
-            "either",
-            Lucide::Split,
-            format!("Either: {bare} alone, or the prefix key then {bare}"),
-        ),
-    };
-    let mut group = ButtonGroup::new(SharedString::from(format!("keymode-{id}-{stored}")))
-        .compact()
-        .xsmall();
-    for mode in KeyMode::ALL {
-        let (name, icon, tip) = info(mode);
-        group = group.child(
-            Button::new(SharedString::from(format!("keymode-{id}-{stored}-{name}")))
-                .test_id(format!("keymode:{id}:{stored}:{name}"))
-                .icon(icon)
-                .tooltip(tip)
-                // The chosen mode is filled so it reads at a glance; the others are outlined.
-                .map(|b| {
-                    if mode == current {
-                        b.primary()
-                    } else {
-                        b.outline()
-                    }
-                })
-                .selected(mode == current),
-        );
-    }
-    let v = view.clone();
-    let stored = stored.to_string();
-    group
-        .on_click(move |picked: &Vec<usize>, window, cx| {
-            if let Some(&ix) = picked.first()
-                && let Some(&mode) = KeyMode::ALL.get(ix)
-            {
-                v.update(cx, |o, cx| o.set_key_mode(id, &stored, mode, window, cx));
-            }
-        })
-        .into_any_element()
-}
-
-/// One action's keys: removable chips, a recorder, Reset when changed, and conflicts.
-fn key_row(
-    view: &Entity<Osier>,
-    id: &'static str,
-    options: &gpui_kit::component::setting::RenderOptions,
-    cx: &App,
-) -> AnyElement {
-    use crate::keymap::{Keymap, conflicts};
-    let o = view.read(cx);
-    let keymap = Keymap::global(cx);
-    let keys = keymap.keys_for(id).to_vec();
-    let recording = o.keymap_recording.as_ref().is_some_and(|(r, _)| *r == id);
-    let overridden = o.keymap_applied.bindings.contains_key(id);
-    let clashes: Vec<&'static str> = keys.iter().flat_map(|k| conflicts(keymap, id, k)).collect();
-    let muted = cx.theme().muted_foreground;
-    let mut row = h_flex().gap_1().items_center().flex_wrap().justify_end();
-    if keys.is_empty() && !recording {
-        row = row.child(div().text_sm().text_color(muted).child("Unbound"));
-    }
-    for k in keys {
-        let v = view.clone();
-        let key = k.clone();
-        let (mode, bare) = crate::keymap::split_mode(&k);
-        let modes = (id != crate::keymap::PREFIX_KEY).then(|| mode_buttons(view, id, &k, mode));
-        row = row.child(
-            h_flex()
-                .gap_0p5()
-                .items_center()
-                .child(
-                    Tag::secondary()
-                        .xsmall()
-                        .child(crate::keymap::pretty_key(bare)),
-                )
-                .when_some(modes, |this, m| this.child(m))
-                .child(
-                    Button::new(SharedString::from(format!("keymap-remove-{id}-{k}")))
-                        .test_id(format!("keymap-remove:{id}:{k}"))
-                        .ghost()
-                        .xsmall()
-                        .icon(Lucide::X)
-                        .tooltip("Remove")
-                        .on_click(move |_, window, cx| {
-                            v.update(cx, |o, cx| o.remove_action_key(id, &key, window, cx));
-                        }),
-                ),
-        );
-    }
-    let v = view.clone();
-    row = if recording {
-        row.child(Tag::warning().xsmall().child("Press keys… (Esc cancels)"))
-    } else {
-        row.child(
-            Button::new(SharedString::from(format!("keymap-add-{id}")))
-                .test_id(format!("keymap-add:{id}"))
-                .ghost()
-                .with_size(options.size())
-                .icon(Lucide::Plus)
-                .tooltip("Add a key binding")
-                .on_click(move |_, _, cx| {
-                    v.update(cx, |o, cx| o.start_key_recording(id, cx));
-                }),
-        )
-    };
-    let v = view.clone();
-    v_flex()
-        .items_end()
-        .gap_1()
-        .child(row.when(overridden, |row| {
-            row.child(
-                Button::new(SharedString::from(format!("keymap-reset-{id}")))
-                    .test_id(format!("keymap-reset:{id}"))
-                    .ghost()
-                    .with_size(options.size())
-                    .label("Reset")
-                    .on_click(move |_, window, cx| {
-                        let defaults: Vec<String> = crate::keymap::actions()
-                            .iter()
-                            .find(|a| a.id == id)
-                            .map(|a| a.defaults.iter().map(|k| k.to_string()).collect())
-                            .unwrap_or_default();
-                        v.update(cx, |o, cx| o.set_action_keys(id, defaults, window, cx));
-                    }),
-            )
-        }))
-        .when(!clashes.is_empty(), |this| {
-            this.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().warning)
-                    .child(format!("Also bound to: {}", clashes.join(", "))),
-            )
-        })
-        .into_any_element()
+    // A larger page title with its description close under it.
+    let mut header = StyleRefinement::default();
+    header = header.text_lg().gap_1().pt_5().pb_4();
+    let pages = vec![
+        appearance::appearance_page(view, cx),
+        diff::diff_page(view),
+        git::git_page(view),
+        editors::editors_page(view, cx),
+        accounts::accounts_page(view, cx),
+        projects::projects_page(view, cx),
+        keymap::keymap_page(view),
+        about::about_page(view, cx),
+    ];
+    pages
+        .into_iter()
+        .map(|page| page.header_style(&header))
+        .collect()
 }

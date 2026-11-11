@@ -7,6 +7,7 @@ mod commit_details;
 mod diff_pane;
 pub(crate) mod files_tab;
 mod log_tab;
+mod notices;
 mod patches_tab;
 mod sidebar;
 mod stashes;
@@ -118,7 +119,7 @@ impl Osier {
                     .children(tabs.iter().map(|t| {
                         KitTab::new()
                             .label(t.label())
-                            .test_id(format!("tab-{}", t.label().to_lowercase()))
+                            .test_id(|| format!("tab-{}", t.label().to_lowercase()))
                             .when(*t == Tab::Changes && changes > 0, |tab| {
                                 tab.suffix(
                                     div()

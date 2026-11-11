@@ -1,10 +1,12 @@
 //! Stable element ids for headless UI tests.
 //!
 //! `test_id` sets gpui's debug selector. gpui records selectors only in test builds (debug
-//! assertions plus its `test-support` feature, which only the dev-dependency enables), so this
-//! costs nothing in the real app. Tests look elements up with
-//! `VisualTestContext::debug_bounds(id)` and click or type at their position, which exercises
-//! the real event routing (focus, key contexts, overlays) that calling methods directly skips.
+//! assertions plus its `test-support` feature, which only the dev-dependency enables), and
+//! `test_id` itself is a no-op outside `cfg(test)`, so the real app never builds the id
+//! string: pass a literal, or a closure (`|| format!(..)`) for ids built per row. Tests look
+//! elements up with `VisualTestContext::debug_bounds(id)` and click or type at their position,
+//! which exercises the real event routing (focus, key contexts, overlays) that calling methods
+//! directly skips.
 //!
 //! Naming convention, kebab-case, `area-thing`, with a `:`-separated key for repeated rows:
 //! - buttons with a literal element id reuse it (`Button::new("settings")` is `settings`)
@@ -23,10 +25,41 @@
 
 use gpui_kit::InteractiveElement;
 
+/// What `test_id` takes: a literal, an owned string, or a closure that builds the id only
+/// when ids are recorded (the `Fn` traits are fundamental, so the impls do not overlap).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) trait TestIdSource {
+    fn build(self) -> String;
+}
+
+impl TestIdSource for &'static str {
+    fn build(self) -> String {
+        self.to_string()
+    }
+}
+
+impl TestIdSource for String {
+    fn build(self) -> String {
+        self
+    }
+}
+
+impl<F: FnOnce() -> String> TestIdSource for F {
+    fn build(self) -> String {
+        self()
+    }
+}
+
 pub(crate) trait TestId: InteractiveElement + Sized {
-    fn test_id(self, id: impl Into<String>) -> Self {
-        let id = id.into();
-        self.debug_selector(move || id)
+    #[cfg(test)]
+    fn test_id(self, id: impl TestIdSource) -> Self {
+        self.debug_selector(|| id.build())
+    }
+
+    #[cfg(not(test))]
+    #[inline]
+    fn test_id(self, _id: impl TestIdSource) -> Self {
+        self
     }
 }
 

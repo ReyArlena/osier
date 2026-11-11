@@ -1,6 +1,5 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tag::Tag;
@@ -171,14 +170,7 @@ impl Osier {
                     })
                     .when(has_project, |this| {
                         this.child(crate::format::count(changes, "change"))
-                    })
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .children(Keystroke::parse("ctrl-q").ok().map(Kbd::new))
-                            .child("Quit"),
-                    ),
+                    }),
             )
     }
 }

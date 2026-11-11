@@ -15,11 +15,13 @@ use osier_git::ops::reset::ResetMode;
 
 use osier_git::ops::patches::PatchSource;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
 use crate::test_ids::TestId as _;
 
 /// Menu handler receiving the commit hash.
 type CommitHandler = std::rc::Rc<dyn Fn(&mut Osier, String, &mut Window, &mut Context<Osier>)>;
+use crate::app::row_actions;
 use crate::graph::{graph_cell, lane_colors};
 
 impl Osier {
@@ -55,10 +57,11 @@ impl Osier {
         if self.show_reflog {
             return self.render_reflog(cx).into_any_element();
         }
-        let commits = Arc::new(snapshot.commits.clone());
-        let graph = Arc::new(snapshot.graph.clone());
-        let unpushed = Arc::new(snapshot.unpushed.clone());
-        let unpushed_edges = Arc::new(snapshot.unpushed_edges.clone());
+        // Shared with the snapshot: no copy of the page per frame.
+        let commits = snapshot.commits.clone();
+        let graph = snapshot.graph.clone();
+        let unpushed = snapshot.unpushed.clone();
+        let unpushed_edges = snapshot.unpushed_edges.clone();
         let unpushed_paint = match self.settings.git.log_unpushed {
             osier_config::settings::UnpushedStyle::Dim => {
                 crate::graph::UnpushedPaint::Dim(cx.theme().background)
@@ -66,7 +69,9 @@ impl Osier {
             osier_config::settings::UnpushedStyle::Colour => {
                 crate::graph::UnpushedPaint::Colour(cx.theme().warning)
             }
+            osier_config::settings::UnpushedStyle::Off => crate::graph::UnpushedPaint::Off,
         };
+        let dim_unpushed_text = matches!(unpushed_paint, crate::graph::UnpushedPaint::Dim(_));
         // Picked commits (click, shift-click range, ctrl-click), highlighted and squashable.
         let picked_rows = Arc::new(project.picked_rows());
         let picked_count = project.picked.len();
@@ -78,6 +83,7 @@ impl Osier {
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
         let owner = cx.entity().downgrade();
         let on_github = self.active_github_url().is_some();
+        let remotes = snapshot.remotes.clone();
         let mono = cx.theme().mono_font_family.clone();
         let muted = cx.theme().muted_foreground;
         let count = commits.len();
@@ -151,15 +157,6 @@ impl Osier {
                                 this.show_reflog = !this.show_reflog;
                                 cx.notify();
                             })),
-                    )
-                    .child(
-                        Button::new("refresh-log")
-                            .test_id("refresh-log")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::RefreshCw)
-                            .tooltip("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
                     ),
             )
             .child(
@@ -175,9 +172,11 @@ impl Osier {
                                     } else {
                                         Vec::new()
                                     };
+                                    let is_unpushed = unpushed.contains(&commit.hash);
+                                    let dim_text = dim_unpushed_text && is_unpushed;
                                     let marks = crate::graph::UnpushedMarks {
                                         paint: unpushed_paint,
-                                        this: unpushed.contains(&commit.hash),
+                                        this: is_unpushed,
                                         outgoing: unpushed_edges
                                             .get(ix)
                                             .cloned()
@@ -193,7 +192,17 @@ impl Osier {
                                     } else {
                                         commit.subject.clone()
                                     };
-                                    let refs: Vec<String> = commit.refs.clone();
+                                    let refs = log_badges(&commit.refs, &remotes);
+                                    // Pull requests git already knows about: the one a merge or
+                                    // squash commit names, and the remote branches on this row.
+                                    let pr_number = on_github
+                                        .then(|| crate::app::github::pull_request_number(&commit.subject))
+                                        .flatten();
+                                    let pr_branches = if on_github {
+                                        crate::app::github::remote_branch_refs(&commit.refs, &remotes)
+                                    } else {
+                                        Vec::new()
+                                    };
                                     let hash = commit.hash.clone();
                                     let is_head = commit.refs.iter().any(|r| r.starts_with("HEAD"));
                                     let menu_owner = owner.clone();
@@ -212,7 +221,7 @@ impl Osier {
                                                 let h = h.clone();
                                                 let o = o.clone();
                                                 match log_menu_kind(label) {
-                                                    Some(kind) => crate::row_actions::menu_item(
+                                                    Some(kind) => row_actions::menu_item(
                                                         label.to_string(),
                                                         kind,
                                                     ),
@@ -376,9 +385,37 @@ impl Osier {
                                                         }),
                                                     ))
                                                 })
+                                                .when_some(pr_number, |menu, n| {
+                                                    menu.item(item(
+                                                        &format!("View pull request #{n} on GitHub"),
+                                                        std::rc::Rc::new(|t, h, w, cx| {
+                                                            t.open_commit_pull_request(h, w, cx)
+                                                        }),
+                                                    ))
+                                                })
+                                                .map(|menu| {
+                                                    pr_branches.iter().fold(menu, |menu, branch| {
+                                                        let b = branch.clone();
+                                                        menu.item(item(
+                                                            &format!("Pull requests for {branch} on GitHub"),
+                                                            std::rc::Rc::new(move |t, _, w, cx| {
+                                                                t.open_branch_pulls_on_github(
+                                                                    b.clone(),
+                                                                    true,
+                                                                    w,
+                                                                    cx,
+                                                                )
+                                                            }),
+                                                        ))
+                                                    })
+                                                })
                                         });
                                     ListItem::new(("commit", ix))
-                                        .test_id(format!("log-row:{ix}"))
+                                        .test_id(|| format!("log-row:{ix}"))
+                                        .a11y_row(
+                                            || format!("{} {}", commit.short_hash(), commit.subject),
+                                            is_selected,
+                                        )
                                         .group("log-row")
                                         .selected(is_selected)
                                         .h(px(crate::graph::ROW_HEIGHT))
@@ -410,46 +447,82 @@ impl Osier {
                                                     commit.is_merge(),
                                                     marks,
                                                 ))
-                                                .child(subject_with_refs(
-                                                    ix,
-                                                    subject,
-                                                    refs,
-                                                    badges_right,
-                                                    (fade_base, fade_hover),
-                                                    cx,
-                                                ))
+                                                // Subject, badges, author, time and hash:
+                                                // faded a little for an unpushed commit when
+                                                // its graph node is dimmed.
                                                 .child(
-                                                    div()
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .flex_none()
-                                                        .max_w(px(110.))
-                                                        .truncate()
-                                                        .child(commit.author_name.clone()),
-                                                )
-                                                .child(
-                                                    super::relative_time_label(
-                                                        ("commit-time", ix),
-                                                        commit.committed_at,
-                                                        cx,
-                                                    )
-                                                    .test_id(format!("commit-time:{ix}"))
-                                                    .text_xs()
-                                                    .text_color(muted)
-                                                    .flex_none()
-                                                    .w(px(78.))
-                                                    .text_right(),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .font_family(mono.clone())
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .flex_none()
-                                                        .child(commit.short_hash().to_string()),
+                                                    h_flex()
+                                                        .test_id(|| format!("log-text:{ix}"))
+                                                        .flex_1()
+                                                        .min_w_0()
+                                                        .h_full()
+                                                        .gap_2()
+                                                        .items_center()
+                                                        .when(dim_text, |this| {
+                                                            this.opacity(
+                                                                crate::graph::UNPUSHED_TEXT_OPACITY,
+                                                            )
+                                                        })
+                                                        .child(subject_with_refs(
+                                                            ix,
+                                                            subject,
+                                                            refs,
+                                                            badges_right,
+                                                            (fade_base, fade_hover),
+                                                            cx,
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(muted)
+                                                                .flex_none()
+                                                                .max_w(px(110.))
+                                                                .truncate()
+                                                                .child(commit.author_name.clone()),
+                                                        )
+                                                        .child(
+                                                            super::relative_time_label(
+                                                                ("commit-time", ix),
+                                                                commit.committed_at,
+                                                                cx,
+                                                            )
+                                                            .test_id(|| format!("commit-time:{ix}"))
+                                                            .text_xs()
+                                                            // Ahead of the clock: a commit from a
+                                                            // machine whose clock runs fast. Fades
+                                                            // with the rest of a dimmed row.
+                                                            .text_color(
+                                                                if crate::format::is_future(
+                                                                    commit.committed_at,
+                                                                ) {
+                                                                    cx.theme().warning
+                                                                } else {
+                                                                    muted
+                                                                },
+                                                            )
+                                                            .flex_none()
+                                                            .w(px(78.))
+                                                            .text_right(),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .font_family(mono.clone())
+                                                                .text_xs()
+                                                                .text_color(muted)
+                                                                .flex_none()
+                                                                .child(
+                                                                    commit.short_hash().to_string(),
+                                                                ),
+                                                        ),
                                                 )
                                                 .child(
                                                     Button::new(("commit-menu", ix))
+                                                        .a11y_name(|| {
+                                                            format!(
+                                                                "Actions for commit {}",
+                                                                commit.short_hash()
+                                                            )
+                                                        })
                                                         .when(!menu_buttons, |b| b.hidden())
                                                         .ghost()
                                                         .xsmall()
@@ -570,6 +643,7 @@ impl Osier {
             list = list.child(
                 h_flex()
                     .id(("reflog", ix))
+                    .a11y_item(|| format!("{} {}", e.selector, e.message))
                     .px_3()
                     .py_1p5()
                     .gap_3()
@@ -607,6 +681,7 @@ impl Osier {
                     )
                     .child(
                         Button::new(("reflog-menu", ix))
+                            .a11y_name(|| format!("Actions for {}", e.selector))
                             .when(!menu_buttons, |b| b.hidden())
                             .ghost()
                             .xsmall()
@@ -672,8 +747,58 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
     tag.xsmall().child(text)
 }
 
-/// A commit subject with up to three ref badges (`git.log_badges`). Without badges the
-/// subject ends in an ellipsis.
+/// How many ref badges a log row shows before the rest go into a "+N" badge.
+const MAX_LOG_BADGES: usize = 3;
+
+/// A log row's ref badges, most useful first, and the refs that did not fit.
+pub(crate) struct LogBadges {
+    pub shown: Vec<String>,
+    pub hidden: Vec<String>,
+}
+
+/// Order a commit's decorations for its log row: the checked-out branch (or a detached
+/// HEAD), other local branches, tags, then remote branches, each group by name. Git
+/// lists other local branches after the remote ones, so a row with a branch, `origin/main`
+/// and `origin/HEAD` used to leave the second local branch out. A remote's `HEAD` (which
+/// branch the remote treats as its default) is dropped when another branch of that remote is
+/// on the same row; it adds nothing there. The first [`MAX_LOG_BADGES`] are shown.
+pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+    /// The remote and branch of a remote-tracking ref, `None` for anything else.
+    fn remote_of<'a>(
+        remotes: &'a [osier_git::refs::Remote],
+        r: &'a str,
+    ) -> Option<(&'a str, &'a str)> {
+        crate::app::github::split_remote_branch(remotes, r)
+            .map(|(remote, branch)| (remote.name.as_str(), branch))
+    }
+    let rank = |r: &str| {
+        if r.starts_with("HEAD") {
+            0
+        } else if r.starts_with("tag: ") {
+            2
+        } else if remote_of(remotes, r).is_some() {
+            3
+        } else {
+            1
+        }
+    };
+    let mut kept: Vec<&String> = refs
+        .iter()
+        .filter(|r| match remote_of(remotes, r) {
+            Some((remote, "HEAD")) => !refs.iter().any(|other| {
+                other != *r && remote_of(remotes, other).is_some_and(|(o, _)| o == remote)
+            }),
+            _ => true,
+        })
+        .collect();
+    kept.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+    let mut shown: Vec<String> = kept.into_iter().cloned().collect();
+    let hidden = shown.split_off(shown.len().min(MAX_LOG_BADGES));
+    LogBadges { shown, hidden }
+}
+
+/// A commit subject with up to [`MAX_LOG_BADGES`] ref badges (`git.log_badges`), and a "+N"
+/// badge naming the rest in its tooltip. Without badges the subject ends in an ellipsis.
 ///
 /// Left: badges first, then the subject; the row's end fades out over badges that do not
 /// fit. Right: the subject runs up to the badges at the end of the line and fades out
@@ -683,15 +808,15 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
 fn subject_with_refs(
     ix: usize,
     subject: String,
-    refs: Vec<String>,
+    refs: LogBadges,
     right: bool,
     fade: (Hsla, Hsla),
     cx: &App,
 ) -> AnyElement {
     let (base, hover) = fade;
-    if refs.is_empty() {
+    if refs.shown.is_empty() {
         return div()
-            .test_id(format!("log-subject:{ix}"))
+            .test_id(|| format!("log-subject:{ix}"))
             .flex_1()
             .min_w_0()
             .text_sm()
@@ -699,7 +824,19 @@ fn subject_with_refs(
             .child(subject)
             .into_any_element();
     }
-    let badges = refs.into_iter().take(3).map(|r| {
+    let more = (!refs.hidden.is_empty()).then(|| {
+        super::hint(
+            ("log-ref-more", ix),
+            refs.hidden.join(", "),
+            "log-ref-more-tooltip",
+            cx,
+        )
+        .flex_none()
+        .test_id(|| format!("log-ref-more:{ix}"))
+        .child(ref_tag(format!("+{}", refs.hidden.len()), false, false, cx))
+        .into_any_element()
+    });
+    let badges = refs.shown.into_iter().map(|r| {
         let is_head = r.starts_with("HEAD");
         let is_tag = r.starts_with("tag: ");
         let label = r
@@ -708,9 +845,11 @@ fn subject_with_refs(
             .to_string();
         div()
             .flex_none()
-            .test_id(format!("log-ref:{ix}:{label}"))
+            .test_id(|| format!("log-ref:{ix}:{label}"))
             .child(ref_tag(label, is_head, is_tag, cx))
+            .into_any_element()
     });
+    let badges = badges.chain(more);
     if !right {
         return h_flex()
             .relative()
@@ -722,7 +861,7 @@ fn subject_with_refs(
             .children(badges)
             .child(
                 div()
-                    .test_id(format!("log-subject:{ix}"))
+                    .test_id(|| format!("log-subject:{ix}"))
                     .text_sm()
                     .truncate()
                     .min_w_0()
@@ -742,7 +881,7 @@ fn subject_with_refs(
         .child(
             // Runs under the gap so the fade, not the clip, ends the text.
             div()
-                .test_id(format!("log-subject:{ix}"))
+                .test_id(|| format!("log-subject:{ix}"))
                 .flex_1()
                 .min_w_0()
                 .mr(px(-REF_GAP))
@@ -789,8 +928,8 @@ fn subject_with_refs(
 }
 
 /// The bindable action behind a Log commit menu entry, for its key hint.
-fn log_menu_kind(label: &str) -> Option<crate::row_actions::RowKind> {
-    use crate::row_actions::RowKind as K;
+fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
+    use row_actions::RowKind as K;
     Some(match label {
         "Checkout (detached)" => K::Checkout,
         "New branch here…" => K::NewBranchHere,
@@ -809,6 +948,70 @@ fn log_menu_kind(label: &str) -> Option<crate::row_actions::RowKind> {
         "Undo last commit…" => K::UndoLastCommit,
         "Copy hash" => K::CopyHash,
         "Open on GitHub" => K::OpenOnGithub,
+        l if l.starts_with("View pull request #") || l.starts_with("Pull requests for ") => {
+            K::PullRequests
+        }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_badges;
+    use osier_git::refs::Remote;
+
+    fn refs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn origin() -> Vec<Remote> {
+        vec![Remote {
+            name: "origin".into(),
+            fetch_url: "https://example.com/app.git".into(),
+            push_url: None,
+        }]
+    }
+
+    #[test]
+    fn local_branches_come_before_remote_ones() {
+        // Git's own order for a commit two local branches point at.
+        let b = log_badges(
+            &refs(&["HEAD -> main", "origin/main", "origin/HEAD", "feat/multi"]),
+            &origin(),
+        );
+        assert_eq!(b.shown, ["HEAD -> main", "feat/multi", "origin/main"]);
+        assert!(b.hidden.is_empty(), "{:?}", b.hidden);
+    }
+
+    #[test]
+    fn order_is_head_local_tags_remote_and_the_rest_are_counted() {
+        let b = log_badges(
+            &refs(&[
+                "HEAD -> main",
+                "origin/main",
+                "origin/feat/a",
+                "tag: v1",
+                "feat/b",
+                "feat/a",
+            ]),
+            &origin(),
+        );
+        assert_eq!(b.shown, ["HEAD -> main", "feat/a", "feat/b"]);
+        assert_eq!(b.hidden, ["tag: v1", "origin/feat/a", "origin/main"]);
+    }
+
+    #[test]
+    fn a_remote_head_alone_stays() {
+        let b = log_badges(&refs(&["origin/HEAD", "feat/x"]), &origin());
+        assert_eq!(b.shown, ["feat/x", "origin/HEAD"]);
+        // A local branch that only looks like one is not a remote's HEAD.
+        let b = log_badges(&refs(&["upstream/HEAD", "origin/main"]), &origin());
+        assert_eq!(b.shown, ["upstream/HEAD", "origin/main"]);
+    }
+
+    #[test]
+    fn a_detached_head_leads() {
+        let b = log_badges(&refs(&["origin/main", "HEAD"]), &origin());
+        assert_eq!(b.shown, ["HEAD", "origin/main"]);
+    }
 }

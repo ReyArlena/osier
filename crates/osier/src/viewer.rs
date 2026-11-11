@@ -70,9 +70,71 @@ pub fn is_markdown(path: &str) -> bool {
     )
 }
 
+/// What [`read_for_viewer`] found, made into a [`Viewer`] on the UI thread.
+enum Loaded {
+    Missing,
+    Error(String),
+    Binary(u64),
+    Image {
+        full_path: std::path::PathBuf,
+        bytes: u64,
+    },
+    Lfs {
+        oid: String,
+        bytes: u64,
+    },
+    Text(String),
+}
+
+/// Read a file for the viewer: the working tree copy (up to `limit` bytes, images whole) or
+/// the one at `rev`. Blocking: runs in the background.
+fn read_for_viewer(
+    repo: &osier_git::Repository,
+    path: &str,
+    rev: Option<&str>,
+    limit: u64,
+) -> Loaded {
+    let full = repo.workdir().join(path);
+    let bytes: Option<Vec<u8>> = match rev {
+        None => match std::fs::metadata(&full) {
+            Ok(meta) if meta.len() > limit && !is_image(path) => {
+                return Loaded::Binary(meta.len());
+            }
+            Ok(_) => std::fs::read(&full).ok(),
+            Err(_) => None,
+        },
+        Some(rev) => match files::show_at(repo, rev, path) {
+            Ok(b) => b,
+            Err(e) => return Loaded::Error(e.to_string()),
+        },
+    };
+    let Some(bytes) = bytes else {
+        return Loaded::Missing;
+    };
+    let size = bytes.len() as u64;
+    if is_image(path) && rev.is_none() {
+        Loaded::Image {
+            full_path: full,
+            bytes: size,
+        }
+    } else if files::is_lfs_pointer(&bytes) {
+        let text = String::from_utf8_lossy(&bytes);
+        let (oid, bytes) = files::lfs_pointer_info(&text).unwrap_or_default();
+        Loaded::Lfs { oid, bytes }
+    } else if files::looks_binary(&bytes) {
+        Loaded::Binary(size)
+    } else {
+        Loaded::Text(
+            String::from_utf8(bytes)
+                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
+        )
+    }
+}
+
 impl Osier {
-    /// Read the file (working tree or at `rev`) and pick a viewer. Synchronous: files are
-    /// capped by the large-file setting, so reads are quick.
+    /// Read the file (working tree or at `rev`) and pick a viewer. The read (and the
+    /// `git show` for a revision) runs in the background; the previous viewer stays until the
+    /// result is in, and a result for a selection that has moved on is dropped.
     pub(crate) fn load_viewer(
         &mut self,
         path: String,
@@ -82,64 +144,54 @@ impl Osier {
         let Some(project) = self.active_project() else {
             return;
         };
-        let full = project.repo.workdir().join(&path);
+        let repo = project.repo.clone();
         let limit = self.settings.diff.large_file_bytes;
-        let bytes: Option<Vec<u8>> = match &rev {
-            None => match std::fs::metadata(&full) {
-                Ok(meta) if meta.len() > limit && !is_image(&path) => {
-                    self.viewer = Some(Viewer::Binary { bytes: meta.len() });
-                    cx.notify();
+        self.viewer_load += 1;
+        let load = self.viewer_load;
+        let read_path = path.clone();
+        let wanted = crate::project::Selection::WorkFile {
+            path: path.clone(),
+            rev: rev.clone(),
+        };
+        self.in_background_user_cx(
+            crate::background::LOADING_FILE,
+            move || read_for_viewer(&repo, &read_path, rev.as_deref(), limit),
+            move |this, loaded, cx| {
+                // Another file was picked meanwhile, or the selection moved to a diff.
+                let still_wanted = this.active_project().is_some_and(|p| p.selection == wanted);
+                if this.viewer_load != load || !still_wanted {
                     return;
                 }
-                Ok(_) => std::fs::read(&full).ok(),
-                Err(_) => None,
+                this.viewer = Some(match loaded {
+                    Loaded::Missing => Viewer::Missing,
+                    Loaded::Error(e) => Viewer::Error(e),
+                    Loaded::Binary(bytes) => Viewer::Binary { bytes },
+                    Loaded::Image { full_path, bytes } => Viewer::Image { full_path, bytes },
+                    Loaded::Lfs { oid, bytes } => Viewer::Lfs { oid, bytes },
+                    Loaded::Text(text) => {
+                        let text: SharedString = text.into();
+                        let language = language_for(&path);
+                        if is_markdown(&path) {
+                            this.markdown_as_code = this.settings.viewer.markdown_mode_for(&path)
+                                == osier_config::settings::MarkdownMode::Code;
+                            Viewer::Markdown {
+                                text,
+                                language,
+                                state: None,
+                            }
+                        } else {
+                            Viewer::Code {
+                                text,
+                                language,
+                                state: None,
+                            }
+                        }
+                    }
+                });
+                cx.notify();
             },
-            Some(rev) => match files::show_at(&project.repo, rev, &path) {
-                Ok(b) => b,
-                Err(e) => {
-                    self.viewer = Some(Viewer::Error(e.to_string()));
-                    cx.notify();
-                    return;
-                }
-            },
-        };
-        let Some(bytes) = bytes else {
-            self.viewer = Some(Viewer::Missing);
-            cx.notify();
-            return;
-        };
-        let size = bytes.len() as u64;
-        self.viewer = Some(if is_image(&path) && rev.is_none() {
-            Viewer::Image {
-                full_path: full,
-                bytes: size,
-            }
-        } else if files::is_lfs_pointer(&bytes) {
-            let text = String::from_utf8_lossy(&bytes);
-            let (oid, bytes) = files::lfs_pointer_info(&text).unwrap_or_default();
-            Viewer::Lfs { oid, bytes }
-        } else if files::looks_binary(&bytes) {
-            Viewer::Binary { bytes: size }
-        } else {
-            let text: SharedString = String::from_utf8_lossy(&bytes).into_owned().into();
-            let language = language_for(&path);
-            if is_markdown(&path) {
-                self.markdown_as_code = self.settings.viewer.markdown_mode_for(&path)
-                    == osier_config::settings::MarkdownMode::Code;
-                Viewer::Markdown {
-                    text,
-                    language,
-                    state: None,
-                }
-            } else {
-                Viewer::Code {
-                    text,
-                    language,
-                    state: None,
-                }
-            }
-        });
-        cx.notify();
+            cx,
+        );
     }
 
     /// The read-only editor for the current viewer, created on first use.

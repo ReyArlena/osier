@@ -117,7 +117,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "open_repository",
-            "Open repository",
+            "Open repository…",
             "General",
             ["ctrl-shift-o"],
             App,
@@ -125,7 +125,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "clone_repository",
-            "Clone repository",
+            "Clone repository…",
             "General",
             [],
             App,
@@ -133,7 +133,7 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "create_repository",
-            "Create new repository",
+            "Create new repository…",
             "General",
             [],
             App,
@@ -157,15 +157,23 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
         ),
         spec!(
             "switch_project",
-            "Switch project",
+            "Switch project…",
             "General",
             ["ctrl-o"],
             App,
             SwitchProject
         ),
         spec!(
+            "switch_branch",
+            "Switch branch…",
+            "General",
+            ["ctrl-shift-b"],
+            App,
+            SwitchBranch
+        ),
+        spec!(
             "open_settings",
-            "Settings",
+            "Settings…",
             "General",
             ["ctrl-,"],
             App,
@@ -186,6 +194,14 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             ["ctrl-`"],
             App,
             ToggleCommandLog
+        ),
+        spec!(
+            "toggle_notifications",
+            "Toggle notifications",
+            "View",
+            ["ctrl-shift-n"],
+            App,
+            ToggleNotifications
         ),
         spec!(
             "toggle_commit_details",
@@ -310,19 +326,180 @@ pub(crate) fn actions() -> Vec<ActionSpec> {
             SelectPrev
         ),
         spec!(
-            "update_project",
-            "Update project",
+            "update_branch",
+            "Update branch…",
             "Remote",
             ["ctrl-t"],
             App,
-            UpdateProject
+            UpdateBranch
         ),
-        spec!("fetch", "Fetch", "Remote", ["ctrl-shift-f"], App, Fetch),
-        spec!("pull", "Pull", "Remote", ["ctrl-shift-l"], App, Pull),
-        spec!("push", "Push", "Remote", ["ctrl-shift-p"], App, Push),
+        spec!("fetch", "Fetch…", "Remote", ["ctrl-shift-f"], App, Fetch),
+        spec!("pull", "Pull…", "Remote", ["ctrl-shift-l"], App, Pull),
+        spec!("push", "Push…", "Remote", ["ctrl-shift-p"], App, Push),
+        // The rows of those submenus, unbound until you bind them.
+        spec!(
+            "update_branch_now",
+            "Update branch",
+            "Remote",
+            [],
+            App,
+            UpdateBranchNow
+        ),
+        spec!(
+            "update_branch_merge",
+            "Update branch with merge",
+            "Remote",
+            [],
+            App,
+            UpdateBranchMerge
+        ),
+        spec!(
+            "update_branch_rebase",
+            "Update branch with rebase",
+            "Remote",
+            [],
+            App,
+            UpdateBranchRebase
+        ),
+        spec!(
+            "forget_update_method",
+            "Forget the update method for this project",
+            "Remote",
+            [],
+            App,
+            ForgetUpdateMethod
+        ),
+        spec!(
+            "fetch_all",
+            "Fetch all remotes",
+            "Remote",
+            [],
+            App,
+            FetchAll
+        ),
+        spec!(
+            "fetch_prune",
+            "Fetch all and prune deleted branches",
+            "Remote",
+            [],
+            App,
+            FetchPrune
+        ),
+        spec!(
+            "fetch_origin",
+            "Fetch origin",
+            "Remote",
+            [],
+            App,
+            FetchOrigin
+        ),
+        spec!(
+            "pull_ff_only",
+            "Pull (fast-forward only)",
+            "Remote",
+            [],
+            App,
+            PullFfOnly
+        ),
+        spec!(
+            "pull_rebase",
+            "Pull with rebase",
+            "Remote",
+            [],
+            App,
+            PullRebase
+        ),
+        spec!(
+            "pull_merge",
+            "Pull with merge",
+            "Remote",
+            [],
+            App,
+            PullMerge
+        ),
+        spec!("push_branch", "Push", "Remote", [], App, PushBranch),
+        spec!(
+            "push_set_upstream",
+            "Push and set upstream (origin)",
+            "Remote",
+            [],
+            App,
+            PushSetUpstream
+        ),
+        spec!(
+            "force_push",
+            "Force push with lease…",
+            "Remote",
+            [],
+            App,
+            ForcePush
+        ),
     ];
-    all.extend(crate::row_actions::specs());
+    all.extend(palette_specs());
+    all.extend(crate::app::row_actions::specs());
     all
+}
+
+/// Palette commands with no action of their own, bindable through `PaletteAction`. Unbound
+/// by default; the name is the palette label, "…" included (it opens a dialog or a choice).
+pub(crate) fn palette_specs() -> Vec<ActionSpec> {
+    macro_rules! palette {
+        ($(($id:literal, $name:literal, $cat:literal)),* $(,)?) => {
+            vec![$(ActionSpec {
+                id: $id,
+                name: $name,
+                category: $cat,
+                defaults: &[],
+                scope: Scope::App,
+                detail: "",
+                make: || Box::new(crate::palette::PaletteAction { id: $id }),
+            }),*]
+        };
+    }
+    palette![
+        ("open_themes_folder", "Open themes folder", "General"),
+        ("rescan_projects", "Rescan project directories", "General"),
+        ("scan_project_status", "Scan project status now", "General"),
+        ("commit_and_push", "Commit and push", "Changes"),
+        ("stage_all", "Stage all", "Changes"),
+        ("unstage_all", "Unstage all", "Changes"),
+        ("stash_changes", "Stash changes…", "Changes"),
+        ("shelve_all_changes", "Shelve all changes…", "Changes"),
+        (
+            "choose_github_account",
+            "Choose GitHub account for this project…",
+            "Remote"
+        ),
+        (
+            "forget_github_account",
+            "Forget GitHub account choice for this project",
+            "Remote"
+        ),
+        ("new_branch", "New branch…", "Branches"),
+        (
+            "apply_patch_from_clipboard",
+            "Apply patch from clipboard…",
+            "Patches"
+        ),
+        ("apply_patch_from_file", "Apply patch from file…", "Patches"),
+        (
+            "copy_all_changes_as_patch",
+            "Copy all changes as patch",
+            "Patches"
+        ),
+        ("diff_unified", "Unified layout", "Diff"),
+        ("diff_split", "Split layout", "Diff"),
+        (
+            "conflicts_three_way",
+            "Conflicts in the 3-way merge tool",
+            "Diff"
+        ),
+        ("conflicts_inline", "Conflicts inline", "Diff"),
+        ("toggle_soft_wrap", "Toggle soft wrap", "Diff"),
+        ("open_in_editor", "Open project in editor", "Open"),
+        ("open_terminal", "Open terminal here", "Open"),
+        ("open_in_file_manager", "Open in file manager", "Open"),
+    ]
 }
 
 /// A keystroke that cannot type into a text field: a modifier chord or a function key.
@@ -471,6 +648,8 @@ pub(crate) fn apply(overrides: &osier_config::keymap::KeymapFile, cx: &mut App) 
     cx.bind_keys(kit);
     cx.bind_keys(ours);
     cx.set_global(keymap);
+    // Menus and tooltips in the cached main view show these keys: redraw past the cache.
+    cx.refresh_windows();
 }
 
 /// A recorded keystroke in gpui notation (`ctrl-shift-p`, `?`, `f5`). `None` for a modifier
@@ -757,12 +936,35 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len());
-        // Context-menu actions, the prefix key, clone and create start unbound; everything
-        // else has keys.
-        let unbound = [super::PREFIX_KEY, "clone_repository", "create_repository"];
+        // Context-menu actions, the prefix key, clone and create, the rows of the palette's
+        // remote submenus and the palette-only commands start unbound; everything else has
+        // keys.
+        let palette_only: Vec<&str> = super::palette_specs().iter().map(|s| s.id).collect();
+        let unbound = [
+            super::PREFIX_KEY,
+            "clone_repository",
+            "create_repository",
+            "update_branch_now",
+            "update_branch_merge",
+            "update_branch_rebase",
+            "forget_update_method",
+            "fetch_all",
+            "fetch_prune",
+            "fetch_origin",
+            "pull_ff_only",
+            "pull_rebase",
+            "pull_merge",
+            "push_branch",
+            "push_set_upstream",
+            "force_push",
+        ];
         assert!(
             all.iter()
-                .filter(|a| a.scope != Scope::Row && !unbound.contains(&a.id))
+                .filter(|a| {
+                    a.scope != Scope::Row
+                        && !unbound.contains(&a.id)
+                        && !palette_only.contains(&a.id)
+                })
                 .all(|a| !a.defaults.is_empty())
         );
         assert!(

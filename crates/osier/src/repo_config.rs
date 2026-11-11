@@ -3,14 +3,13 @@
 //! overrides. Read only for now. Opened from a project's sidebar menu as a dialog, or shown
 //! as a tab (Settings > Git > Git config tab).
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::{Path, PathBuf};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::*;
 use osier_git::Repository;
 use osier_git::config::{ConfigEntry, Scope};
@@ -603,7 +602,7 @@ impl Osier {
         let root_focus = self.focus_handle.clone();
         let focus = cx.focus_handle();
         let inner = focus.clone();
-        window.open_dialog(cx, move |dialog, window, _| {
+        window.open_app_dialog(cx, move |dialog, window, _| {
             let viewport = window.viewport_size();
             let width = (viewport.width * 0.9).min(px(900.));
             let height = (viewport.height * 0.8).min(px(820.));
@@ -755,7 +754,7 @@ fn repo_config_body(
                 let weak = weak.clone();
                 line.child(
                     Button::new(("repo-config-open", ix))
-                        .test_id(format!("repo-config-open:{ix}"))
+                        .test_id(|| format!("repo-config-open:{ix}"))
                         .xsmall()
                         .ghost()
                         .label("Open")

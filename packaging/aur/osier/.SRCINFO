@@ -1,6 +1,6 @@
 pkgbase = osier
 	pkgdesc = Fast native git GUI
-	pkgver = 0.2.0
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/ReyArlena/osier
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = osier
 	depends = gcc-libs
 	depends = glibc
 	optdepends = github-cli: multi-account GitHub authentication
-	source = osier-0.2.0.tar.gz::https://github.com/ReyArlena/osier/archive/refs/tags/v0.2.0.tar.gz
+	source = osier-0.3.0.tar.gz::https://github.com/ReyArlena/osier/archive/refs/tags/v0.3.0.tar.gz
 	sha256sums = SKIP
 
 pkgname = osier

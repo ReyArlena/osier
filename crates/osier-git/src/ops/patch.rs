@@ -4,15 +4,21 @@ use crate::diff::{DiffFile, FileStatus, Hunk, Line, LineKind};
 
 /// Patch containing only hunk `hunk_ix` of `file`.
 pub fn hunk_patch(file: &DiffFile, hunk_ix: usize) -> Option<String> {
-    lines_patch(file, hunk_ix, |_| true)
+    lines_patch(file, hunk_ix, false, |_| true)
 }
 
 /// Patch containing hunk `hunk_ix` with only the changed lines for which `selected` is true.
-/// Unselected added lines are dropped; unselected removed lines become context. Returns `None`
-/// when nothing is selected or the file is binary.
+/// Returns `None` when nothing is selected or the file is binary.
+///
+/// `reverse` says how the patch will be applied, because the lines left out have to match
+/// what the patch is applied to. Applied forwards (staging) that is the old side: unselected
+/// added lines are dropped and unselected removed lines become context. Applied in reverse
+/// (unstaging, discarding) it is the new side: unselected added lines become context and
+/// unselected removed lines are dropped.
 pub fn lines_patch(
     file: &DiffFile,
     hunk_ix: usize,
+    reverse: bool,
     selected: impl Fn(&Line) -> bool,
 ) -> Option<String> {
     if file.binary {
@@ -22,35 +28,30 @@ pub fn lines_patch(
     let mut body = String::new();
     let (mut old_count, mut new_count, mut changed) = (0u32, 0u32, 0usize);
     for line in &hunk.lines {
-        let keep = match line.kind {
-            LineKind::Context => {
-                old_count += 1;
-                new_count += 1;
-                Some(' ')
-            }
-            LineKind::Added => {
-                if selected(line) {
-                    new_count += 1;
-                    changed += 1;
-                    Some('+')
-                } else {
-                    None
-                }
-            }
-            LineKind::Removed => {
-                if selected(line) {
-                    old_count += 1;
-                    changed += 1;
-                    Some('-')
-                } else {
-                    // Not removing it: it stays in both versions.
-                    old_count += 1;
-                    new_count += 1;
-                    Some(' ')
-                }
-            }
+        // What an unselected changed line turns into: context when the side the patch is
+        // applied to has the line, nothing when it does not.
+        let (marker, in_target) = match line.kind {
+            LineKind::Context => (' ', true),
+            LineKind::Added => ('+', reverse),
+            LineKind::Removed => ('-', !reverse),
+        };
+        let keep = if line.kind == LineKind::Context {
+            Some(' ')
+        } else if selected(line) {
+            changed += 1;
+            Some(marker)
+        } else if in_target {
+            Some(' ')
+        } else {
+            None
         };
         if let Some(marker) = keep {
+            if marker != '+' {
+                old_count += 1;
+            }
+            if marker != '-' {
+                new_count += 1;
+            }
             body.push(marker);
             body.push_str(&line.text);
             body.push('\n');
@@ -62,19 +63,33 @@ pub fn lines_patch(
     if changed == 0 {
         return None;
     }
-    let old_start = hunk.old_start;
-    // A single hunk applied on its own starts at the same line on both sides, except for a
-    // brand new file where the old side has no lines at all.
-    let new_start = if old_count == 0 && old_start == 0 {
-        1
+    // A single hunk applied on its own starts at the same line on both sides, counted on the
+    // side the patch is applied to. A side with no lines at all (a brand new or deleted file)
+    // starts at 0.
+    let (old_start, new_start) = if reverse {
+        let new_start = hunk.new_start;
+        let old_start = if new_count == 0 && new_start == 0 {
+            1
+        } else {
+            new_start.max(1)
+        };
+        (old_start, new_start)
     } else {
-        old_start.max(1)
+        let old_start = hunk.old_start;
+        let new_start = if old_count == 0 && old_start == 0 {
+            1
+        } else {
+            old_start.max(1)
+        };
+        (old_start, new_start)
     };
     let mut out = String::new();
     let old_path = file.old_path.as_deref().unwrap_or(&file.path);
     out.push_str(&format!("diff --git a/{old_path} b/{}\n", file.path));
+    // With some lines left out, a new file's patch still has old lines and a deleted file's
+    // still has new ones: git only takes those as an edit of the file.
     match file.status {
-        FileStatus::Added => {
+        FileStatus::Added if old_count == 0 => {
             out.push_str(&format!(
                 "new file mode {}\n",
                 file.new_mode.as_deref().unwrap_or("100644")
@@ -82,7 +97,7 @@ pub fn lines_patch(
             out.push_str("--- /dev/null\n");
             out.push_str(&format!("+++ b/{}\n", file.path));
         }
-        FileStatus::Deleted => {
+        FileStatus::Deleted if new_count == 0 => {
             out.push_str(&format!(
                 "deleted file mode {}\n",
                 file.old_mode.as_deref().unwrap_or("100644")
@@ -206,8 +221,10 @@ mod tests {
         let repo = t.repo();
         let files = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
         // Select only the added "d" line (new line 4): "b" stays, "B" is not staged.
-        let patch =
-            lines_patch(&files[0], 0, |l| l.kind == LineKind::Added && l.text == "d").unwrap();
+        let patch = lines_patch(&files[0], 0, false, |l| {
+            l.kind == LineKind::Added && l.text == "d"
+        })
+        .unwrap();
         apply_patch(&repo, &patch, ApplyTarget::Index, false).unwrap();
         let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
         let added: Vec<&str> = staged[0].hunks[0]
@@ -220,6 +237,137 @@ mod tests {
         assert_eq!(staged[0].removed(), 0, "unselected removal became context");
         let unstaged = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
         assert_eq!((unstaged[0].added(), unstaged[0].removed()), (1, 1));
+    }
+
+    fn kinds(file: &DiffFile, kind: LineKind) -> Vec<&str> {
+        file.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .filter(|l| l.kind == kind)
+            .map(|l| l.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn unstage_selected_lines_only() {
+        let t = TempRepo::new();
+        t.commit_file("f.txt", "a\nb\nc\n", "base");
+        t.write("f.txt", "a\nB\nc\nd\n");
+        t.git(["add", "f.txt"]);
+        let repo = t.repo();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        // Unstage only the added "d": the b -> B change stays staged.
+        let patch = lines_patch(&staged[0], 0, true, |l| {
+            l.kind == LineKind::Added && l.text == "d"
+        })
+        .unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Index, true).unwrap();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        assert_eq!(kinds(&staged[0], LineKind::Added), ["B"]);
+        assert_eq!(kinds(&staged[0], LineKind::Removed), ["b"]);
+        let unstaged = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
+        assert_eq!(kinds(&unstaged[0], LineKind::Added), ["d"]);
+        assert_eq!(unstaged[0].removed(), 0);
+        assert_eq!(t.read("f.txt"), "a\nB\nc\nd\n", "working tree untouched");
+    }
+
+    #[test]
+    fn unstage_a_selected_removal_only() {
+        let t = TempRepo::new();
+        t.commit_file("f.txt", "a\nb\nc\n", "base");
+        t.write("f.txt", "a\nB\nc\nd\n");
+        t.git(["add", "f.txt"]);
+        let repo = t.repo();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        // Unstage only the removal of "b": the index keeps it next to the staged "B".
+        let patch = lines_patch(&staged[0], 0, true, |l| l.kind == LineKind::Removed).unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Index, true).unwrap();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        assert_eq!(kinds(&staged[0], LineKind::Added), ["B", "d"]);
+        assert_eq!(staged[0].removed(), 0);
+    }
+
+    #[test]
+    fn unstage_lines_of_a_new_file() {
+        let t = TempRepo::new();
+        t.commit_file("keep.txt", "k\n", "base");
+        t.write("n.txt", "one\ntwo\nthree\n");
+        t.git(["add", "n.txt"]);
+        let repo = t.repo();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        let patch = lines_patch(&staged[0], 0, true, |l| l.text == "two").unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Index, true).unwrap();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        assert_eq!(kinds(&staged[0], LineKind::Added), ["one", "three"]);
+        let unstaged = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
+        assert_eq!(kinds(&unstaged[0], LineKind::Added), ["two"]);
+    }
+
+    #[test]
+    fn unstage_every_line_of_a_new_file_by_selection() {
+        let t = TempRepo::new();
+        t.commit_file("keep.txt", "k\n", "base");
+        t.write("n.txt", "one\ntwo\n");
+        t.git(["add", "n.txt"]);
+        let repo = t.repo();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        let patch = lines_patch(&staged[0], 0, true, |_| true).unwrap();
+        assert!(patch.contains("new file mode"));
+        apply_patch(&repo, &patch, ApplyTarget::Index, true).unwrap();
+        assert!(
+            diff(&repo, &DiffOptions::new(DiffTarget::Staged))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn unstage_part_of_a_staged_deletion() {
+        let t = TempRepo::new();
+        t.commit_file("gone.txt", "one\ntwo\nthree\n", "base");
+        t.git(["rm", "-q", "gone.txt"]);
+        let repo = t.repo();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        // Unstage the removal of "two" only: the index gets the file back with that line.
+        let patch = lines_patch(&staged[0], 0, true, |l| l.text == "two").unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Index, true).unwrap();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        assert_eq!(kinds(&staged[0], LineKind::Removed), ["one", "three"]);
+        assert_eq!(staged[0].added(), 0);
+    }
+
+    #[test]
+    fn stage_part_of_a_deleted_file() {
+        let t = TempRepo::new();
+        t.commit_file("gone.txt", "one\ntwo\nthree\n", "base");
+        t.remove("gone.txt");
+        let repo = t.repo();
+        let files = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
+        // Stage the removal of "two" only: the index keeps the file with the other lines.
+        let patch = lines_patch(&files[0], 0, false, |l| l.text == "two").unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Index, false).unwrap();
+        let staged = diff(&repo, &DiffOptions::new(DiffTarget::Staged)).unwrap();
+        assert_eq!(kinds(&staged[0], LineKind::Removed), ["two"]);
+        assert_eq!(staged[0].added(), 0);
+    }
+
+    #[test]
+    fn discard_selected_lines_only() {
+        let t = TempRepo::new();
+        t.commit_file("f.txt", "a\nb\nc\n", "base");
+        t.write("f.txt", "a\nB\nc\nd\n");
+        let repo = t.repo();
+        let files = diff(&repo, &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
+        let patch = lines_patch(&files[0], 0, true, |l| {
+            l.kind == LineKind::Added && l.text == "d"
+        })
+        .unwrap();
+        apply_patch(&repo, &patch, ApplyTarget::Worktree, true).unwrap();
+        assert_eq!(
+            t.read("f.txt"),
+            "a\nB\nc\n",
+            "only the selected line is gone"
+        );
     }
 
     #[test]
@@ -254,7 +402,7 @@ mod tests {
     fn nothing_selected_is_none() {
         let t = two_hunk_repo();
         let files = diff(&t.repo(), &DiffOptions::new(DiffTarget::Unstaged)).unwrap();
-        assert!(lines_patch(&files[0], 0, |_| false).is_none());
+        assert!(lines_patch(&files[0], 0, false, |_| false).is_none());
         assert!(hunk_patch(&files[0], 5).is_none());
     }
 

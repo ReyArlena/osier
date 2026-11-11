@@ -51,11 +51,27 @@ The workspace is split into `osier-git` (git layer, no UI), `osier-config`, `osi
 
 ## UI changes
 
-Headless UI tests live in `crates/osier/src/app.rs` (`mod tests`) and run with plain
-`cargo test`. Add one for every new flow that can be driven without a pointer. For visual
-checks, `scripts/dev-screenshot.sh [seconds] [repo]` builds, launches, captures with `grim`
-(Wayland) and prints the log. Screenshots for the README show only this repository or a
-throwaway one.
+Headless UI tests live in `crates/osier/src/app/tests/` (the harness in `mod.rs`, one file
+per area) and run with plain `cargo test`. Add one for every new flow that can be driven
+without a pointer. For visual checks, `scripts/dev-screenshot.sh [seconds] [repo]` builds,
+launches, captures with `grim` (Wayland) and prints the log. Screenshots for the README show
+only this repository or a throwaway one.
+
+Everything a user can act on needs a name for assistive technology (screen readers, voice
+control). gpui-kit's controls name themselves when they show a label; what we build
+ourselves does not. The top of `crates/osier/src/a11y.rs` lists what needs what:
+
+- a list row (a `div` or `ListItem` with a click): `.a11y_row(|| label, selected)`, or
+  `.a11y_item(|| label)` when it cannot be selected, right after its `.test_id(..)`
+- a button that shows only an icon, and every slider: `.tooltip(..)` (buttons) or
+  `.accessibility_label(..)`
+- a checkbox without a visible label, and buttons that repeat on every row with the same
+  text: `.a11y_name(|| ..)` with what they act on
+
+`cargo test` checks the source for these (`a11y::tests`), and a real exception takes a
+`// a11y: <why>` comment on the line above. To see what assistive technology gets, turn on
+the session's accessibility flag and look at the app with an AT-SPI browser such as
+Accerciser; every button, checkbox and row should have a name.
 
 ## Pull requests
 
@@ -72,3 +88,8 @@ tests (`OSIER_LIVE_TESTS=1 cargo test -p osier --test live -- --ignored`) need g
 and a private repository you can push to: set `OSIER_LIVE_REPO` (its https URL) and
 `OSIER_LIVE_OWNER` (the gh login that owns it), and optionally `OSIER_LIVE_OTHER` (a second
 login without access, for the refusal test). See the top of `crates/osier/tests/live.rs`.
+
+## Releasing
+
+The steps for cutting a release (version bump, checks, tag, what to verify afterwards) are
+in [docs/releasing.md](docs/releasing.md).

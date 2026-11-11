@@ -203,13 +203,8 @@ pub fn run(check: bool, force: bool) -> i32 {
         return 2;
     };
     match install(bin_dir, &target, false) {
-        Ok(_) => {
-            println!(
-                "Updated to {target}. An Osier window that is already open keeps running the old \
-                 version until you restart it (and `osier <path>` opens paths in that window)."
-            );
-            0
-        }
+        // The installer has said what it installed, and to restart a running Osier.
+        Ok(_) => 0,
         Err(e) => {
             eprintln!("osier --update: {e}");
             1

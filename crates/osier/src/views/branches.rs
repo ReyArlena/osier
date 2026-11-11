@@ -8,10 +8,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::refs::Branch;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
-use crate::row_actions::RefRow;
+use crate::app::row_actions;
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::MergeMode;
+use row_actions::RefRow;
 
 impl Osier {
     pub(crate) fn render_branches(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -31,6 +33,7 @@ impl Osier {
                 .empty_state(&project.name, "Reading branches…", cx)
                 .into_any_element();
         };
+        let on_github = self.active_github_url().is_some();
         let local: Vec<&Branch> = snapshot.branches.iter().filter(|b| !b.is_remote).collect();
         let remote: Vec<&Branch> = snapshot.branches.iter().filter(|b| b.is_remote).collect();
         let muted = cx.theme().muted_foreground;
@@ -67,16 +70,42 @@ impl Osier {
                 let menu_name = name.clone();
                 let weak = weak.clone();
                 let checkout = (!is_head).then(|| (weak.clone(), checkout_name.clone()));
+                // Pull requests exist for remote branches and for locals with an upstream.
+                let pulls = (on_github && (is_remote || b.upstream.is_some()))
+                    .then(|| (weak.clone(), menu_name.clone()));
+                let pulls_item = move |menu: gpui_kit::component::menu::PopupMenu| match &pulls {
+                    Some((w, n)) => {
+                        let (w, n) = (w.clone(), n.clone());
+                        menu.item(
+                            row_actions::menu_item(
+                                "Pull requests on GitHub",
+                                row_actions::RowKind::PullRequests,
+                            )
+                            .on_click(move |_, window, cx| {
+                                let _ = w.update(cx, |this, cx| {
+                                    this.open_branch_pulls_on_github(
+                                        n.clone(),
+                                        is_remote,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                        )
+                    }
+                    None => menu,
+                };
                 let inner = if is_remote {
                     let (wm, wc) = (weak.clone(), weak.clone());
                     let (m1, c1) = (menu_name.clone(), menu_name.clone());
                     crate::row_menu::RowMenu::new(move |menu, _, _| {
                         let (wm, wc) = (wm.clone(), wc.clone());
                         let (m1, c1) = (m1.clone(), c1.clone());
+                        let pulls_item = pulls_item.clone();
                         menu.item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Merge into current branch",
-                                crate::row_actions::RowKind::MergeIntoCurrent,
+                                row_actions::RowKind::MergeIntoCurrent,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = wm.update(cx, |this, cx| {
@@ -85,9 +114,9 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Compare with current branch",
-                                crate::row_actions::RowKind::CompareWithCurrent,
+                                row_actions::RowKind::CompareWithCurrent,
                             )
                             .on_click(move |_, _, cx| {
                                 let _ = wc.update(cx, |this, cx| {
@@ -100,9 +129,11 @@ impl Osier {
                                 });
                             }),
                         )
+                        .map(pulls_item)
                     })
                 } else {
                     crate::row_menu::RowMenu::new(move |menu, _, _| {
+                        let pulls_item = pulls_item.clone();
                         let n1 = menu_name.clone();
                         let n2 = menu_name.clone();
                         let n3 = menu_name.clone();
@@ -125,9 +156,9 @@ impl Osier {
                         );
                         let menu = menu
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Merge into current branch",
-                                    crate::row_actions::RowKind::MergeIntoCurrent,
+                                    row_actions::RowKind::MergeIntoCurrent,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, window, cx| {
@@ -170,9 +201,9 @@ impl Osier {
                                     }),
                             )
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Rebase current branch onto this…",
-                                    crate::row_actions::RowKind::RebaseCurrentOnto,
+                                    row_actions::RowKind::RebaseCurrentOnto,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, window, cx| {
@@ -182,9 +213,9 @@ impl Osier {
                                 }),
                             )
                             .item(
-                                crate::row_actions::menu_item(
+                                row_actions::menu_item(
                                     "Compare with current branch",
-                                    crate::row_actions::RowKind::CompareWithCurrent,
+                                    row_actions::RowKind::CompareWithCurrent,
                                 )
                                 .disabled(is_head)
                                 .on_click(move |_, _, cx| {
@@ -198,11 +229,12 @@ impl Osier {
                                     });
                                 }),
                             )
+                            .map(pulls_item)
                             .separator();
                         menu.item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "New branch from here…",
-                                crate::row_actions::RowKind::NewBranchHere,
+                                row_actions::RowKind::NewBranchHere,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = w1.update(cx, |this, cx| {
@@ -211,28 +243,22 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
-                                "Rename…",
-                                crate::row_actions::RowKind::Rename,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w2.update(cx, |this, cx| {
-                                    this.prompt_rename_branch(n2.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Rename…", row_actions::RowKind::Rename)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w2.update(cx, |this, cx| {
+                                        this.prompt_rename_branch(n2.clone(), window, cx)
+                                    });
+                                }),
                         )
                         .separator()
                         .item(
-                            crate::row_actions::menu_item(
-                                "Delete",
-                                crate::row_actions::RowKind::Delete,
-                            )
-                            .disabled(is_head)
-                            .on_click(move |_, window, cx| {
-                                let _ = w3.update(cx, |this, cx| {
-                                    this.confirm_delete_branch(n3.clone(), false, window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Delete", row_actions::RowKind::Delete)
+                                .disabled(is_head)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w3.update(cx, |this, cx| {
+                                        this.confirm_delete_branch(n3.clone(), false, window, cx)
+                                    });
+                                }),
                         )
                         .item(
                             PopupMenuItem::new("Force delete")
@@ -251,15 +277,12 @@ impl Osier {
                         Some((w, n)) => {
                             let (w, n) = (w.clone(), n.clone());
                             menu.item(
-                                crate::row_actions::menu_item(
-                                    "Checkout",
-                                    crate::row_actions::RowKind::Checkout,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    let _ = w.update(cx, |this, cx| {
-                                        this.checkout_branch(n.clone(), is_remote, window, cx)
-                                    });
-                                }),
+                                row_actions::menu_item("Checkout", row_actions::RowKind::Checkout)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = w.update(cx, |this, cx| {
+                                            this.checkout_branch(n.clone(), is_remote, window, cx)
+                                        });
+                                    }),
                             )
                             .separator()
                         }
@@ -267,19 +290,17 @@ impl Osier {
                     };
                     (inner.build())(menu, window, cx)
                 });
+                let row_selected = selected_ref.as_ref()
+                    == Some(&RefRow::Branch {
+                        name: b.name.clone(),
+                        remote: b.is_remote,
+                    });
                 list =
                     list.child(
                         h_flex()
                             .id((title, ix))
                             .cursor_pointer()
-                            .when(
-                                selected_ref.as_ref()
-                                    == Some(&RefRow::Branch {
-                                        name: b.name.clone(),
-                                        remote: b.is_remote,
-                                    }),
-                                |this| this.bg(cx.theme().list_active),
-                            )
+                            .when(row_selected, |this| this.bg(cx.theme().list_active))
                             .on_click(cx.listener({
                                 let row = RefRow::Branch {
                                     name: b.name.clone(),
@@ -287,7 +308,20 @@ impl Osier {
                                 };
                                 move |this, _, _, cx| this.select_ref(row.clone(), cx)
                             }))
-                            .test_id(format!("branch-row:{}", b.name))
+                            .test_id(|| format!("branch-row:{}", b.name))
+                            .a11y_row(
+                                || {
+                                    let kind = if b.is_head {
+                                        ", current branch"
+                                    } else if b.is_remote {
+                                        ", remote branch"
+                                    } else {
+                                        ""
+                                    };
+                                    format!("{}{kind}", b.name)
+                                },
+                                row_selected,
+                            )
                             .group("row")
                             .px_3()
                             .py_1p5()
@@ -351,6 +385,7 @@ impl Osier {
                                             .ghost()
                                             .xsmall()
                                             .label("Checkout")
+                                            .a11y_name(|| format!("Checkout {}", b.name))
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.checkout_branch(
                                                     checkout_name.clone(),
@@ -363,12 +398,13 @@ impl Osier {
                                     })
                                     .child(
                                         div()
-                                            .test_id(format!("branch-menu:{}", b.name))
+                                            .test_id(|| format!("branch-menu:{}", b.name))
                                             .when(!menu_buttons, |d| d.hidden())
                                             .child(
                                                 Button::new(SharedString::from(format!(
                                                     "branch-menu-{title}-{ix}"
                                                 )))
+                                                .a11y_name(|| format!("Actions for {}", b.name))
                                                 .ghost()
                                                 .xsmall()
                                                 .icon(Lucide::Ellipsis)
@@ -406,19 +442,17 @@ impl Osier {
                     let (w1, w2, w3, w4) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
                     let mut menu = menu
                         .item(
-                            crate::row_actions::menu_item(
-                                "Show commit",
-                                crate::row_actions::RowKind::ShowCommit,
-                            )
-                            .on_click(move |_, _, cx| {
-                                let _ = w1
-                                    .update(cx, |this, cx| this.select_commit_hash(t1.clone(), cx));
-                            }),
+                            row_actions::menu_item("Show commit", row_actions::RowKind::ShowCommit)
+                                .on_click(move |_, _, cx| {
+                                    let _ = w1.update(cx, |this, cx| {
+                                        this.select_commit_hash(t1.clone(), cx)
+                                    });
+                                }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
+                            row_actions::menu_item(
                                 "Check out (detached)",
-                                crate::row_actions::RowKind::Checkout,
+                                row_actions::RowKind::Checkout,
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = w2.update(cx, |this, cx| {
@@ -427,27 +461,21 @@ impl Osier {
                             }),
                         )
                         .item(
-                            crate::row_actions::menu_item(
-                                "Copy name",
-                                crate::row_actions::RowKind::CopyName,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w3.update(cx, |this, cx| {
-                                    this.copy_to_clipboard(n1.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Copy name", row_actions::RowKind::CopyName)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w3.update(cx, |this, cx| {
+                                        this.copy_to_clipboard(n1.clone(), window, cx)
+                                    });
+                                }),
                         )
                         .separator()
                         .item(
-                            crate::row_actions::menu_item(
-                                "Delete…",
-                                crate::row_actions::RowKind::Delete,
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = w4.update(cx, |this, cx| {
-                                    this.confirm_delete_tag(n2.clone(), window, cx)
-                                });
-                            }),
+                            row_actions::menu_item("Delete…", row_actions::RowKind::Delete)
+                                .on_click(move |_, window, cx| {
+                                    let _ = w4.update(cx, |this, cx| {
+                                        this.confirm_delete_tag(n2.clone(), window, cx)
+                                    });
+                                }),
                         );
                     for r in &remotes {
                         let (w, n, r2) = (weak.clone(), n3.clone(), r.clone());
@@ -466,19 +494,18 @@ impl Osier {
                     }
                     menu
                 });
+                let row_selected = selected_ref.as_ref() == Some(&RefRow::Tag(t.name.clone()));
                 list = list.child(
                     h_flex()
                         .id(("tag", ix))
                         .cursor_pointer()
-                        .when(
-                            selected_ref.as_ref() == Some(&RefRow::Tag(t.name.clone())),
-                            |this| this.bg(cx.theme().list_active),
-                        )
+                        .when(row_selected, |this| this.bg(cx.theme().list_active))
                         .on_click(cx.listener({
                             let row = RefRow::Tag(t.name.clone());
                             move |this, _, _, cx| this.select_ref(row.clone(), cx)
                         }))
-                        .test_id(format!("tag-row:{}", t.name))
+                        .test_id(|| format!("tag-row:{}", t.name))
+                        .a11y_row(|| format!("Tag {}", t.name), row_selected)
                         .group("row")
                         .px_3()
                         .py_1p5()
@@ -508,6 +535,7 @@ impl Osier {
                         )
                         .child(
                             Button::new(("tag-menu", ix))
+                                .a11y_name(|| format!("Actions for tag {}", t.name))
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()
@@ -563,6 +591,7 @@ impl Osier {
                 list = list.child(
                     h_flex()
                         .id(("worktree", ix))
+                        .a11y_item(|| format!("Worktree {}", crate::format::tilde(&w.path)))
                         .px_3()
                         .py_1p5()
                         .gap_2()
@@ -598,6 +627,12 @@ impl Osier {
                         })
                         .child(
                             Button::new(("worktree-menu", ix))
+                                .a11y_name(|| {
+                                    format!(
+                                        "Actions for worktree {}",
+                                        crate::format::tilde(&w.path)
+                                    )
+                                })
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()
@@ -695,48 +730,40 @@ impl Osier {
                     let (n1, n2, n3, u1) = (name.clone(), name.clone(), name.clone(), url.clone());
                     let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
                     menu.item(
-                        crate::row_actions::menu_item(
-                            "Edit URL…",
-                            crate::row_actions::RowKind::EditRemoteUrl,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w1.update(cx, |this, cx| {
-                                this.prompt_remote_url(n1.clone(), u1.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Edit URL…", row_actions::RowKind::EditRemoteUrl)
+                            .on_click(move |_, window, cx| {
+                                let _ = w1.update(cx, |this, cx| {
+                                    this.prompt_remote_url(n1.clone(), u1.clone(), window, cx)
+                                });
+                            }),
                     )
                     .item(
-                        crate::row_actions::menu_item(
-                            "Rename…",
-                            crate::row_actions::RowKind::Rename,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w2.update(cx, |this, cx| {
-                                this.prompt_rename_remote(n2.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Rename…", row_actions::RowKind::Rename).on_click(
+                            move |_, window, cx| {
+                                let _ = w2.update(cx, |this, cx| {
+                                    this.prompt_rename_remote(n2.clone(), window, cx)
+                                });
+                            },
+                        ),
                     )
                     .separator()
                     .item(
-                        crate::row_actions::menu_item(
-                            "Remove",
-                            crate::row_actions::RowKind::Delete,
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = w3.update(cx, |this, cx| {
-                                this.confirm_remove_remote(n3.clone(), window, cx)
-                            });
-                        }),
+                        row_actions::menu_item("Remove", row_actions::RowKind::Delete).on_click(
+                            move |_, window, cx| {
+                                let _ = w3.update(cx, |this, cx| {
+                                    this.confirm_remove_remote(n3.clone(), window, cx)
+                                });
+                            },
+                        ),
                     )
                 });
+                let row_selected = selected_ref.as_ref() == Some(&RefRow::Remote(r.name.clone()));
                 list = list.child(
                     h_flex()
                         .id(("remote", ix))
+                        .a11y_row(|| format!("Remote {}", r.name), row_selected)
                         .cursor_pointer()
-                        .when(
-                            selected_ref.as_ref() == Some(&RefRow::Remote(r.name.clone())),
-                            |this| this.bg(cx.theme().list_active),
-                        )
+                        .when(row_selected, |this| this.bg(cx.theme().list_active))
                         .on_click(cx.listener({
                             let row = RefRow::Remote(r.name.clone());
                             move |this, _, _, cx| this.select_ref(row.clone(), cx)
@@ -759,6 +786,7 @@ impl Osier {
                         )
                         .child(
                             Button::new(("remote-menu", ix))
+                                .a11y_name(|| format!("Actions for remote {}", r.name))
                                 .when(!menu_buttons, |b| b.hidden())
                                 .ghost()
                                 .xsmall()

@@ -23,9 +23,9 @@ none of the IDE.
   create/rename/delete/checkout actions and confirmations where data could be lost.
 - **Fetch, pull, push** with progress and cancel, upstream prompts, pull strategy memory per
   repository, `--force-with-lease` only (never plain `--force`).
-- **Update project**, like PhpStorm's: fetch, then merge or rebase (asked, or remembered per
-  repository), with uncommitted changes set aside and put back, stopping only for real
-  conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
+- **Update branch**, like PhpStorm's Update Project: fetch, then merge or rebase (asked, or
+  remembered per repository), with uncommitted changes set aside and put back, stopping only
+  for real conflicts. Remembered choices are listed in Settings > Projects > Per-project choices.
 - **Merge, rebase, cherry-pick, revert, interactive rebase, squash** with conflicts resolved in place:
   accept current / incoming / both per block, or edit the result directly.
 - **Three-way merge tool**, like PhpStorm's: yours, the result and theirs side by side, with
@@ -111,10 +111,11 @@ says so. Settings > About shows how Osier was installed.
 
 Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directories for them
 (Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
-projects in the command palette. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
-`ctrl-t` updates the project, `ctrl-shift-f/l/p` fetch/pull/push, `` ctrl-` `` shows the git command log, `ctrl-p` or
-`F1` opens the command palette, `ctrl-,` opens settings, `/` searches projects, `?` searches
-files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
+projects in the command palette. `ctrl-shift-b` does the same for branches. In the palette,
+Fetch…, Pull…, Push… and Update branch… offer the same choices as the title bar's menus. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
+`ctrl-t` and `ctrl-shift-f/l/p` open the update branch/fetch/pull/push choices (Enter runs the first), `` ctrl-` `` shows the git command log, `ctrl-p` or
+`F1` opens the command palette, `ctrl-,` opens settings (each closes again when pressed a
+second time), `/` searches projects, `?` searches files (Esc clears a search). Plain keys like `/`, `j` or space never fire while you type in a
 text field.
 
 The project filter also takes `is:changed` (uncommitted changes), `is:ahead` (unpushed
@@ -220,6 +221,7 @@ re-read when it changes. Every key is optional.
 ```toml
 [appearance]
 high_contrast = false         # stronger selection and hover colours
+syntax_contrast = true        # lift dim syntax colours (comments) until readable
 mode = "system"               # dark | light | system (the default follows the desktop)
 system_fallback = "dark"      # system mode when the desktop states no preference
 dark_theme = "Catppuccin Mocha"
@@ -231,6 +233,13 @@ light_theme = "Catppuccin Latte"
 changes_indicator = "icon"    # icon | dot: how the sidebar marks uncommitted changes
 row_menu_buttons = false      # show a ... menu button on list rows (right-click always works)
 tooltip_delay_ms = 0          # how long to hover before a tooltip shows (0 to 1000)
+toast_seconds = 5             # how long a notification stays in the corner (1 to 30; 0 = until closed)
+animations = "system"         # system | on | off: dialogs, menus and toasts animate in, spinners turn
+animation_ms = 180            # how long a dialog fades in (60 to 400); switches and tabs scale with it
+
+[palette]
+search_submenus = false       # typing in the palette also finds projects, branches and remote choices
+show_categories = false       # each command's category (General, Remote...) next to its shortcut
 
 [keys]
 prefix_timeout_secs = 5       # how long the prefix key waits; 0 waits until a key
@@ -263,9 +272,12 @@ large_file_bytes = 2097152
 log_page_size = 500
 show_command_log = false
 log_badges = "left"           # Log branch/tag badges: left (before the subject) | right
-log_unpushed = "dim"          # graph marking for commits not on a remote: dim | colour
+log_unpushed = "dim"          # commits not on a remote: dim (graph and, a little, the row) | colour | off
 offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 config_tab = false            # show the Git config panel as a tab (always in the sidebar menu)
+
+[github]
+list_refresh_minutes = 30     # refresh the cached GitHub lists (repositories, templates); 0 = off
 
 [auth]
 askpass = true                # route ssh/git prompts to Osier's own window

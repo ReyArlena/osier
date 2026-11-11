@@ -3,6 +3,7 @@ use gpui_kit::component::Collapsible;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem, SidebarMenuItem,
 };
@@ -14,6 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
+use crate::app::panes::ResizeSidebar;
 use crate::format::{ahead_behind as arrows_text, tilde};
 use crate::test_ids::TestId as _;
 
@@ -313,7 +315,7 @@ impl Osier {
             list = list.child(
                 v_flex()
                     .id(SharedString::from(format!("filter-suggestion:{term}")))
-                    .test_id(format!("filter-suggestion:{term}"))
+                    .test_id(|| format!("filter-suggestion:{term}"))
                     .px_2()
                     .py_1()
                     .rounded(cx.theme().radius)
@@ -400,6 +402,7 @@ impl Osier {
         let filter = self.sidebar_filter_text(cx);
         let query = self.sidebar_query(cx);
         let project_count = self.projects.len();
+        let name_hints = self.sidebar_name_hints();
 
         let mut open = ReorderMenu::new();
         let mut open_rows: Vec<(usize, SharedString)> = Vec::new();
@@ -409,7 +412,8 @@ impl Osier {
                 continue;
             }
             shown_open += 1;
-            open_rows.push((ix, project.name.clone().into()));
+            let label = crate::format::name_with_hint(&project.name, name_hints.get(&project.path));
+            open_rows.push((ix, label.clone().into()));
             let pinned = self.state.is_pinned(&project.path);
             let (dirty, ahead, behind) = project
                 .snapshot
@@ -430,9 +434,10 @@ impl Osier {
             let fade = RowFade::new(cx);
             let is_active = self.active == Some(ix);
             let on_github = project.snapshot.as_ref().is_some_and(|s| {
-                crate::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref()).is_some()
+                crate::app::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref())
+                    .is_some()
             });
-            let item = SidebarMenuItem::new(project.name.clone())
+            let item = SidebarMenuItem::new(label)
                 .icon(
                     Icon::new(Lucide::FolderGit2)
                         .when(by_icon, |icon| icon.text_color(changes_color)),
@@ -555,11 +560,11 @@ impl Osier {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let missing = !path.is_dir();
+            let missing = self.project_missing(&path);
             let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
             let (item, dot) = self.status_item(
                 &path,
-                &name,
+                &crate::format::name_with_hint(&name, name_hints.get(&path)),
                 if missing {
                     Lucide::FolderX
                 } else {
@@ -613,7 +618,7 @@ impl Osier {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let missing = !path.is_dir();
+            let missing = self.project_missing(&path);
             let open_path = path.clone();
             let menu_weak = weak.clone();
             let menu_path = path.clone();
@@ -625,7 +630,8 @@ impl Osier {
             } else {
                 Lucide::Folder
             };
-            let (item, dot) = self.status_item(&path, &name, icon, cx);
+            let label = crate::format::name_with_hint(&name, name_hints.get(&path));
+            let (item, dot) = self.status_item(&path, &label, icon, cx);
             recent = recent.row(
                 format!("sidebar-recent:{name}"),
                 item.on_click(cx.listener(move |this, _, window, cx| {
@@ -671,8 +677,11 @@ impl Osier {
             );
         }
 
-        Sidebar::new("projects")
-            .w(px(240.))
+        // Not collapsible: Osier hides the sidebar as a whole, and a collapsible one animates
+        // every change of width, which trails behind the pointer while its edge is dragged.
+        let sidebar = Sidebar::new("projects")
+            .collapsible(false)
+            .w(px(self.sidebar_width(window)))
             .header(
                 SidebarHeader::new().child(
                     v_flex()
@@ -785,6 +794,28 @@ impl Osier {
                                 })),
                         ),
                 ),
+            );
+        // The sidebar with a draggable right edge. The drag is followed here rather than on
+        // the handle, since the pointer leaves the handle as soon as it moves.
+        div()
+            .test_id("sidebar-pane")
+            .relative()
+            .flex()
+            .flex_none()
+            .h_full()
+            .child(sidebar)
+            .child(
+                resize_handle("sidebar-edge", Axis::Horizontal)
+                    .inside(HandleEdge::Trailing)
+                    .on_drag(ResizeSidebar, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    }),
+            )
+            .on_drag_move(
+                cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, window, cx| {
+                    this.resize_sidebar(e.event.position.x - e.bounds.left(), window, cx)
+                }),
             )
     }
 }

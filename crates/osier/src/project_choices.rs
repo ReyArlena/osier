@@ -1,5 +1,5 @@
 //! Settings > Projects > Per-project choices: what Osier remembers per repository (the GitHub
-//! account, the diverged-pull method and the Update project method), as pills with an X that
+//! account, the diverged-pull method and the Update branch method), as pills with an X that
 //! forgets one, so Osier asks again next time.
 
 use std::collections::BTreeSet;
@@ -80,7 +80,7 @@ pub(crate) fn choices(o: &Osier) -> Vec<(String, Vec<Pill>)> {
             if let Some(c) = s.update_strategies.get(repo) {
                 pills.push(Pill {
                     kind: Choice::Update,
-                    label: "Update project",
+                    label: "Update branch",
                     value: method(&c.strategy),
                     note: Some(if c.remember {
                         "remembered"
@@ -114,7 +114,7 @@ fn pill(repo_ix: usize, repo: &str, p: &Pill, view: &Entity<Osier>, cx: &App) ->
     let (v, repo, kind) = (view.clone(), repo.to_string(), p.kind);
     let id = format!("choice:{}:{repo_ix}", p.kind.id());
     h_flex()
-        .test_id(id.clone())
+        .test_id(|| id.clone())
         .flex_none()
         .items_center()
         .gap_1p5()
@@ -138,7 +138,7 @@ fn pill(repo_ix: usize, repo: &str, p: &Pill, view: &Entity<Osier>, cx: &App) ->
         })
         .child(
             Button::new(SharedString::from(format!("forget-{id}")))
-                .test_id(format!("choice-forget:{}:{repo_ix}", p.kind.id()))
+                .test_id(|| format!("choice-forget:{}:{repo_ix}", p.kind.id()))
                 .ghost()
                 .xsmall()
                 .rounded_full()
@@ -162,7 +162,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
     .title("Per-project choices")
     .description(
         "What Osier remembers for each project: the GitHub account to use, how to pull when \
-         the branch has diverged, and how Update project joins commits. Forget one with its X \
+         the branch has diverged, and how Update branch joins commits. Forget one with its X \
          and Osier asks again next time.",
     )
     .item(SettingItem::render(move |options, _, cx| {
@@ -173,7 +173,7 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
         if rows.is_empty() {
             return col.child(div().text_sm().text_color(theme.muted_foreground).child(
                 "Nothing remembered yet. Choices appear here when you pick an account, a \
-                     pull method or an Update project method for a project.",
+                     pull method or an Update branch method for a project.",
             ));
         }
         for (ix, (repo, pills)) in rows.iter().enumerate() {
@@ -183,8 +183,9 @@ pub(crate) fn group(view: &Entity<Osier>, cx: &App) -> SettingGroup {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| repo.clone());
             col = col.child(
+                // a11y: a card, not a row to pick: its pills are the controls.
                 v_flex()
-                    .test_id(format!("project-choice-row:{ix}"))
+                    .test_id(|| format!("project-choice-row:{ix}"))
                     .gap_2()
                     .p_3()
                     .rounded(theme.radius)

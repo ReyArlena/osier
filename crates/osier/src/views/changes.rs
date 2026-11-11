@@ -13,7 +13,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::status::StatusEntry;
 
+use crate::a11y::{A11yName as _, A11yRow as _};
 use crate::app::Osier;
+use crate::app::row_actions;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
@@ -37,7 +39,55 @@ fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
     }
 }
 
+/// Height of every row in the Changes list (headings and changes alike).
+const CHANGE_ROW_H: f32 = 28.;
+
+/// A row of the Changes list.
+#[derive(Clone, Copy)]
+enum ChangeRow {
+    Heading {
+        area: Area,
+        title: &'static str,
+        count: usize,
+    },
+    /// The `ix`th change of `area`.
+    Entry {
+        area: Area,
+        title: &'static str,
+        ix: usize,
+    },
+}
+
+/// Position of an area in the list's order.
+fn area_slot(area: Area) -> usize {
+    match area {
+        Area::Conflicted => 0,
+        Area::Staged => 1,
+        Area::Unstaged => 2,
+        Area::Untracked => 3,
+    }
+}
+
 impl Osier {
+    /// The paths of one area of the Changes list, read when "Stage all" or "Unstage all" is
+    /// clicked rather than copied on every frame.
+    pub(crate) fn area_paths(&self, area: Area) -> Vec<String> {
+        let Some(status) = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .map(|s| s.status.clone())
+        else {
+            return Vec::new();
+        };
+        let entries: Vec<&StatusEntry> = match area {
+            Area::Conflicted => status.conflicted().collect(),
+            Area::Staged => status.staged().collect(),
+            Area::Unstaged => status.unstaged().collect(),
+            Area::Untracked => status.untracked().collect(),
+        };
+        entries.into_iter().map(|e| e.path.clone()).collect()
+    }
+
     pub(crate) fn render_changes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(project) = self.active_project() else {
             let hint = match crate::keymap::hint("open_repository", cx) {
@@ -61,26 +111,74 @@ impl Osier {
         let unstaged: Vec<&StatusEntry> = status.unstaged().collect();
         let untracked: Vec<&StatusEntry> = status.untracked().collect();
         let total = conflicted.len() + staged.len() + unstaged.len() + untracked.len();
-        let selection = project.selection.clone();
         let muted = cx.theme().muted_foreground;
 
-        let mut list = v_flex()
-            .flex_1()
-            .min_h_0()
-            .id("changes-list")
-            .overflow_y_scrollbar();
-        for (area, title, entries) in [
-            (Area::Conflicted, "Conflicts", &conflicted),
-            (Area::Staged, "Staged", &staged),
-            (Area::Unstaged, "Unstaged", &unstaged),
-            (Area::Untracked, "Untracked", &untracked),
+        // One row per group heading and per change, in a virtualised list: only the rows
+        // on screen are built each frame, so a big untracked folder or a mass rename stays
+        // cheap. All rows share one height (`uniform_list` measures the first one).
+        let mut rows: Vec<ChangeRow> = Vec::new();
+        for (area, title, count) in [
+            (Area::Conflicted, "Conflicts", conflicted.len()),
+            (Area::Staged, "Staged", staged.len()),
+            (Area::Unstaged, "Unstaged", unstaged.len()),
+            (Area::Untracked, "Untracked", untracked.len()),
         ] {
-            if entries.is_empty() {
-                continue;
+            if count > 0 {
+                rows.push(ChangeRow::Heading { area, title, count });
+                rows.extend((0..count).map(|ix| ChangeRow::Entry { area, title, ix }));
             }
-            let group_paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
-            list = list.child(
+        }
+        let rows = std::rc::Rc::new(rows);
+        let list = if total == 0 {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .p_6()
+                        .child(div().font_medium().child("Working tree clean"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child("Nothing to commit."),
+                        ),
+                )
+                .into_any_element()
+        } else {
+            let status = snapshot.status.clone();
+            let row_count = rows.len();
+            div()
+                .id("changes-list")
+                .flex_1()
+                .min_h_0()
+                .child(
+                    uniform_list(
+                        "changes-rows",
+                        row_count,
+                        cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                            let selection = this
+                                .active_project()
+                                .map(|p| p.selection.clone())
+                                .unwrap_or_default();
+                            // The entries of each area, in display order (cheap: no copies).
+                            let lists: [Vec<&StatusEntry>; 4] = [
+                                status.conflicted().collect(),
+                                status.staged().collect(),
+                                status.unstaged().collect(),
+                                status.untracked().collect(),
+                            ];
+                            range
+                                .map(|row_ix| match rows[row_ix] {
+                                    ChangeRow::Heading { area, title, count } => {
                 h_flex()
+                    .w_full()
+                    .h(px(CHANGE_ROW_H))
                     .px_3()
                     .py_1()
                     .gap_2()
@@ -89,10 +187,9 @@ impl Osier {
                     .font_medium()
                     .text_color(muted)
                     .child(title)
-                    .child(div().child(entries.len().to_string()))
+                    .child(div().child(count.to_string()))
                     .child(div().flex_1())
                     .when(area == Area::Staged, |this| {
-                        let paths = group_paths.clone();
                         this.child(
                             Button::new("unstage-group")
                                 .test_id("unstage-group")
@@ -100,24 +197,31 @@ impl Osier {
                                 .xsmall()
                                 .label("Unstage all")
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.unstage_paths(paths.clone(), window, cx)
+                                    let paths = this.area_paths(area);
+                                    this.unstage_paths(paths, window, cx)
                                 })),
                         )
                     })
                     .when(matches!(area, Area::Unstaged | Area::Untracked), |this| {
-                        let paths = group_paths.clone();
                         this.child(
                             Button::new(SharedString::from(format!("stage-group-{title}")))
                                 .ghost()
                                 .xsmall()
                                 .label("Stage all")
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.stage_paths(paths.clone(), window, cx)
+                                    let paths = this.area_paths(area);
+                                    this.stage_paths(paths, window, cx)
                                 })),
                         )
-                    }),
-            );
-            for (ix, entry) in entries.iter().enumerate() {
+                    })
+                                        .into_any_element()
+                                    }
+                                    ChangeRow::Entry { area, title, ix } => {
+                                        let entry = lists[area_slot(area)][ix];
+                                        let has_markers = this
+                                            .active_project()
+                                            .and_then(|p| p.snapshot.as_ref())
+                                            .is_some_and(|s| s.conflict_markers.contains(&entry.path));
                 let selected = matches!(&selection, Selection::File { path, area: a } if path == &entry.path && *a == area);
                 let path = entry.path.clone();
                 let display = match &entry.orig_path {
@@ -127,14 +231,12 @@ impl Osier {
                 let click_path = path.clone();
                 let toggle_path = path.clone();
                 let discard_path = path.clone();
-                list = list.child(
                     h_flex()
                         .id((title, ix))
-                        .test_id(format!(
-                            "change-row:{}:{}",
-                            title.to_lowercase(),
-                            entry.path
-                        ))
+                        .w_full()
+                    .h(px(CHANGE_ROW_H))
+                        .test_id(|| format!("change-row:{}:{}", title.to_lowercase(), entry.path))
+                        .a11y_row(|| format!("{display}, {}", title.to_lowercase()), selected)
                         .group("row")
                         .px_3()
                         .py_1()
@@ -160,9 +262,9 @@ impl Osier {
                                 let (p7, p8) = (p.clone(), p.clone());
                                 let menu = menu
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Open in editor",
-                                            crate::row_actions::RowKind::OpenInEditor,
+                                            row_actions::RowKind::OpenInEditor,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -177,9 +279,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Open in file manager",
-                                            crate::row_actions::RowKind::OpenInFileManager,
+                                            row_actions::RowKind::OpenInFileManager,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -194,9 +296,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Copy path",
-                                            crate::row_actions::RowKind::CopyPath,
+                                            row_actions::RowKind::CopyPath,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -208,9 +310,9 @@ impl Osier {
                                     )
                                     .separator()
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Blame",
-                                            crate::row_actions::RowKind::Blame,
+                                            row_actions::RowKind::Blame,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -221,9 +323,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "History",
-                                            crate::row_actions::RowKind::FileHistory,
+                                            row_actions::RowKind::FileHistory,
                                         )
                                         .on_click(
                                             move |_, _, cx| {
@@ -235,9 +337,9 @@ impl Osier {
                                     )
                                     .separator()
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Copy as patch",
-                                            crate::row_actions::RowKind::CopyAsPatch,
+                                            row_actions::RowKind::CopyAsPatch,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -249,9 +351,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Save to Patches…",
-                                            crate::row_actions::RowKind::SaveToPatches,
+                                            row_actions::RowKind::SaveToPatches,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -268,9 +370,9 @@ impl Osier {
                                         ),
                                     )
                                     .item(
-                                        crate::row_actions::menu_item(
+                                        row_actions::menu_item(
                                             "Shelve…",
-                                            crate::row_actions::RowKind::Shelve,
+                                            row_actions::RowKind::Shelve,
                                         )
                                         .on_click(
                                             move |_, window, cx| {
@@ -287,7 +389,7 @@ impl Osier {
                                 if area == Area::Conflicted {
                                     return menu;
                                 }
-                                let row = crate::ignore_ops::RowState {
+                                let row = crate::app::ignore_ops::RowState {
                                     // Untracked folders are listed whole, as `dir/`.
                                     is_dir: p9.ends_with('/'),
                                     tracked: area != Area::Untracked,
@@ -302,22 +404,22 @@ impl Osier {
                                 Osier::ignore_menu(menu.separator(), w9, path, row)
                                     .separator()
                                     .item(
-                                        crate::row_actions::action_menu_item(discard, "discard")
-                                            .on_click(move |_, window, cx| {
+                                        row_actions::action_menu_item(discard, "discard").on_click(
+                                            move |_, window, cx| {
                                                 let _ = w10.update(cx, |this, cx| {
                                                     this.discard_file(p10.clone(), area, window, cx)
                                                 });
-                                            }),
+                                            },
+                                        ),
                                     )
                             }
                         })
                         .child(
                             Checkbox::new(SharedString::from(format!("stage-{title}-{ix}")))
-                                .test_id(format!(
-                                    "change-stage:{}:{}",
-                                    title.to_lowercase(),
-                                    entry.path
-                                ))
+                                .test_id(|| {
+                                    format!("change-stage:{}:{}", title.to_lowercase(), entry.path)
+                                })
+                                .a11y_name(|| format!("Stage {}", entry.path))
                                 .small()
                                 .checked(area == Area::Staged)
                                 .disabled(area == Area::Conflicted)
@@ -337,7 +439,7 @@ impl Osier {
                         .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
                         .when(area == Area::Conflicted, |this| {
                             let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
-                            let has_markers = snapshot.conflict_markers.contains(&entry.path);
+
                             this.child(
                                 h_flex()
                                     .gap_1()
@@ -373,7 +475,7 @@ impl Osier {
                                     )
                                     .child(
                                         Button::new(SharedString::from(format!("resolved-{ix}")))
-                                            .test_id(format!("mark-resolved:{}", entry.path))
+                                            .test_id(|| format!("mark-resolved:{}", entry.path))
                                             .outline()
                                             .xsmall()
                                             .label("Mark resolved")
@@ -423,27 +525,19 @@ impl Osier {
                                         ),
                                     ),
                             )
+                        })
+                                        .into_any_element()
+                                    }
+                                })
+                                .collect()
                         }),
-                );
-            }
-        }
-        if total == 0 {
-            list = list.child(
-                v_flex()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .gap_1()
-                    .p_6()
-                    .child(div().font_medium().child("Working tree clean"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(muted)
-                            .child("Nothing to commit."),
-                    ),
-            );
-        }
+                    )
+                    .track_scroll(&self.changes_scroll)
+                    .size_full(),
+                )
+                .vertical_scrollbar(&self.changes_scroll)
+                .into_any_element()
+        };
 
         let identity = match (&snapshot.identity.name, &snapshot.identity.email) {
             (Some(n), Some(e)) => format!("{n} <{e}>"),
@@ -515,15 +609,6 @@ impl Osier {
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.unstage_all(window, cx)),
                             ),
-                    )
-                    .child(
-                        Button::new("refresh-changes")
-                            .test_id("refresh-changes")
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::RefreshCw)
-                            .tooltip("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
                     ),
             )
             .child(list)
@@ -594,6 +679,7 @@ impl Osier {
                             .flex_wrap()
                             .child(
                                 Checkbox::new("amend")
+                                    .test_id("amend")
                                     .small()
                                     .label("Amend")
                                     .checked(self.amend)
@@ -610,30 +696,40 @@ impl Osier {
                                         cx.listener(|this, _, _, cx| this.toggle_signoff(cx)),
                                     ),
                             )
-                            .child(div().flex_1())
+                            // Both buttons as one group, pushed to the right: when the
+                            // pane is too narrow they drop to the next line together.
                             .child(
-                                Button::new("commit-push")
-                                    .test_id("commit-push")
-                                    .outline()
-                                    .small()
-                                    .label("Commit and Push")
-                                    .disabled(!can_commit || self.remote_job.is_some())
-                                    .tooltip("Commit, then push the current branch")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.commit_and_push(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("commit")
-                                    .test_id("commit")
-                                    .primary()
-                                    .small()
-                                    .icon(Lucide::GitCommitHorizontal)
-                                    .label(commit_label)
-                                    .disabled(!can_commit)
-                                    .tooltip("Commit (ctrl-enter)")
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.commit(window, cx)),
+                                h_flex()
+                                    .ml_auto()
+                                    .gap_3()
+                                    .gap_y_2()
+                                    .items_center()
+                                    .justify_end()
+                                    .flex_wrap()
+                                    .child(
+                                        Button::new("commit-push")
+                                            .test_id("commit-push")
+                                            .outline()
+                                            .small()
+                                            .label("Commit and Push")
+                                            .disabled(!can_commit || self.remote_job.is_some())
+                                            .tooltip("Commit, then push the current branch")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.commit_and_push(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("commit")
+                                            .test_id("commit")
+                                            .primary()
+                                            .small()
+                                            .icon(Lucide::GitCommitHorizontal)
+                                            .label(commit_label)
+                                            .disabled(!can_commit)
+                                            .tooltip("Commit (ctrl-enter)")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.commit(window, cx)
+                                            })),
                                     ),
                             ),
                     ),

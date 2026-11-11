@@ -1,17 +1,16 @@
 //! Blame in the diff pane, and the file history filter for the Log tab.
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_git::blame::BlameLine;
 
+use crate::app::ops::describe;
 use crate::app::{Osier, Tab};
 use crate::format::iso_date;
-use crate::ops::describe;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::Selection;
 
 #[derive(Debug, Clone)]
@@ -242,10 +241,7 @@ impl Osier {
             .and_then(|p| p.snapshot.as_ref())
             .is_some_and(|s| s.submodules.is_empty())
         {
-            window.push_notification(
-                Notification::warning("No submodules in this repository"),
-                cx,
-            );
+            window.push_notice(Notice::warning("No submodules in this repository"), cx);
             return;
         }
         self.run_op(

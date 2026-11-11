@@ -22,6 +22,8 @@ pub enum UnpushedPaint {
     /// would show the lane line through it.
     Dim(Hsla),
     Colour(Hsla),
+    /// Not marked: drawn like any other commit.
+    Off,
 }
 
 impl UnpushedPaint {
@@ -29,9 +31,14 @@ impl UnpushedPaint {
         match self {
             UnpushedPaint::Dim(background) => background.blend(color.opacity(0.4)),
             UnpushedPaint::Colour(c) => c,
+            UnpushedPaint::Off => color,
         }
     }
 }
+
+/// How visible the text of an unpushed commit's row stays with `UnpushedPaint::Dim`: a little
+/// faded next to its faded graph node, still easy to read.
+pub const UNPUSHED_TEXT_OPACITY: f32 = 0.7;
 
 /// Which parts of a row belong to unpushed commits: this row's node (`this`), and per edge
 /// whether it is a link from an unpushed commit to its parent, for the edges leaving this row

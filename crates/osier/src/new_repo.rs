@@ -9,16 +9,15 @@
 //! account is remembered for the project. GitHub calls go through [`Hub`] so tests never reach
 //! gh or the network.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::{Select, SelectState};
@@ -29,11 +28,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use osier_auth::GhAccount;
 use osier_auth::hub::{CreatedRepo, GhRepo, License, NewRepo};
-use osier_config::history::{self, HistoryEntry};
+use osier_config::history::HistoryEntry;
 use osier_git::ops::remote::{self, CloneOptions, RemoteContext};
 use osier_git::{CancelToken, GitError, Progress};
 
 use crate::app::Osier;
+use crate::cached_list::{CachedLists, Freshness};
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::palette::{Choice, ChoicePick};
 use crate::test_ids::TestId as _;
 
@@ -180,37 +181,165 @@ pub(crate) fn default_hub(log: Arc<dyn osier_git::CommandSink>) -> Arc<dyn Hub> 
 }
 
 impl Osier {
-    /// Start loading every account's repository list that is not cached yet, so the clone
-    /// submenu and the template list are ready sooner (some accounts reach hundreds).
-    pub(crate) fn prefetch_hub_repos(&mut self, cx: &mut Context<Self>) {
+    /// The repositories `account` can clone (`CheckNow` when the clone list opens).
+    pub(crate) fn use_gh_repos(
+        &mut self,
+        account: &GhAccount,
+        freshness: Freshness,
+        cx: &mut Context<Self>,
+    ) {
+        let (hub, a) = (self.hub.clone(), account.clone());
+        self.use_list(
+            |o| &mut o.gh_lists.repos,
+            &account_key(account),
+            freshness,
+            Arc::new(move || hub.repos(&a)),
+            cx,
+        );
+    }
+
+    /// The Create dialog's lists: owners and templates for `account` (creating on GitHub),
+    /// `.gitignore` templates and licences from `source` (any logged-in account).
+    pub(crate) fn use_gh_create_lists(
+        &mut self,
+        account: Option<&GhAccount>,
+        source: &GhAccount,
+        freshness: Freshness,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(account) = account {
+            let key = account_key(account);
+            let (hub, a) = (self.hub.clone(), account.clone());
+            self.use_list(
+                |o| &mut o.gh_lists.orgs,
+                &key,
+                freshness,
+                Arc::new(move || hub.orgs(&a)),
+                cx,
+            );
+            // One search over the account and its organisations, not a read of every
+            // repository it can reach (hundreds for some accounts).
+            let (hub, a) = (self.hub.clone(), account.clone());
+            self.use_list(
+                |o| &mut o.gh_lists.templates,
+                &key,
+                freshness,
+                Arc::new(move || {
+                    let mut owners = vec![a.login.clone()];
+                    owners.extend(hub.orgs(&a).unwrap_or_default());
+                    hub.templates(&a, &owners)
+                }),
+                cx,
+            );
+        }
+        let key = account_key(source);
+        let (hub, a) = (self.hub.clone(), source.clone());
+        self.use_list(
+            |o| &mut o.gh_lists.gitignores,
+            &key,
+            freshness,
+            Arc::new(move || hub.gitignore_templates(&a)),
+            cx,
+        );
+        let (hub, a) = (self.hub.clone(), source.clone());
+        self.use_list(
+            |o| &mut o.gh_lists.licenses,
+            &key,
+            freshness,
+            Arc::new(move || hub.licenses(&a)),
+            cx,
+        );
+    }
+
+    /// Make every account's repository list ready (disk copy, then a refresh when older than
+    /// the timer's interval, or 5 minutes with the timer off): entering the clone or create
+    /// submenus, so the list is there by the time an account is picked.
+    pub(crate) fn warm_gh_repos(&mut self, cx: &mut Context<Self>) {
+        let minutes = match self.settings.github.list_refresh_minutes {
+            0 => 5,
+            m => m,
+        };
+        let freshness =
+            Freshness::OlderThan(std::time::Duration::from_secs(u64::from(minutes) * 60));
         for account in self.gh_accounts.clone() {
-            let key = account_key(&account);
-            if self.hub_repos.contains_key(&key) || !self.hub_repos_loading.insert(key.clone()) {
-                continue;
+            self.use_gh_repos(&account, freshness, cx);
+        }
+    }
+
+    /// Settings > Accounts > GitHub lists > Refresh now: every account's lists, at once.
+    pub(crate) fn refresh_gh_lists_now(&mut self, cx: &mut Context<Self>) {
+        for account in self.gh_accounts.clone() {
+            self.use_gh_repos(&account, Freshness::CheckNow, cx);
+            self.use_gh_create_lists(Some(&account), &account, Freshness::CheckNow, cx);
+        }
+    }
+
+    /// Whether any GitHub list is being refreshed.
+    pub(crate) fn gh_lists_refreshing(&self) -> bool {
+        self.gh_lists.any_refreshing()
+    }
+
+    /// The tick loop's refresh of the GitHub lists (`github.list_refresh_minutes`, 0 = off):
+    /// a list older than that is fetched again, one at a time, starting a little after
+    /// launch so startup has the machine to itself.
+    pub(crate) fn refresh_lists_on_timer(&mut self, cx: &mut Context<Self>) {
+        const AFTER_LAUNCH: std::time::Duration = std::time::Duration::from_secs(20);
+        let minutes = self.settings.github.list_refresh_minutes;
+        if minutes == 0
+            || !self.gh_accounts_loaded
+            || self.started.elapsed() < AFTER_LAUNCH
+            || self.gh_lists.any_refreshing()
+        {
+            return;
+        }
+        let freshness =
+            Freshness::OlderThan(std::time::Duration::from_secs(u64::from(minutes) * 60));
+        let accounts = self.gh_accounts.clone();
+        for account in &accounts {
+            self.use_gh_repos(account, freshness, cx);
+            if self.gh_lists.any_refreshing() {
+                return;
             }
-            let hub = self.hub.clone();
-            let busy = self.background.begin(crate::background::GH_REPOS);
-            cx.spawn(async move |this, cx| {
-                let _busy = busy;
-                let repos = cx
-                    .background_spawn(async move { hub.repos(&account) })
-                    .await;
-                let _ = this.update(cx, |this, _| {
-                    this.hub_repos_loading.remove(&key);
-                    match repos {
-                        Ok(r) => {
-                            this.hub_repos.entry(key).or_insert(r);
-                        }
-                        Err(e) => tracing::info!(error = %e, "repository list prefetch failed"),
-                    }
-                });
-            })
-            .detach();
+            self.use_gh_create_lists(Some(account), account, freshness, cx);
+            if self.gh_lists.any_refreshing() {
+                return;
+            }
         }
     }
 }
 
-/// Key of an account in `Osier::hub_repos`.
+/// The GitHub lists Osier keeps ready (`cached_list.rs`), by account.
+pub(crate) struct GhLists {
+    pub(crate) repos: CachedLists<Vec<GhRepo>>,
+    pub(crate) orgs: CachedLists<Vec<String>>,
+    pub(crate) templates: CachedLists<Vec<String>>,
+    pub(crate) gitignores: CachedLists<Vec<String>>,
+    pub(crate) licenses: CachedLists<Vec<License>>,
+}
+
+impl Default for GhLists {
+    fn default() -> Self {
+        Self {
+            repos: CachedLists::new("github-repos", crate::background::GH_REPOS),
+            orgs: CachedLists::new("github-orgs", crate::background::GH_LISTS),
+            templates: CachedLists::new("github-templates", crate::background::GH_LISTS),
+            gitignores: CachedLists::new("github-gitignores", crate::background::GH_LISTS),
+            licenses: CachedLists::new("github-licenses", crate::background::GH_LISTS),
+        }
+    }
+}
+
+impl GhLists {
+    fn any_refreshing(&self) -> bool {
+        self.repos.any_refreshing()
+            || self.orgs.any_refreshing()
+            || self.templates.any_refreshing()
+            || self.gitignores.any_refreshing()
+            || self.licenses.any_refreshing()
+    }
+}
+
+/// Key of an account in the GitHub lists (`GhLists`).
 pub(crate) fn account_key(a: &GhAccount) -> String {
     format!("{}@{}", a.login, a.host)
 }
@@ -240,6 +369,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             } else {
                 ChoicePick::CreateAccount(a.clone())
             },
+            action: None,
         })
         .collect();
     let other: SharedString = "Other".into();
@@ -250,6 +380,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             detail: Some("Any HTTPS or SSH clone address".into()),
             icon: Lucide::Link,
             pick: ChoicePick::CloneOther,
+            action: None,
         }
     } else {
         Choice {
@@ -258,6 +389,7 @@ pub(crate) fn account_choices(osier: &Osier, clone: bool) -> Vec<Choice> {
             detail: Some("A local repository (git init)".into()),
             icon: Lucide::HardDrive,
             pick: ChoicePick::CreateLocal,
+            action: None,
         }
     });
     rows
@@ -302,6 +434,7 @@ pub(crate) fn repo_choices(account: &GhAccount, repos: &[GhRepo]) -> Vec<Choice>
                     Lucide::BookMarked
                 },
                 pick: ChoicePick::CloneRepo(account.clone(), r.clone()),
+                action: None,
             }
         })
         .collect()
@@ -365,7 +498,52 @@ fn check_repo_name(name: &str) -> Result<(), String> {
 
 /// The target must be missing or an empty directory (checked again by the git layer).
 fn check_target(target: &Path) -> Result<(), String> {
-    remote::check_empty_target(target).map_err(|e| e.to_string())
+    // Shown under the form: the path as everywhere else in Osier (`~/...`).
+    remote::check_empty_target(target).map_err(|e| {
+        e.to_string()
+            .replace(&target.display().to_string(), &crate::format::tilde(target))
+    })
+}
+
+/// Whether a form's target folder can take the new repository (missing or empty), checked in
+/// the background once per target path: listing a folder on every frame would be file work on
+/// the UI thread, and it would also see the clone's own files appear while it runs.
+#[derive(Default)]
+struct TargetCheck {
+    target: Option<PathBuf>,
+    result: Option<Result<(), String>>,
+    _task: Option<Task<()>>,
+}
+
+impl TargetCheck {
+    /// The result for `target`, `None` while it is being checked. A new target starts a
+    /// check; `slot` finds this check in the form when the result comes back.
+    fn status<V: 'static>(
+        &mut self,
+        target: &Path,
+        slot: fn(&mut V) -> &mut TargetCheck,
+        cx: &mut Context<V>,
+    ) -> Option<Result<(), String>> {
+        if self.target.as_deref() != Some(target) {
+            self.target = Some(target.to_path_buf());
+            self.result = None;
+            let checked = target.to_path_buf();
+            self._task = Some(cx.spawn(async move |this, cx| {
+                let path = checked.clone();
+                let result = cx
+                    .background_spawn(async move { check_target(&path) })
+                    .await;
+                let _ = this.update(cx, |form, cx| {
+                    let check = slot(form);
+                    if check.target.as_deref() == Some(checked.as_path()) {
+                        check.result = Some(result);
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+        self.result.clone()
+    }
 }
 
 /// Directory field plus "Choose directory…" (portal folder picker).
@@ -376,14 +554,14 @@ fn directory_row(dir: &Entity<InputState>, prefix: &'static str) -> impl IntoEle
         .gap_2()
         .child(
             div()
-                .test_id(format!("{prefix}-dir"))
+                .test_id(|| format!("{prefix}-dir"))
                 .flex_1()
                 .min_w_0()
                 .child(Input::new(dir)),
         )
         .child(
             Button::new(SharedString::from(format!("{prefix}-choose-dir")))
-                .test_id(format!("{prefix}-choose-dir"))
+                .test_id(|| format!("{prefix}-choose-dir"))
                 .outline()
                 .icon(Lucide::FolderOpen)
                 .label("Choose directory…")
@@ -423,20 +601,18 @@ fn field_label(text: &'static str, cx: &App) -> Div {
         .child(text)
 }
 
-/// "Clones into ~/Work/app" under the form, or what is wrong.
-fn outcome_line(text: Result<String, String>, cx: &App) -> Div {
-    let theme = cx.theme();
+/// "Clones into ~/Work/app" under the form, or what is wrong as an error notice.
+fn outcome_line(text: Result<String, String>, cx: &App) -> AnyElement {
     match text {
         Ok(t) => div()
             .test_id("new-repo-target")
             .text_sm()
-            .text_color(theme.muted_foreground)
-            .child(t),
-        Err(e) => div()
+            .text_color(cx.theme().muted_foreground)
+            .child(t)
+            .into_any_element(),
+        Err(e) => crate::dialog_notice::DialogNotice::error(e)
             .test_id("new-repo-error")
-            .text_sm()
-            .text_color(theme.danger)
-            .child(e),
+            .into_any_element(),
     }
 }
 
@@ -461,8 +637,11 @@ pub(crate) struct CloneForm {
     url: Entity<InputState>,
     dir: Entity<InputState>,
     recurse: bool,
-    /// Set when OK was refused; cleared on the next edit.
-    error: Option<String>,
+    target_check: TargetCheck,
+    /// Everything checked and fine: Clone is enabled.
+    ready: bool,
+    /// Confirmed: what the form says while the dialog closes (nothing is checked any more).
+    submitted: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -480,9 +659,8 @@ impl CloneForm {
         let dir =
             cx.new(|cx| InputState::new(window, cx).default_value(crate::format::tilde(parent)));
         let watch = |cx: &mut Context<Self>, input: &Entity<InputState>| {
-            cx.subscribe(input, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe(input, |_: &mut Self, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
-                    this.error = None;
                     cx.notify();
                 }
             })
@@ -493,7 +671,9 @@ impl CloneForm {
             url,
             dir,
             recurse: true,
-            error: None,
+            target_check: TargetCheck::default(),
+            ready: false,
+            submitted: None,
             _subscriptions,
         }
     }
@@ -520,7 +700,6 @@ impl CloneForm {
                 .ok_or_else(|| format!("Cannot tell the folder name from {url}."))?,
         };
         let target = parse_dir(&self.dir.read(cx).value())?.join(name);
-        check_target(&target)?;
         Ok(ClonePlan {
             url,
             target,
@@ -531,18 +710,59 @@ impl CloneForm {
     }
 }
 
+impl CloneForm {
+    /// The line under the form (muted text, or an error), and whether Clone may go ahead.
+    fn outcome(&mut self, cx: &mut Context<Self>) -> Result<String, String> {
+        if let Some(text) = &self.submitted {
+            return Ok(text.clone());
+        }
+        let (ready, outcome) = match self.plan(cx) {
+            // Before anything is typed, say what is needed without alarm.
+            Err(e) if self.source.is_none() && self.url.read(cx).value().is_empty() => {
+                (false, Ok(e))
+            }
+            Err(e) => (false, Err(e)),
+            Ok(plan) => {
+                let target = crate::format::tilde(&plan.target);
+                match self
+                    .target_check
+                    .status(&plan.target, |f: &mut Self| &mut f.target_check, cx)
+                {
+                    None => (false, Ok(format!("Checking {target}…"))),
+                    Some(Ok(())) => (true, Ok(format!("Clones into {target}"))),
+                    Some(Err(e)) => (false, Err(e)),
+                }
+            }
+        };
+        if self.ready != ready {
+            // The dialog reads `ready` for its button before this form redraws in the same
+            // frame, so ask for one more frame. Deferred: gpui drops a notify made while the
+            // window is drawing.
+            self.ready = ready;
+            let form = cx.entity();
+            cx.defer(move |cx| form.update(cx, |_, cx| cx.notify()));
+        }
+        outcome
+    }
+
+    /// The plan to run when Clone is pressed, `None` while checks are not done or failed.
+    /// Freezes the form: it stops checking (the clone fills the folder it checked).
+    fn confirm(&mut self, cx: &mut Context<Self>) -> Option<ClonePlan> {
+        let ready = self.outcome(cx).is_ok() && self.ready;
+        let plan = self.plan(cx).ok().filter(|_| ready)?;
+        self.submitted = Some(format!(
+            "Cloning into {}…",
+            crate::format::tilde(&plan.target)
+        ));
+        cx.notify();
+        Some(plan)
+    }
+}
+
 impl Render for CloneForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
-        let outcome = match &self.error {
-            Some(e) => Err(e.clone()),
-            None => match self.plan(cx) {
-                Ok(p) => Ok(format!("Clones into {}", crate::format::tilde(&p.target))),
-                // Before anything is typed, say what is needed without alarm.
-                Err(e) if self.source.is_none() && self.url.read(cx).value().is_empty() => Ok(e),
-                Err(e) => Err(e),
-            },
-        };
+        let outcome = self.outcome(cx);
         v_flex()
             .test_id("clone-form")
             .w_full()
@@ -605,8 +825,9 @@ impl Osier {
         let form = cx.new(|cx| CloneForm::new(source, &parent, window, cx));
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (form, weak) = (form.clone(), weak.clone());
+            let ready = form.read(cx).ready;
             dialog
                 .title(title.clone())
                 .w(px(560.))
@@ -616,20 +837,18 @@ impl Osier {
                         .ok_text("Clone")
                         .show_cancel(true),
                 )
-                .footer(crate::dialog_buttons::DialogButtons::new("Clone"))
-                .on_ok(move |_, window, cx| match form.read(cx).plan(cx) {
-                    Ok(plan) => {
-                        let _ = weak.update(cx, |this, cx| this.start_clone(plan, window, cx));
-                        true
-                    }
-                    Err(e) => {
-                        form.update(cx, |f, cx| {
-                            f.error = Some(e);
-                            cx.notify();
-                        });
-                        false
-                    }
-                })
+                // Disabled until every check (the target folder in the background) passed.
+                .footer(crate::dialog_buttons::DialogButtons::new("Clone").disabled(!ready))
+                .on_ok(
+                    move |_, window, cx| match form.update(cx, |f, cx| f.confirm(cx)) {
+                        Some(plan) => {
+                            let _ = weak.update(cx, |this, cx| this.start_clone(plan, window, cx));
+                            true
+                        }
+                        // Enter before the checks are done, or with a problem shown: stay.
+                        None => false,
+                    },
+                )
         });
         focus.update(cx, |f, cx| {
             let input = if has_url { &f.url } else { &f.dir };
@@ -645,8 +864,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         if let Some(job) = &self.remote_job {
-            window.push_notification(
-                Notification::warning(format!("{} is still running", job.label)),
+            window.push_notice(
+                Notice::warning(format!("{} is still running", job.label)),
                 cx,
             );
             return;
@@ -654,7 +873,7 @@ impl Osier {
         let ctx = self.clone_context(&plan);
         let (tx, rx) = mpsc::channel();
         let label = format!("Clone {}", plan.label);
-        self.remote_job = Some(crate::remote_ops::RemoteJob::new(
+        self.remote_job = Some(crate::app::remote_ops::RemoteJob::new(
             label.clone(),
             ctx.cancel.clone().unwrap_or_default(),
             rx,
@@ -737,31 +956,38 @@ impl Osier {
         let mut entry = HistoryEntry::now(target, label.to_string());
         if let Err(e) = &result {
             entry.ok = false;
-            entry.error = Some(crate::ops::describe(e));
+            entry.error = Some(crate::app::ops::describe(e));
         }
-        if let Err(e) = history::append(&self.paths, &entry) {
-            tracing::warn!(error = %e, "could not write history");
-        }
+        self.record_history(entry, cx);
         match result {
             Ok(_) => {
-                window.push_notification(
-                    Notification::success(format!("In {}", crate::format::tilde(target)))
+                window.push_notice(
+                    Notice::success(format!("In {}", crate::format::tilde(target)))
                         .title(label.to_string()),
                     cx,
                 );
-                self.open_project_notify(target, window, cx);
-                if let (Some(account), Some(project)) = (account, self.active_project())
-                    && project.path.starts_with(target)
-                {
-                    let key = project.path.to_string_lossy().into_owned();
-                    self.set_project_account(&key, &account.login, true);
-                }
+                let target_dir = target.to_path_buf();
+                let login = account.map(|a| a.login.clone());
+                self.open_project_then(
+                    target,
+                    move |this, ix, _, _| {
+                        if let Some(login) = login
+                            && let Some(project) = this.projects.get(ix)
+                            && project.path.starts_with(&target_dir)
+                        {
+                            let key = project.path.to_string_lossy().into_owned();
+                            this.set_project_account(&key, &login, true);
+                        }
+                    },
+                    window,
+                    cx,
+                );
             }
             Err(GitError::Cancelled(_)) => {
-                window.push_notification(format!("{label}: cancelled"), cx);
+                window.push_notice(format!("{label}: cancelled"), cx);
             }
-            Err(e) => window.push_notification(
-                Notification::warning(crate::ops::describe(&e)).title(format!("{label} failed")),
+            Err(e) => window.push_notice(
+                Notice::warning(crate::app::ops::describe(&e)).title(format!("{label} failed")),
                 cx,
             ),
         }
@@ -775,16 +1001,6 @@ type Pick = Entity<SelectState<SearchableVec<SharedString>>>;
 
 const NONE: &str = "None";
 const NO_TEMPLATE: &str = "No template";
-
-/// One list the create form fills from GitHub, as it arrives.
-enum Loaded {
-    Orgs(Vec<String>),
-    Templates(Vec<String>),
-    Gitignores(Vec<String>),
-    Licenses(Vec<License>),
-}
-
-type LoadJob = Box<dyn FnOnce() -> Result<Loaded, String> + Send>;
 
 /// What a create needs once the dialog is confirmed.
 #[derive(Debug, Clone)]
@@ -801,9 +1017,77 @@ pub(crate) struct CreatePlan {
 struct FormSeed {
     account: Option<GhAccount>,
     lookup: Option<GhAccount>,
-    hub: Arc<dyn Hub>,
-    background: crate::background::Background,
+    /// The app view, whose cached GitHub lists (`gh_lists`) fill the form.
+    app: Entity<Osier>,
     parent: PathBuf,
+}
+
+/// One cached list as the Create form sees it.
+struct ListState<T> {
+    /// The form uses this list (owners and templates only when creating on GitHub).
+    wanted: bool,
+    revision: u64,
+    data: Option<Arc<T>>,
+    checking: bool,
+    error: Option<String>,
+}
+
+impl<T> ListState<T> {
+    /// For a list the form uses: (has data, being checked, last error).
+    fn summary(&self) -> Option<(bool, bool, Option<String>)> {
+        self.wanted
+            .then(|| (self.data.is_some(), self.checking, self.error.clone()))
+    }
+
+    fn read(lists: &CachedLists<T>, key: Option<String>) -> Self {
+        let Some(key) = key else {
+            return Self {
+                wanted: false,
+                revision: 0,
+                data: None,
+                checking: false,
+                error: None,
+            };
+        };
+        match lists.get(&key) {
+            Some(e) => Self {
+                wanted: true,
+                revision: e.revision,
+                data: e.data.clone(),
+                checking: e.refreshing,
+                error: e.error.clone(),
+            },
+            // Its disk copy is still being read.
+            None => Self {
+                wanted: true,
+                revision: 0,
+                data: None,
+                checking: true,
+                error: None,
+            },
+        }
+    }
+}
+
+/// The Create form's four lists, read from the app's cache.
+struct CreateLists {
+    orgs: ListState<Vec<String>>,
+    templates: ListState<Vec<String>>,
+    gitignores: ListState<Vec<String>>,
+    licenses: ListState<Vec<License>>,
+}
+
+impl CreateLists {
+    fn read(app: &Osier, account: Option<&GhAccount>, source: Option<&GhAccount>) -> Self {
+        let account = account.map(account_key);
+        let source = source.map(account_key);
+        Self {
+            orgs: ListState::read(&app.gh_lists.orgs, account.clone()),
+            templates: ListState::read(&app.gh_lists.templates, account),
+            gitignores: ListState::read(&app.gh_lists.gitignores, source.clone()),
+            licenses: ListState::read(&app.gh_lists.licenses, source),
+        }
+    }
 }
 
 /// The "Create new repository" dialog's form, after GitHub's own.
@@ -823,11 +1107,16 @@ pub(crate) struct CreateForm {
     dir: Entity<InputState>,
     /// Lists still loading, or why they could not be.
     status: Option<String>,
-    error: Option<String>,
-    /// Lists still on their way, and the errors of those that failed.
-    pending: usize,
-    load_errors: Vec<String>,
-    _loads: Vec<Task<()>>,
+    target_check: TargetCheck,
+    /// Everything checked and fine: Create is enabled.
+    ready: bool,
+    /// Confirmed: what the form says while the dialog closes (nothing is checked any more).
+    submitted: Option<String>,
+    /// `status` is a problem (lists that could not load), shown as a warning notice.
+    status_warning: bool,
+    /// Revisions of the cached lists last copied into the form: owners, templates,
+    /// `.gitignore`s, licences.
+    seen: [u64; 4],
     _subscriptions: Vec<Subscription>,
 }
 
@@ -836,8 +1125,7 @@ impl CreateForm {
         let FormSeed {
             account,
             lookup,
-            hub,
-            background,
+            app,
             parent,
         } = seed;
         let parent = parent.as_path();
@@ -865,14 +1153,21 @@ impl CreateForm {
         let dir =
             cx.new(|cx| InputState::new(window, cx).default_value(crate::format::tilde(parent)));
         let watch = |cx: &mut Context<Self>, input: &Entity<InputState>| {
-            cx.subscribe(input, |this: &mut Self, _, e: &InputEvent, cx| {
+            cx.subscribe(input, |_: &mut Self, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
-                    this.error = None;
                     cx.notify();
                 }
             })
         };
-        let _subscriptions = vec![watch(cx, &name), watch(cx, &dir)];
+        let mut _subscriptions = vec![watch(cx, &name), watch(cx, &dir)];
+        // The lists come from the app's cache: shown at once, refreshed in the background,
+        // copied in again whenever one changes.
+        _subscriptions.push(
+            cx.observe_in(&app, window, |this: &mut Self, app, window, cx| {
+                let view = CreateLists::read(app.read(cx), this.account.as_ref(), this.source());
+                this.apply_lists(view, window, cx);
+            }),
+        );
         let source = account.clone().or_else(|| lookup.clone());
         let mut this = Self {
             account: account.clone(),
@@ -890,10 +1185,11 @@ impl CreateForm {
             status: source
                 .is_some()
                 .then(|| "Loading the lists from GitHub…".to_string()),
-            error: None,
-            pending: 0,
-            load_errors: Vec::new(),
-            _loads: Vec::new(),
+            target_check: TargetCheck::default(),
+            ready: false,
+            submitted: None,
+            status_warning: false,
+            seen: [0; 4],
             _subscriptions,
         };
         if source.is_none() {
@@ -903,88 +1199,109 @@ impl CreateForm {
                     .into(),
             );
         }
-        if let Some(source) = source {
-            let mut jobs: Vec<LoadJob> = Vec::new();
-            let (h, a) = (hub.clone(), source.clone());
-            jobs.push(Box::new(move || {
-                h.gitignore_templates(&a).map(Loaded::Gitignores)
-            }));
-            let (h, a) = (hub.clone(), source.clone());
-            jobs.push(Box::new(move || h.licenses(&a).map(Loaded::Licenses)));
-            if account.is_some() {
-                let (h, a) = (hub.clone(), source.clone());
-                jobs.push(Box::new(move || h.orgs(&a).map(Loaded::Orgs)));
-                // One search over the account and its organisations, not a read of every
-                // repository it can reach (hundreds for some accounts).
-                let (h, a) = (hub.clone(), source.clone());
-                jobs.push(Box::new(move || {
-                    let mut owners = vec![a.login.clone()];
-                    owners.extend(h.orgs(&a).unwrap_or_default());
-                    h.templates(&a, &owners).map(Loaded::Templates)
-                }));
-            }
-            this.pending = jobs.len();
-            for job in jobs {
-                let busy = background.begin(crate::background::GH_LISTS);
-                this._loads.push(cx.spawn_in(window, async move |this, cx| {
-                    let _busy = busy;
-                    let loaded = cx.background_spawn(async move { job() }).await;
-                    let _ = this.update_in(cx, |this, window, cx| this.fill(loaded, window, cx));
-                }));
-            }
-        }
         this
     }
 
-    fn fill(
-        &mut self,
-        loaded: Result<Loaded, String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let set =
-            |pick: &Pick, first: &str, rest: Vec<String>, window: &mut Window, cx: &mut App| {
+    /// The account the `.gitignore` and licence lists come from.
+    fn source(&self) -> Option<&GhAccount> {
+        self.account.as_ref().or(self.lookup.as_ref())
+    }
+
+    /// Copy the cached lists in where they changed, keeping each dropdown's pick, and say
+    /// whether GitHub is being checked or a list could not load.
+    fn apply_lists(&mut self, view: CreateLists, window: &mut Window, cx: &mut Context<Self>) {
+        if self.source().is_none() {
+            return;
+        }
+        let fill =
+            |pick: &Pick, first: &str, rest: &[String], window: &mut Window, cx: &mut App| {
+                // Keep what the user picked if it is still there.
+                let keep = pick.read(cx).selected_value().map(|v| v.to_string());
                 let mut items: Vec<SharedString> = vec![SharedString::from(first.to_string())];
-                items.extend(rest.into_iter().map(SharedString::from));
+                items.extend(rest.iter().cloned().map(SharedString::from));
+                let ix = keep
+                    .and_then(|k| items.iter().position(|i| i.as_ref() == k))
+                    .unwrap_or(0);
                 pick.update(cx, |s, cx| {
                     s.set_items(SearchableVec::new(items), window, cx);
-                    s.set_selected_index(Some(IndexPath::default()), window, cx);
+                    s.set_selected_index(Some(IndexPath::new(ix)), window, cx);
                 });
             };
-        match loaded {
-            Ok(Loaded::Orgs(orgs)) => {
-                if let Some(a) = &self.account {
-                    let login = a.login.clone();
-                    set(&self.owner, &login, orgs, window, cx);
-                }
-            }
-            Ok(Loaded::Templates(templates)) => {
-                set(&self.template, NO_TEMPLATE, templates, window, cx);
-            }
-            Ok(Loaded::Gitignores(names)) => set(&self.gitignore, NONE, names, window, cx),
-            Ok(Loaded::Licenses(licenses)) => {
-                let names = licenses.iter().map(|l| l.name.clone()).collect();
-                set(&self.license, NONE, names, window, cx);
-                self.licenses = licenses;
-            }
-            Err(e) => {
-                if !self.load_errors.contains(&e) {
-                    self.load_errors.push(e);
-                }
-            }
+        let mut changed = false;
+        if view.orgs.revision != self.seen[0]
+            && let (Some(orgs), Some(a)) = (&view.orgs.data, &self.account)
+        {
+            let login = a.login.clone();
+            fill(&self.owner, &login, orgs, window, cx);
+            self.seen[0] = view.orgs.revision;
+            changed = true;
         }
-        self.pending = self.pending.saturating_sub(1);
-        self.status = if self.pending > 0 {
-            Some(
-                "Loading the lists from GitHub… (templates take longer for accounts with many \
-                 repositories)"
-                    .to_string(),
+        if view.templates.revision != self.seen[1]
+            && let Some(templates) = &view.templates.data
+        {
+            fill(&self.template, NO_TEMPLATE, templates, window, cx);
+            self.seen[1] = view.templates.revision;
+            changed = true;
+        }
+        if view.gitignores.revision != self.seen[2]
+            && let Some(names) = &view.gitignores.data
+        {
+            fill(&self.gitignore, NONE, names, window, cx);
+            self.seen[2] = view.gitignores.revision;
+            changed = true;
+        }
+        if view.licenses.revision != self.seen[3]
+            && let Some(licenses) = &view.licenses.data
+        {
+            let names: Vec<String> = licenses.iter().map(|l| l.name.clone()).collect();
+            fill(&self.license, NONE, &names, window, cx);
+            self.licenses = licenses.as_ref().clone();
+            self.seen[3] = view.licenses.revision;
+            changed = true;
+        }
+        let lists: Vec<(bool, bool, Option<String>)> = [
+            view.orgs.summary(),
+            view.templates.summary(),
+            view.gitignores.summary(),
+            view.licenses.summary(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let missing = lists.iter().any(|(has, _, _)| !has);
+        let checking = lists.iter().any(|(_, checking, _)| *checking);
+        let errors: Vec<String> = lists
+            .iter()
+            .filter(|(has, _, _)| !has)
+            .filter_map(|(_, _, e)| e.clone())
+            .collect();
+        let (status, warning) = if missing && checking {
+            (
+                Some(
+                    "Loading the lists from GitHub… (templates take longer for accounts with \
+                     many repositories)"
+                        .to_string(),
+                ),
+                false,
+            )
+        } else if checking {
+            (
+                Some("Checking GitHub for new templates and lists…".to_string()),
+                false,
+            )
+        } else if !errors.is_empty() {
+            (
+                Some(format!("Some lists could not load: {}", errors.join("; "))),
+                true,
             )
         } else {
-            (!self.load_errors.is_empty())
-                .then(|| format!("Some lists could not load: {}", self.load_errors.join("; ")))
+            (None, false)
         };
-        cx.notify();
+        if changed || status != self.status || warning != self.status_warning {
+            self.status = status;
+            self.status_warning = warning;
+            cx.notify();
+        }
     }
 
     fn picked(pick: &Pick, none: &str, cx: &App) -> Option<String> {
@@ -1004,7 +1321,6 @@ impl CreateForm {
         let name = self.name.read(cx).value().trim().to_string();
         check_repo_name(&name)?;
         let target = parse_dir(&self.dir.read(cx).value())?.join(&name);
-        check_target(&target)?;
         let template = self.template(cx);
         let starters = template.is_none();
         let license_name = Self::picked(&self.license, NONE, cx);
@@ -1036,30 +1352,67 @@ impl CreateForm {
     }
 }
 
+impl CreateForm {
+    /// The line under the form (muted text, or an error), and whether Create may go ahead.
+    fn outcome(&mut self, cx: &mut Context<Self>) -> Result<String, String> {
+        if let Some(text) = &self.submitted {
+            return Ok(text.clone());
+        }
+        let (ready, outcome) = match self.plan(cx) {
+            Err(e) if self.name.read(cx).value().is_empty() => (false, Ok(e)),
+            Err(e) => (false, Err(e)),
+            Ok(plan) => {
+                let target = crate::format::tilde(&plan.target);
+                match self
+                    .target_check
+                    .status(&plan.target, |f: &mut Self| &mut f.target_check, cx)
+                {
+                    None => (false, Ok(format!("Checking {target}…"))),
+                    Some(Ok(())) => (
+                        true,
+                        Ok(match &plan.account {
+                            Some(_) => format!(
+                                "Creates {}/{} on GitHub and clones it into {target}",
+                                plan.new.owner, plan.new.name
+                            ),
+                            None => format!("Creates a local repository in {target}"),
+                        }),
+                    ),
+                    Some(Err(e)) => (false, Err(e)),
+                }
+            }
+        };
+        if self.ready != ready {
+            // The dialog reads `ready` for its button before this form redraws in the same
+            // frame, so ask for one more frame. Deferred: gpui drops a notify made while the
+            // window is drawing.
+            self.ready = ready;
+            let form = cx.entity();
+            cx.defer(move |cx| form.update(cx, |_, cx| cx.notify()));
+        }
+        outcome
+    }
+
+    /// The plan to run when Create is pressed, `None` while checks are not done or failed.
+    /// Freezes the form: it stops checking (creating fills the folder it checked).
+    fn confirm(&mut self, cx: &mut Context<Self>) -> Option<CreatePlan> {
+        let ready = self.outcome(cx).is_ok() && self.ready;
+        let plan = self.plan(cx).ok().filter(|_| ready)?;
+        self.submitted = Some(format!(
+            "Creating in {}…",
+            crate::format::tilde(&plan.target)
+        ));
+        cx.notify();
+        Some(plan)
+    }
+}
+
 impl Render for CreateForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let remote = self.account.is_some();
         let templated = self.template(cx).is_some();
-        let outcome = match &self.error {
-            Some(e) => Err(e.clone()),
-            None => match self.plan(cx) {
-                Ok(p) => Ok(match &p.account {
-                    Some(_) => format!(
-                        "Creates {}/{} on GitHub and clones it into {}",
-                        p.new.owner,
-                        p.new.name,
-                        crate::format::tilde(&p.target)
-                    ),
-                    None => format!(
-                        "Creates a local repository in {}",
-                        crate::format::tilde(&p.target)
-                    ),
-                }),
-                Err(e) if self.name.read(cx).value().is_empty() => Ok(e),
-                Err(e) => Err(e),
-            },
-        };
+        let outcome = self.outcome(cx);
         let row = |label: &'static str, child: AnyElement, cx: &App| {
             v_flex().gap_1().child(field_label(label, cx)).child(child)
         };
@@ -1199,13 +1552,19 @@ impl Render for CreateForm {
                     .child(directory_row(&self.dir, "create")),
             )
             .when_some(self.status.clone(), |this, s| {
-                this.child(
+                // Lists that could not load are worth a warning; loading is just a note.
+                this.child(if self.status_warning {
+                    crate::dialog_notice::DialogNotice::warning(s)
+                        .test_id("create-status")
+                        .into_any_element()
+                } else {
                     div()
                         .test_id("create-status")
                         .text_xs()
                         .text_color(muted)
-                        .child(s),
-                )
+                        .child(s)
+                        .into_any_element()
+                })
             })
             .child(outcome_line(outcome, cx))
     }
@@ -1226,26 +1585,32 @@ impl Osier {
             .find(|a| a.active)
             .or_else(|| self.gh_accounts.first())
             .cloned();
-        let hub = self.hub.clone();
         let title: SharedString = match &account {
             Some(a) => format!("Create a repository as {}", a.login).into(),
             None => "Create a local repository".into(),
         };
-        let background = self.background.clone();
+        // Cached lists at once, a check for new ones in the background.
+        let source = account.clone().or_else(|| lookup.clone());
+        if let Some(source) = &source {
+            self.use_gh_create_lists(account.as_ref(), source, Freshness::CheckNow, cx);
+        }
+        let view = CreateLists::read(self, account.as_ref(), source.as_ref());
+        let app = cx.entity();
         let form = cx.new(|cx| {
             let seed = FormSeed {
                 account,
                 lookup,
-                hub,
-                background,
+                app,
                 parent,
             };
             CreateForm::new(seed, window, cx)
         });
+        form.update(cx, |f, cx| f.apply_lists(view, window, cx));
         let weak = cx.entity().downgrade();
         let focus = form.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, cx| {
             let (form, weak) = (form.clone(), weak.clone());
+            let ready = form.read(cx).ready;
             dialog
                 .title(title.clone())
                 .w(px(600.))
@@ -1255,20 +1620,18 @@ impl Osier {
                         .ok_text("Create")
                         .show_cancel(true),
                 )
-                .footer(crate::dialog_buttons::DialogButtons::new("Create"))
-                .on_ok(move |_, window, cx| match form.read(cx).plan(cx) {
-                    Ok(plan) => {
-                        let _ = weak.update(cx, |this, cx| this.start_create(plan, window, cx));
-                        true
-                    }
-                    Err(e) => {
-                        form.update(cx, |f, cx| {
-                            f.error = Some(e);
-                            cx.notify();
-                        });
-                        false
-                    }
-                })
+                // Disabled until every check (the target folder in the background) passed.
+                .footer(crate::dialog_buttons::DialogButtons::new("Create").disabled(!ready))
+                .on_ok(
+                    move |_, window, cx| match form.update(cx, |f, cx| f.confirm(cx)) {
+                        Some(plan) => {
+                            let _ = weak.update(cx, |this, cx| this.start_create(plan, window, cx));
+                            true
+                        }
+                        // Enter before the checks are done, or with a problem shown: stay.
+                        None => false,
+                    },
+                )
         });
         focus.update(cx, |f, cx| f.name.update(cx, |i, cx| i.focus(window, cx)));
     }
@@ -1281,8 +1644,8 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         if let Some(job) = &self.remote_job {
-            window.push_notification(
-                Notification::warning(format!("{} is still running", job.label)),
+            window.push_notice(
+                Notice::warning(format!("{} is still running", job.label)),
                 cx,
             );
             return;
@@ -1292,7 +1655,7 @@ impl Osier {
             Some(account) => {
                 let label = format!("Create {}/{}", plan.new.owner, plan.new.name);
                 let (_tx, rx) = mpsc::channel();
-                self.remote_job = Some(crate::remote_ops::RemoteJob::new(
+                self.remote_job = Some(crate::app::remote_ops::RemoteJob::new(
                     label.clone(),
                     CancelToken::new(),
                     rx,
@@ -1308,7 +1671,7 @@ impl Osier {
                         this.remote_job = None;
                         match created {
                             Ok(repo) => {
-                                this.hub_repos.remove(&account_key(&account));
+                                this.gh_lists.repos.mark_stale(&account_key(&account));
                                 this.start_clone(
                                     ClonePlan {
                                         url: repo.clone_url,
@@ -1322,8 +1685,8 @@ impl Osier {
                                 );
                             }
                             Err(e) => {
-                                window.push_notification(
-                                    Notification::warning(e).title(format!("{label} failed")),
+                                window.push_notice(
+                                    Notice::warning(e).title(format!("{label} failed")),
                                     cx,
                                 );
                                 cx.notify();

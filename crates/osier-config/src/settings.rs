@@ -18,9 +18,40 @@ pub struct Settings {
     pub viewer: Viewer,
     pub keys: Keys,
     pub updates: Updates,
+    pub github: GitHub,
+    pub palette: Palette,
     /// Keys this version does not know, preserved on save.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// The command palette.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Palette {
+    /// Searching the commands also lists matching rows of their submenus (Fetch, Push, Switch
+    /// branch, Switch project…), after the commands themselves.
+    pub search_submenus: bool,
+    /// Each command's category (General, Remote, Tabs…) beside its shortcut.
+    pub show_categories: bool,
+}
+
+/// GitHub lists Osier keeps ready (repositories to clone, organisations, templates,
+/// `.gitignore` and licence lists).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitHub {
+    /// Refresh the lists in the background this often, in minutes; 0 only when a screen
+    /// that shows them opens.
+    pub list_refresh_minutes: u32,
+}
+
+impl Default for GitHub {
+    fn default() -> Self {
+        Self {
+            list_refresh_minutes: 30,
+        }
+    }
 }
 
 /// Checking GitHub for a newer Osier release.
@@ -81,13 +112,36 @@ pub struct Appearance {
     pub row_menu_buttons: bool,
     /// How long the pointer rests on something before its tooltip shows, in milliseconds.
     pub tooltip_delay_ms: u32,
+    /// How long a notification stays in the corner before it slides away, in seconds. 0
+    /// keeps it until it is closed.
+    pub toast_seconds: u32,
     /// Selections, hovers and the sidebar highlight in a stronger tint of the theme's
     /// primary colour (like the switches), for more contrast. Off: the theme as designed.
     pub high_contrast: bool,
+    /// Lift syntax colours that sit too close to the editor background (comments above all)
+    /// until they read, whatever the theme. Off: the theme's colours as they are.
+    pub syntax_contrast: bool,
     /// A spinner and label in the status bar while Osier works quietly in the background
     /// (refreshes, project scans, GitHub lists, diff and branch lookups). Fetch, pull, push,
     /// clone and create always show.
     pub show_background_tasks: bool,
+    /// Dialogs, menus and toasts animating in, and spinners turning: `system`
+    /// follows the desktop's reduced-motion setting, `on` and `off` override it.
+    pub animations: Animations,
+    /// How long a dialog takes to fade in, in milliseconds. gpui-kit's other transitions
+    /// (switches, tabs, collapsing sections) scale with it.
+    pub animation_ms: u32,
+}
+
+/// Whether the interface animates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Animations {
+    /// Follow the desktop (on when it says nothing).
+    #[default]
+    System,
+    On,
+    Off,
 }
 
 /// What System mode shows when the desktop has no light/dark preference.
@@ -122,8 +176,12 @@ impl Default for Appearance {
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
             tooltip_delay_ms: 0,
+            toast_seconds: 5,
             high_contrast: false,
+            syntax_contrast: true,
             show_background_tasks: false,
+            animations: Animations::System,
+            animation_ms: 180,
         }
     }
 }
@@ -292,7 +350,8 @@ pub struct Git {
     pub config_tab: bool,
 }
 
-/// `dim` fades unpushed commits in the graph, `colour` draws them in another colour.
+/// `dim` fades unpushed commits in the graph (and their row's text a little), `colour` draws
+/// them in another colour, `off` draws them like any other commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UnpushedStyle {
@@ -300,6 +359,7 @@ pub enum UnpushedStyle {
     Dim,
     #[serde(alias = "color")]
     Colour,
+    Off,
 }
 
 /// `left` puts ref badges before the commit subject, `right` at the end of the line.
@@ -440,6 +500,37 @@ mod tests {
     }
 
     #[test]
+    fn animations_default_to_the_system_and_read_their_names() {
+        assert_eq!(
+            Settings::default().appearance.animations,
+            Animations::System
+        );
+        for (text, want) in [
+            ("system", Animations::System),
+            ("on", Animations::On),
+            ("off", Animations::Off),
+        ] {
+            let s: Settings =
+                toml::from_str(&format!("[appearance]\nanimations = \"{text}\"\n")).unwrap();
+            assert_eq!(s.appearance.animations, want);
+        }
+        assert!(toml::from_str::<Settings>("[appearance]\nanimations = \"fast\"\n").is_err());
+        assert_eq!(Settings::default().appearance.animation_ms, 180);
+        let s: Settings = toml::from_str("[appearance]\ntoast_seconds = 2\n").unwrap();
+        assert_eq!(s.appearance.toast_seconds, 2);
+        assert_eq!(Settings::default().appearance.toast_seconds, 5);
+        let s: Settings = toml::from_str("[appearance]\nanimation_ms = 120\n").unwrap();
+        assert_eq!(s.appearance.animation_ms, 120);
+    }
+
+    #[test]
+    fn github_lists_refresh_every_half_hour_by_default() {
+        assert_eq!(Settings::default().github.list_refresh_minutes, 30);
+        let s: Settings = toml::from_str("[github]\nlist_refresh_minutes = 0\n").unwrap();
+        assert_eq!(s.github.list_refresh_minutes, 0);
+    }
+
+    #[test]
     fn bad_toml_is_a_parse_error() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::under(dir.path());
@@ -470,6 +561,10 @@ mod tests {
         for v in ["colour", "color"] {
             let s: Settings = toml::from_str(&format!("[git]\nlog_unpushed = \"{v}\"\n")).unwrap();
             assert_eq!(s.git.log_unpushed, UnpushedStyle::Colour);
+        }
+        {
+            let s: Settings = toml::from_str("[git]\nlog_unpushed = \"off\"\n").unwrap();
+            assert_eq!(s.git.log_unpushed, UnpushedStyle::Off);
         }
     }
 

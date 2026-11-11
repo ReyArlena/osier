@@ -17,7 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::Osier;
-use crate::hunk_ops::HunkAction;
+use crate::app::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 
@@ -114,9 +114,14 @@ impl Osier {
             })
         });
         let area = self.diff_area();
-        let has_selection = self.diff.read(cx).selected_lines().is_some();
+        // The selected lines, or the ones a line button was pressed with (see `line_pick`).
+        let line_range = self.diff.read(cx).selected_lines().or_else(|| {
+            let pick = self.line_pick.as_ref()?;
+            let (path, _) = area.as_ref()?;
+            (pick.path().as_ref() == path.as_str()).then(|| pick.clone())
+        });
         let line_actions: &[HunkAction] = match &area {
-            Some((_, a)) if has_selection => HunkAction::for_area(*a),
+            Some((_, a)) if line_range.is_some() => HunkAction::for_area(*a),
             _ => &[],
         };
 
@@ -129,7 +134,12 @@ impl Osier {
         let body: AnyElement = if let Some(view) = &blame {
             self.render_blame(view, cx)
         } else if let Some(editor) = &self.editor {
-            Editor::new(&editor.state).size_full().into_any_element()
+            // No border of its own: the header's bottom border already separates it, and a
+            // second line under it reads as one thick rule.
+            Editor::new(&editor.state)
+                .bordered(false)
+                .size_full()
+                .into_any_element()
         } else if three_way {
             match self.merge_view(window, cx) {
                 Ok(Some(view)) => view.into_any_element(),
@@ -410,7 +420,9 @@ impl Osier {
                     })
                     .child(div().flex_1())
                     .when(
-                        matches!(&self.viewer, Some(Viewer::Markdown { .. })) && viewing,
+                        matches!(&self.viewer, Some(Viewer::Markdown { .. }))
+                            && viewing
+                            && !editing,
                         |this| {
                             this.child(
                                 Button::new("md-rendered")
@@ -461,19 +473,22 @@ impl Osier {
                             this.child(self.blame_history_buttons(path, rev, cx))
                         })
                     })
-                    .when(viewing && !editing, |this| {
-                        this.child(
-                            Button::new("view-edit")
-                                .test_id("view-edit")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Pencil)
-                                .tooltip("Edit this file in place")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.open_editor(window, cx)),
-                                ),
-                        )
-                    })
+                    .when(
+                        viewing && !editing && self.viewer_is_editable(&selection),
+                        |this| {
+                            this.child(
+                                Button::new("view-edit")
+                                    .test_id("view-edit")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Lucide::Pencil)
+                                    .tooltip("Edit this file in place")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_editor(window, cx)
+                                    })),
+                            )
+                        },
+                    )
                     .when(editing, |this| {
                         let (save_label, save_tip) = self.save_button_text(cx);
                         this.child(
@@ -544,10 +559,39 @@ impl Osier {
                     )
                     .children(line_actions.iter().map(|action| {
                         let action = *action;
+                        let pressed = line_range.clone();
                         Button::new(SharedString::from(format!("lines-{}", action.label())))
+                            .test_id(|| format!("lines-{}", action.label().to_lowercase()))
                             .outline()
                             .xsmall()
                             .label(format!("{} lines", action.label()))
+                            // The press itself clears the diff's selection, so hold on to
+                            // the lines until the click (or a release somewhere else).
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.line_pick = pressed.clone();
+                                    cx.notify();
+                                }),
+                            )
+                            // Released somewhere else: let go, but only once the release
+                            // has reached every button, since the one next to this may be
+                            // the one that was clicked.
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    if this.line_pick.is_some() {
+                                        let view = cx.entity();
+                                        cx.defer(move |cx| {
+                                            view.update(cx, |this, cx| {
+                                                if this.line_pick.take().is_some() {
+                                                    cx.notify();
+                                                }
+                                            })
+                                        });
+                                    }
+                                }),
+                            )
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.lines_action(action, window, cx)
                             }))
@@ -820,6 +864,7 @@ impl Osier {
             .child(
                 Button::new("diff-settings")
                     .test_id("diff-settings")
+                    .accessibility_label("Diff settings")
                     .ghost()
                     .xsmall()
                     .icon(Lucide::Settings)
@@ -881,6 +926,16 @@ impl Osier {
             .into_any_element()
     }
 
+    /// Whether the Files tab viewer shows something the editor can open: text in the working
+    /// tree, not a file at a revision, an image or a binary.
+    fn viewer_is_editable(&self, selection: &Selection) -> bool {
+        matches!(selection, Selection::WorkFile { rev: None, .. })
+            && matches!(
+                &self.viewer,
+                Some(Viewer::Code { .. } | Viewer::Markdown { .. })
+            )
+    }
+
     fn render_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let repo_root = self
@@ -938,6 +993,7 @@ impl Osier {
             Some(Viewer::Code { .. }) => match &editor {
                 Some(state) => Editor::new(state)
                     .readonly(true)
+                    .bordered(false)
                     .size_full()
                     .into_any_element(),
                 None => div().into_any_element(),
@@ -947,6 +1003,7 @@ impl Osier {
                     match &editor {
                         Some(state) => Editor::new(state)
                             .readonly(true)
+                            .bordered(false)
                             .size_full()
                             .into_any_element(),
                         None => div().into_any_element(),

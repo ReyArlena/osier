@@ -12,6 +12,7 @@
 //! user chose through [`MergeEvent`]. The app writes the result into the working tree and
 //! marks the file resolved; `osier merge` writes it to the output file and exits.
 
+use crate::app_dialog::AppDialogExt as _;
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::rc::Rc;
@@ -26,8 +27,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -521,7 +521,7 @@ impl MergeView {
         let weak = cx.entity().downgrade();
         let body: SharedString = body.into();
         let on_ok = Rc::new(on_ok);
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_app_dialog(cx, move |dialog, _, _| {
             let (weak, on_ok) = (weak.clone(), on_ok.clone());
             dialog
                 .title(title)
@@ -1349,7 +1349,7 @@ impl Render for MergeView {
                     };
                     let apply =
                         Button::new(SharedString::from(format!("merge-chunk-apply-{key}-{ix}")))
-                            .test_id(format!("merge-chunk-apply:{key}:{ix}"))
+                            .test_id(|| format!("merge-chunk-apply:{key}:{ix}"))
                             .ghost()
                             .xsmall()
                             .icon(match side {
@@ -1373,7 +1373,7 @@ impl Render for MergeView {
                             }));
                     let ignore =
                         Button::new(SharedString::from(format!("merge-chunk-ignore-{key}-{ix}")))
-                            .test_id(format!("merge-chunk-ignore:{key}:{ix}"))
+                            .test_id(|| format!("merge-chunk-ignore:{key}:{ix}"))
                             .ghost()
                             .xsmall()
                             .icon(Lucide::X)

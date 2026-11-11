@@ -1,12 +1,11 @@
 //! Editing in the diff pane: the merge result of a conflicted file, or a working-tree file.
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{EditorState, InputEvent};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 use osier_git::ops::integrate;
 
 use crate::app::Osier;
+use crate::notices::{Notice, WindowNoticeExt as _};
 use crate::project::{Area, Selection};
 
 /// What the editor is editing.
@@ -55,33 +54,59 @@ pub(crate) fn language_for(path: &str) -> &'static str {
 }
 
 impl Osier {
-    /// Text the merge editor should start from: the component's resolved text when every
-    /// conflict has a choice, otherwise the raw file with markers.
-    fn merge_seed(&self, path: &str, cx: &App) -> Option<String> {
-        if let Some(text) = self.diff.read(cx).resolved_text(path) {
-            return Some(text);
+    /// Open the editor for the selected file (merge result for conflicts, plain otherwise).
+    /// A merge whose conflicts all have a choice starts from the resolved text; otherwise the
+    /// file is read in the background (no size limit here, so it can be large) and the editor
+    /// opens once it is in.
+    pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((path, kind)) = self.edit_target() else {
+            return;
+        };
+        if kind == EditKind::MergeResult
+            && let Some(text) = self.diff.read(cx).resolved_text(&path)
+        {
+            self.install_editor(path, kind, text, window, cx);
+            return;
         }
-        let repo = &self.active_project()?.repo;
-        std::fs::read_to_string(repo.workdir().join(path)).ok()
+        let Some(full) = self.active_project().map(|p| p.repo.workdir().join(&path)) else {
+            return;
+        };
+        self.in_background_user(
+            crate::background::LOADING_FILE,
+            move || std::fs::read_to_string(full).ok(),
+            move |this, text, window, cx| match text {
+                Some(text) => this.install_editor(path, kind, text, window, cx),
+                None => window.push_notice(Notice::warning("Cannot read the file as text"), cx),
+            },
+            window,
+            cx,
+        );
     }
 
-    /// Open the editor for the selected file (merge result for conflicts, plain otherwise).
-    pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((path, area)) = self.diff_area() else {
-            return;
-        };
-        let (kind, text) = match area {
-            Area::Conflicted => (EditKind::MergeResult, self.merge_seed(&path, cx)),
-            _ => (
-                EditKind::File,
-                self.active_project()
-                    .and_then(|p| std::fs::read_to_string(p.repo.workdir().join(&path)).ok()),
-            ),
-        };
-        let Some(text) = text else {
-            window.push_notification(Notification::warning("Cannot read the file as text"), cx);
-            return;
-        };
+    /// What the editor would open for the selection: a Changes file (its merge result when
+    /// conflicted) or a Files tab file in the working tree. A file at a revision is history
+    /// and cannot be edited.
+    fn edit_target(&self) -> Option<(String, EditKind)> {
+        match &self.active_project()?.selection {
+            Selection::File {
+                path,
+                area: Area::Conflicted,
+            } => Some((path.clone(), EditKind::MergeResult)),
+            Selection::File { path, .. } | Selection::WorkFile { path, rev: None } => {
+                Some((path.clone(), EditKind::File))
+            }
+            _ => None,
+        }
+    }
+
+    fn install_editor(
+        &mut self,
+        path: String,
+        kind: EditKind,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let language = language_for(&path);
         let state = cx.new(|cx| {
             EditorState::new(window, cx)
@@ -174,8 +199,8 @@ impl Osier {
             return;
         };
         let Some(text) = self.diff.read(cx).resolved_text(&path) else {
-            window.push_notification(
-                Notification::warning("Choose a side for every conflict first"),
+            window.push_notice(
+                Notice::warning("Choose a side for every conflict first"),
                 cx,
             );
             return;

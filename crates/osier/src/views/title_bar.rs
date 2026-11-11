@@ -3,7 +3,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use osier_git::ops::remote::{FetchOptions, PullOptions, PullStrategy, PushOptions};
 
-use crate::remote_ops::RemoteOp;
+use crate::app::remote_ops::RemoteOp;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, TitleBar, h_flex,
@@ -292,42 +292,19 @@ impl Osier {
                 })
                 .child(div().flex_1())
                 .child(
-                    Button::new("open-editor")
-                        .test_id("open-editor")
-                        .ghost()
-                        .small()
-                        .icon(Lucide::SquareArrowOutUpRight)
-                        .tooltip("Open project in editor")
-                        .disabled(!has_project)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.open_in_editor(None, window, cx)
-                            }),
-                        ),
-                )
-                .child(
-                    Button::new("refresh")
-                        .test_id("refresh")
-                        .ghost()
-                        .small()
-                        .icon(Lucide::RefreshCw)
-                        .when(!self.compact, |b| b.label("Refresh"))
-                        .tooltip("Refresh (ctrl-r)")
-                        .disabled(!has_project)
-                        .on_click(cx.listener(|this, _, _, cx| this.refresh_active(cx))),
-                )
-                .child(Separator::vertical().h_4().mx_1())
-                .child(
-                    Button::new("update-project")
-                        .test_id("update-project")
+                    Button::new("update-branch")
+                        .test_id("update-branch")
                         .ghost()
                         .small()
                         .icon(Lucide::FolderSync)
-                        .when(!self.compact, |b| b.label("Update project"))
-                        .tooltip("Update project: fetch, then merge or rebase (ctrl-t)")
+                        .when(!self.compact, |b| b.label("Update branch"))
+                        .tooltip(match crate::keymap::hint("update_branch_now", cx) {
+                            Some(k) => format!("Update branch: fetch, then merge or rebase ({k})"),
+                            None => "Update branch: fetch, then merge or rebase".to_string(),
+                        })
                         .disabled(busy)
                         .on_click(
-                            cx.listener(|this, _, window, cx| this.update_project(window, cx)),
+                            cx.listener(|this, _, window, cx| this.update_branch(window, cx)),
                         ),
                 )
                 .child(self.remote_menu_button("fetch", Lucide::CloudDownload, "Fetch", busy, cx))
@@ -355,6 +332,51 @@ impl Osier {
                         .tooltip("Git command log (ctrl-`)")
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_command_log(cx))),
                 )
+                .child({
+                    let unread = self.unread_notices(cx);
+                    let on = self.command_log_visible
+                        && self.bottom_tab == crate::app::BottomTab::Notifications;
+                    div()
+                        .relative()
+                        .child(
+                            Button::new("notifications")
+                                .test_id("notifications")
+                                .ghost()
+                                .small()
+                                .icon(Lucide::Bell)
+                                .toggled(on)
+                                .tooltip(match unread {
+                                    0 => "Notifications".to_string(),
+                                    n => format!("Notifications ({n} new)"),
+                                })
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.toggle_notifications(cx)),
+                                ),
+                        )
+                        .when(unread > 0, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .min_w(px(14.))
+                                    .h(px(14.))
+                                    .px_0p5()
+                                    .rounded_full()
+                                    .bg(cx.theme().primary)
+                                    .text_color(cx.theme().primary_foreground)
+                                    .text_size(px(9.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(if unread > 99 {
+                                        "99+".to_string()
+                                    } else {
+                                        unread.to_string()
+                                    }),
+                            )
+                        })
+                })
                 .child(self.render_theme_menu(cx))
                 .child(
                     Button::new("settings")
@@ -390,6 +412,7 @@ impl Osier {
         let weak2 = cx.entity().downgrade();
         let weak3 = cx.entity().downgrade();
         let has_gh = !self.gh_accounts.is_empty();
+        // a11y: named just below, by its label or (compact) its tooltip.
         let mut button = Button::new(id)
             .test_id(id)
             .ghost()

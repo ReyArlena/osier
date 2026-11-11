@@ -2,59 +2,52 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-mod actions;
+mod a11y;
 mod app;
+mod app_dialog;
 mod askpass;
 mod background;
 mod blame_view;
-mod changes_ops;
+mod cached_list;
+mod cached_root;
 mod cli;
 mod command_log;
 mod config_watch;
 mod dialog_buttons;
 mod dialog_hint;
+mod dialog_notice;
 mod dms_cheatsheet;
 mod edit_pane;
-mod external;
 mod fade;
 mod format;
-mod github;
 mod graph;
-mod hunk_ops;
-mod ignore_ops;
 mod inline_code;
 mod install_route;
 mod instance;
 mod keymap;
-mod merge_ops;
 mod merge_view;
 mod merge_window;
 mod new_repo;
-mod ops;
+mod notices;
 mod palette;
-mod patch_ops;
-mod prefix;
+mod palette_menus;
+#[cfg(feature = "profiler")]
+mod profiling;
 mod project;
 mod project_choices;
-mod rebase_dialog;
-mod recent_status;
-mod remote_ops;
 mod repo_config;
 mod repo_watch;
-mod row_actions;
 mod row_menu;
 mod runtime_info;
+mod save_queue;
 mod settings_panel;
 mod sidebar_query;
-mod squash_ui;
-mod switch_project;
+mod system_motion;
 mod system_scheme;
 mod test_ids;
 mod theme_cards;
 mod themes;
 mod update;
-mod update_project;
-mod update_ui;
 mod viewer;
 mod views;
 
@@ -237,7 +230,7 @@ fn main() {
             app_id: Some(APP_ID.into()),
             ..TitleBar::window_options()
         };
-        let opened = gpui_kit::open_window(options, cx, |window, cx| {
+        let opened = crate::cached_root::open_window(options, cx, |window, cx| {
             cx.new(|cx| {
                 app::Osier::new(
                     paths,
@@ -252,11 +245,16 @@ fn main() {
                 )
             })
         });
-        if let Err(error) = opened {
-            tracing::error!(%error, "failed to open main window");
-            cx.quit();
-            return;
-        }
+        let (_window, _) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                tracing::error!(%error, "failed to open main window");
+                cx.quit();
+                return;
+            }
+        };
+        #[cfg(feature = "profiler")]
+        profiling::start(_window, cx);
         cx.activate(true);
     });
 }

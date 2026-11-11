@@ -6,14 +6,16 @@
 //! Some entries open a submenu (a [`PaletteMode`]): the list is replaced and the query field
 //! shows the submenu's name in a badge. Backspace on an empty query or Escape go back to the
 //! commands; Escape there closes the palette. A submenu can also be opened directly by its
-//! own shortcut (ctrl-o for "Switch project").
+//! own shortcut (ctrl-o for "Switch project", ctrl-shift-b for "Switch branch"). The Fetch,
+//! Pull, Push and Update branch submenus list what the title bar's dropdowns offer
+//! (`palette_menus.rs`).
 //!
 //! gpui-kit's `Command` draws its own query field with a fixed search icon, so the palette
 //! hides it (`searchable(false)`), draws an `Input` with the badge in the `header` slot and
 //! filters the items itself. The header sits inside the `Command` key context, so Up, Down
 //! and Enter still reach the list.
 
-use std::cell::Cell;
+use crate::app_dialog::AppDialogExt as _;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as Lucide;
@@ -22,13 +24,13 @@ use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandSt
 use gpui_kit::component::diff::DiffMode;
 use gpui_kit::component::input::{Backspace, Input, InputEvent, InputState};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IndexPath, Sizable as _, WindowExt as _, h_flex,
+    ActiveTheme as _, Icon, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::app::switch_project::{ProjectEntry, Section};
 use crate::app::{Osier, Tab};
-use crate::switch_project::{ProjectEntry, Section};
 use crate::test_ids::TestId as _;
 
 type Run = Rc<dyn Fn(&mut Osier, &mut Window, &mut Context<Osier>)>;
@@ -44,16 +46,40 @@ pub(crate) enum PaletteMode {
     CloneRepo,
     /// "Create new repository…": a gh account, or "No remote".
     CreateAccount,
+    /// Local branches, then remote ones not checked out yet.
+    SwitchBranch,
+    Fetch,
+    Pull,
+    Push,
+    UpdateBranch,
 }
 
 impl PaletteMode {
+    /// The remote submenus, in the order the commands list them.
+    pub(crate) const REMOTE: [PaletteMode; 4] = [
+        PaletteMode::Fetch,
+        PaletteMode::UpdateBranch,
+        PaletteMode::Pull,
+        PaletteMode::Push,
+    ];
+
+    /// Submenus about the open project: nothing to list without one.
+    fn needs_project(self) -> bool {
+        matches!(self, PaletteMode::SwitchBranch) || Self::REMOTE.contains(&self)
+    }
+
     /// The badge in the query field; `None` for the commands themselves.
-    fn badge(self) -> Option<&'static str> {
+    pub(crate) fn badge(self) -> Option<&'static str> {
         match self {
             PaletteMode::Root => None,
             PaletteMode::SwitchProject => Some("Switch project"),
             PaletteMode::CloneAccount | PaletteMode::CloneRepo => Some("Clone repository"),
             PaletteMode::CreateAccount => Some("New repository"),
+            PaletteMode::SwitchBranch => Some("Switch branch"),
+            PaletteMode::Fetch => Some("Fetch"),
+            PaletteMode::Pull => Some("Pull"),
+            PaletteMode::Push => Some("Push"),
+            PaletteMode::UpdateBranch => Some("Update branch"),
         }
     }
 
@@ -64,6 +90,11 @@ impl PaletteMode {
             PaletteMode::CloneAccount => "Pick a GitHub account, or Other… for any address",
             PaletteMode::CloneRepo => "Search repositories…",
             PaletteMode::CreateAccount => "Pick a GitHub account, or No remote",
+            PaletteMode::SwitchBranch => "Search branches…",
+            PaletteMode::Fetch => "How to fetch…",
+            PaletteMode::Pull => "How to pull…",
+            PaletteMode::Push => "How to push…",
+            PaletteMode::UpdateBranch => "How to update the branch…",
         }
     }
 
@@ -76,14 +107,17 @@ impl PaletteMode {
     }
 }
 
-/// A row of the clone and create submenus.
+/// A row of a submenu other than "Switch project".
 #[derive(Clone)]
 pub(crate) struct Choice {
+    /// Group heading; rows with an empty one are listed without a heading.
     pub section: SharedString,
     pub label: SharedString,
     pub detail: Option<SharedString>,
     pub icon: Lucide,
     pub pick: ChoicePick,
+    /// Registry action id whose keys are shown as the row's hint.
+    pub action: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -93,6 +127,15 @@ pub(crate) enum ChoicePick {
     CloneRepo(osier_auth::GhAccount, osier_auth::hub::GhRepo),
     CreateAccount(osier_auth::GhAccount),
     CreateLocal,
+    Remote(crate::app::remote_ops::RemoteOp),
+    ForcePush,
+    /// Update branch: `None` asks (or uses the remembered method), like the button.
+    Update(Option<osier_git::ops::remote::PullStrategy>),
+    ForgetUpdateMethod,
+    Checkout {
+        name: String,
+        remote: bool,
+    },
 }
 
 impl Choice {
@@ -106,6 +149,39 @@ impl Choice {
                 .as_ref()
                 .is_some_and(|d| d.to_lowercase().contains(&q))
     }
+}
+
+/// A row's shortcut as a quiet `<kbd>`-like pill: outlined, muted, monospace.
+fn key_pill(keys: String, cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex_none()
+        .px_1p5()
+        .rounded(theme.radius.half())
+        .border_1()
+        // Faded text colour, not the border token: that one matches the highlighted row's
+        // background and the pill vanished there.
+        .border_color(theme.muted_foreground.opacity(0.35))
+        .text_color(theme.muted_foreground)
+        .font_family(theme.mono_font_family.clone())
+        .text_xs()
+        .line_height(relative(1.5))
+        .child(keys)
+}
+
+/// Case-insensitive substring match on a row's name; an empty query matches everything.
+fn label_matches(label: &str, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty() || label.to_lowercase().contains(&q)
+}
+
+/// The key-bindable form of a palette command that has no action of its own (Stage all,
+/// Split layout…): runs that command's closure, so the palette and the key do the same.
+/// The ids and keymap names are listed in `keymap::palette_specs`.
+#[derive(Debug, Clone, PartialEq, Action)]
+#[action(namespace = osier, no_json)]
+pub(crate) struct PaletteAction {
+    pub id: &'static str,
 }
 
 /// What choosing a command does.
@@ -158,6 +234,7 @@ fn sub(
     label: &'static str,
     icon: Lucide,
     action: Option<&'static str>,
+    needs_project: bool,
     mode: PaletteMode,
 ) -> PaletteCommand {
     PaletteCommand {
@@ -165,27 +242,36 @@ fn sub(
         label,
         icon,
         action,
-        needs_project: false,
+        needs_project,
         target: Target::Submenu(mode),
     }
 }
 
 /// Every palette command, in display order.
 pub(crate) fn commands() -> Vec<PaletteCommand> {
-    use crate::remote_ops::RemoteOp;
     vec![
         sub(
             "General",
             "Switch project…",
             Lucide::ArrowLeftRight,
             Some("switch_project"),
+            false,
             PaletteMode::SwitchProject,
+        ),
+        sub(
+            "General",
+            "Switch branch…",
+            Lucide::GitBranch,
+            Some("switch_branch"),
+            true,
+            PaletteMode::SwitchBranch,
         ),
         sub(
             "General",
             "Clone repository…",
             Lucide::CloudDownload,
             Some("clone_repository"),
+            false,
             PaletteMode::CloneAccount,
         ),
         sub(
@@ -193,6 +279,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Create new repository…",
             Lucide::FolderPlus,
             Some("create_repository"),
+            false,
             PaletteMode::CreateAccount,
         ),
         cmd(
@@ -249,6 +336,14 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
         ),
         cmd(
             "General",
+            "Toggle notifications",
+            Lucide::Bell,
+            Some("toggle_notifications"),
+            false,
+            |o, _, cx| o.toggle_notifications(cx),
+        ),
+        cmd(
+            "General",
             "Toggle commit details",
             Lucide::PanelBottom,
             Some("toggle_commit_details"),
@@ -267,7 +362,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Open themes folder",
             Lucide::Palette,
-            None,
+            Some("open_themes_folder"),
             false,
             |o, w, cx| o.open_themes_dir(w, cx),
         ),
@@ -275,7 +370,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Rescan project directories",
             Lucide::FolderSearch,
-            None,
+            Some("rescan_projects"),
             false,
             |o, _, cx| o.rescan_projects(cx),
         ),
@@ -283,7 +378,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "General",
             "Scan project status now",
             Lucide::RefreshCw,
-            None,
+            Some("scan_project_status"),
             false,
             |o, w, cx| o.scan_recent_now(w, cx),
         ),
@@ -355,7 +450,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Commit and push",
             Lucide::ArrowUp,
-            None,
+            Some("commit_and_push"),
             true,
             |o, w, cx| o.commit_and_push(w, cx),
         ),
@@ -363,7 +458,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Stage all",
             Lucide::ListChecks,
-            None,
+            Some("stage_all"),
             true,
             |o, w, cx| o.stage_all(w, cx),
         ),
@@ -371,7 +466,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Unstage all",
             Lucide::ListX,
-            None,
+            Some("unstage_all"),
             true,
             |o, w, cx| o.unstage_all(w, cx),
         ),
@@ -379,7 +474,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Stash changes…",
             Lucide::Archive,
-            None,
+            Some("stash_changes"),
             true,
             |o, w, cx| o.prompt_stash(w, cx),
         ),
@@ -387,55 +482,63 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Changes",
             "Shelve all changes…",
             Lucide::Package,
-            None,
+            Some("shelve_all_changes"),
             true,
             |o, w, cx| o.shelve_prompt(Vec::new(), w, cx),
         ),
-        cmd(
+        sub(
             "Remote",
-            "Fetch all remotes",
+            "Fetch…",
             Lucide::CloudDownload,
             Some("fetch"),
             true,
-            |o, w, cx| o.start_remote(RemoteOp::fetch_all(), w, cx),
+            PaletteMode::Fetch,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Update project",
+            "Update branch…",
             Lucide::FolderSync,
-            Some("update_project"),
+            Some("update_branch"),
             true,
-            |o, w, cx| o.update_project(w, cx),
+            PaletteMode::UpdateBranch,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Pull",
+            "Pull…",
             Lucide::ArrowDown,
             Some("pull"),
             true,
-            |o, w, cx| o.start_remote(RemoteOp::pull_default(), w, cx),
+            PaletteMode::Pull,
         ),
-        cmd(
+        sub(
             "Remote",
-            "Push",
+            "Push…",
             Lucide::ArrowUp,
             Some("push"),
             true,
-            |o, w, cx| o.start_remote(RemoteOp::push_default(), w, cx),
+            PaletteMode::Push,
         ),
         cmd(
             "Remote",
             "Choose GitHub account for this project…",
             Lucide::Github,
-            None,
+            Some("choose_github_account"),
             true,
             |o, w, cx| o.choose_account(w, cx),
+        ),
+        cmd(
+            "Remote",
+            "Forget GitHub account choice for this project",
+            Lucide::Github,
+            Some("forget_github_account"),
+            true,
+            |o, w, cx| o.clear_project_account(w, cx),
         ),
         cmd(
             "Branches",
             "New branch…",
             Lucide::GitBranch,
-            None,
+            Some("new_branch"),
             true,
             |o, w, cx| o.prompt_new_branch(None, w, cx),
         ),
@@ -443,7 +546,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Apply patch from clipboard…",
             Lucide::ClipboardPaste,
-            None,
+            Some("apply_patch_from_clipboard"),
             true,
             |o, w, cx| o.apply_patch_from_clipboard(w, cx),
         ),
@@ -451,7 +554,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Apply patch from file…",
             Lucide::FileInput,
-            None,
+            Some("apply_patch_from_file"),
             true,
             |o, w, cx| o.apply_patch_from_file(w, cx),
         ),
@@ -459,7 +562,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Patches",
             "Copy all changes as patch",
             Lucide::ClipboardCopy,
-            None,
+            Some("copy_all_changes_as_patch"),
             true,
             |o, w, cx| {
                 if let Some(s) = o.all_changes_source() {
@@ -471,7 +574,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Unified layout",
             Lucide::FileDiff,
-            None,
+            Some("diff_unified"),
             false,
             |o, _, cx| o.set_diff_mode(DiffMode::Unified, cx),
         ),
@@ -479,7 +582,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Split layout",
             Lucide::Columns2,
-            None,
+            Some("diff_split"),
             false,
             |o, _, cx| o.set_diff_mode(DiffMode::Split, cx),
         ),
@@ -487,7 +590,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Conflicts in the 3-way merge tool",
             Lucide::Columns3,
-            None,
+            Some("conflicts_three_way"),
             false,
             |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::ThreeWay, cx),
         ),
@@ -495,7 +598,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Conflicts inline",
             Lucide::FileDiff,
-            None,
+            Some("conflicts_inline"),
             false,
             |o, _, cx| o.set_conflict_view(osier_config::settings::ConflictView::Inline, cx),
         ),
@@ -503,7 +606,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Expand the diff pane",
             Lucide::Maximize2,
-            None,
+            Some("toggle_diff_expanded"),
             false,
             |o, _, cx| o.toggle_diff_expanded(cx),
         ),
@@ -511,7 +614,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Diff",
             "Toggle soft wrap",
             Lucide::FileDiff,
-            None,
+            Some("toggle_soft_wrap"),
             false,
             |o, window, cx| o.toggle_soft_wrap(window, cx),
         ),
@@ -519,7 +622,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open project in editor",
             Lucide::SquareArrowOutUpRight,
-            None,
+            Some("open_in_editor"),
             true,
             |o, w, cx| o.open_in_editor(None, w, cx),
         ),
@@ -527,7 +630,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open terminal here",
             Lucide::Terminal,
-            None,
+            Some("open_terminal"),
             true,
             |o, w, cx| o.open_terminal(w, cx),
         ),
@@ -535,7 +638,7 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
             "Open",
             "Open in file manager",
             Lucide::FolderOpen,
-            None,
+            Some("open_in_file_manager"),
             true,
             |o, w, cx| o.reveal_in_file_manager(None, w, cx),
         ),
@@ -543,6 +646,25 @@ pub(crate) fn commands() -> Vec<PaletteCommand> {
 }
 
 impl Osier {
+    /// Run the palette command whose keymap action is `id`, as choosing it would.
+    pub(crate) fn run_palette_command(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(command) = commands().into_iter().find(|c| c.action == Some(id)) else {
+            return;
+        };
+        if command.needs_project && self.active_project().is_none() {
+            return;
+        }
+        match command.target {
+            Target::Run(run) => run(self, window, cx),
+            Target::Submenu(mode) => self.open_palette_in(mode, window, cx),
+        }
+    }
+
     pub(crate) fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_palette_in(PaletteMode::Root, window, cx);
     }
@@ -555,6 +677,9 @@ impl Osier {
         cx: &mut Context<Self>,
     ) {
         let has_project = self.active_project().is_some();
+        if mode.needs_project() && !has_project {
+            return;
+        }
         let commands: Rc<Vec<PaletteCommand>> = Rc::new(
             commands()
                 .into_iter()
@@ -562,7 +687,7 @@ impl Osier {
                 .collect(),
         );
         if matches!(mode, PaletteMode::CloneAccount | PaletteMode::CreateAccount) {
-            self.prefetch_hub_repos(cx);
+            self.warm_gh_repos(cx);
         }
         let owner = cx.weak_entity();
         // Read here: the palette cannot read this view while it is being updated.
@@ -573,28 +698,71 @@ impl Osier {
         if Palette::lists_accounts(mode) && !self.gh_accounts_loaded {
             palette.update(cx, |p, cx| p.wait_for_accounts(window, cx));
         }
-        let focus_on_mount = Rc::new(Cell::new(true));
-        window.open_dialog(cx, move |dialog, _, _| {
+        let query = palette.read(cx).query.clone();
+        window.open_app_dialog(cx, move |dialog, _, _| {
             let palette = palette.clone();
-            let focus_on_mount = focus_on_mount.clone();
             dialog
                 .close_button(false)
                 .p_0()
-                .content(move |content, window, cx| {
-                    if focus_on_mount.replace(false) {
-                        let query = palette.read(cx).query.clone();
-                        window.defer(cx, move |window, cx| {
-                            query.update(cx, |q, cx| q.focus(window, cx));
-                        });
-                    }
-                    content.child(palette.clone())
+                .content(move |content, _, _| {
+                    // The palette's own shortcuts while it is open: the dialog is drawn outside
+                    // the app view, so they never reach the app's handlers. The key for the
+                    // mode on screen closes the palette, the other one switches to its mode.
+                    let (p1, p2, p3) = (palette.clone(), palette.clone(), palette.clone());
+                    let (p4, p5, p6, p7) = (
+                        palette.clone(),
+                        palette.clone(),
+                        palette.clone(),
+                        palette.clone(),
+                    );
+                    content.child(
+                        v_flex()
+                            .w_full()
+                            .on_action(move |_: &crate::app::OpenCommandPalette, window, cx| {
+                                p1.update(cx, |p, cx| p.toggle(PaletteMode::Root, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::SwitchProject, window, cx| {
+                                p2.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::SwitchProject, window, cx)
+                                })
+                            })
+                            .on_action(move |_: &crate::app::SwitchBranch, window, cx| {
+                                p3.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::SwitchBranch, window, cx)
+                                })
+                            })
+                            .on_action(move |_: &crate::app::Fetch, window, cx| {
+                                p4.update(cx, |p, cx| p.toggle(PaletteMode::Fetch, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::Pull, window, cx| {
+                                p5.update(cx, |p, cx| p.toggle(PaletteMode::Pull, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::Push, window, cx| {
+                                p6.update(cx, |p, cx| p.toggle(PaletteMode::Push, window, cx))
+                            })
+                            .on_action(move |_: &crate::app::UpdateBranch, window, cx| {
+                                p7.update(cx, |p, cx| {
+                                    p.toggle(PaletteMode::UpdateBranch, window, cx)
+                                })
+                            })
+                            .child(palette.clone()),
+                    )
                 })
+        });
+        // Focus the field now, before the dialog's first frame. Moving focus redraws the
+        // whole window (main view included, past its cache), so doing it from the first
+        // frame instead cost a second full redraw while the palette animates in.
+        window.defer(cx, move |window, cx| {
+            query.update(cx, |q, cx| q.focus(window, cx))
         });
     }
 
     /// The rows a submenu lists, read when it is entered.
     fn entries_for(&self, mode: PaletteMode) -> Rc<Vec<ProjectEntry>> {
         Rc::new(match mode {
+            PaletteMode::Root if self.settings.palette.search_submenus => {
+                self.switch_project_entries()
+            }
             PaletteMode::Root => Vec::new(),
             PaletteMode::SwitchProject => self.switch_project_entries(),
             _ => Vec::new(),
@@ -607,7 +775,9 @@ impl Osier {
             PaletteMode::CloneAccount | PaletteMode::CreateAccount => {
                 crate::new_repo::account_choices(self, mode == PaletteMode::CloneAccount)
             }
-            _ => Vec::new(),
+            PaletteMode::SwitchBranch => self.branch_choices(),
+            PaletteMode::Root => self.searchable_sub_choices(),
+            _ => self.remote_choices(mode),
         }
     }
 }
@@ -628,6 +798,12 @@ pub(crate) struct Palette {
     /// Shown instead of the rows while they load, or when there are none.
     status: Option<SharedString>,
     _load: Option<Task<()>>,
+    /// Watches the cached repository list while "Clone from" shows it.
+    _repos_watch: Option<Subscription>,
+    /// The cached list's revision shown in the rows.
+    repos_seen: u64,
+    /// "Checking for new repositories…" under the search field.
+    note: Option<SharedString>,
     /// A row to highlight once the new list has been drawn (see `rebuild_list`).
     pending_select: Option<IndexPath>,
     _subscription: Subscription,
@@ -672,6 +848,9 @@ impl Palette {
             account: None,
             status: None,
             _load: None,
+            _repos_watch: None,
+            repos_seen: 0,
+            note: None,
             pending_select: None,
             _subscription,
         };
@@ -687,62 +866,81 @@ impl Palette {
             return;
         };
         if matches!(mode, PaletteMode::CloneAccount | PaletteMode::CreateAccount) {
-            owner.update(cx, |o, cx| o.prefetch_hub_repos(cx));
+            owner.update(cx, |o, cx| o.warm_gh_repos(cx));
         }
         self.projects = owner.read(cx).entries_for(mode);
         self.choices = Rc::new(owner.read(cx).choices_for(mode));
         if Self::lists_accounts(mode) && !owner.read(cx).gh_accounts_loaded {
             self.wait_for_accounts(window, cx);
         }
+        self._repos_watch = None;
+        self.note = None;
         if mode != PaletteMode::CloneRepo {
             return;
         }
         let Some(account) = self.account.clone() else {
             return;
         };
-        let (hub, cached) = {
-            let o = owner.read(cx);
-            (
-                o.hub.clone(),
-                o.hub_repos
-                    .get(&crate::new_repo::account_key(&account))
-                    .cloned(),
-            )
-        };
-        match cached {
-            Some(repos) => self.choices = Rc::new(crate::new_repo::repo_choices(&account, &repos)),
-            None => self.status = Some("Loading repositories…".into()),
-        }
-        // Always refresh: the cached list shows at once, the new one replaces it.
-        let busy = owner.read(cx).background.begin(crate::background::GH_REPOS);
-        self._load = Some(cx.spawn_in(window, async move |this, cx| {
-            let _busy = busy;
-            let acc = account.clone();
-            let result = cx.background_spawn(async move { hub.repos(&acc) }).await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                if this.mode != PaletteMode::CloneRepo || this.account.as_ref() != Some(&account) {
-                    return;
-                }
-                match result {
-                    Ok(repos) => {
-                        let _ = this.owner.update(cx, |o, _| {
-                            o.hub_repos
-                                .insert(crate::new_repo::account_key(&account), repos.clone());
-                        });
-                        let rows = crate::new_repo::repo_choices(&account, &repos);
-                        this.status = rows
-                            .is_empty()
-                            .then(|| format!("{} has no repositories.", account.login).into());
-                        this.choices = Rc::new(rows);
-                    }
-                    Err(e) if this.choices.is_empty() => {
-                        this.status = Some(format!("Could not list repositories: {e}").into());
-                    }
-                    Err(e) => tracing::info!(error = %e, "repository list refresh failed"),
-                }
-                this.rebuild_list(window, cx);
-            });
+        // The cached list shows at once (from disk on the first open of a session); a
+        // check for new repositories runs in the background, and its result replaces the
+        // rows when it lands.
+        self.repos_seen = 0;
+        owner.update(cx, |o, cx| {
+            o.use_gh_repos(&account, crate::cached_list::Freshness::CheckNow, cx)
+        });
+        self._repos_watch = Some(cx.observe_in(&owner, window, |this, _, window, cx| {
+            this.sync_repos(window, cx)
         }));
+        self.sync_repos(window, cx);
+    }
+
+    /// Show the cached repository list of the account being cloned from: rows when its
+    /// revision moved, the note while a refresh runs, a status when there is nothing to show.
+    fn sync_repos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode != PaletteMode::CloneRepo {
+            return;
+        }
+        let (Some(account), Some(owner)) = (self.account.clone(), self.owner.upgrade()) else {
+            return;
+        };
+        let (revision, data, checking, error) = {
+            let o = owner.read(cx);
+            match o
+                .gh_lists
+                .repos
+                .get(&crate::new_repo::account_key(&account))
+            {
+                Some(e) => (e.revision, e.data.clone(), e.refreshing, e.error.clone()),
+                // Its disk copy is still being read.
+                None => (0, None, true, None),
+            }
+        };
+        let status: Option<SharedString> = match &data {
+            None if checking => Some("Loading repositories…".into()),
+            None => error.map(|e| format!("Could not list repositories: {e}").into()),
+            Some(repos) if repos.is_empty() && !checking => {
+                Some(format!("{} has no repositories.", account.login).into())
+            }
+            Some(_) => None,
+        };
+        let note: Option<SharedString> =
+            (checking && data.is_some()).then(|| "Checking for new repositories…".into());
+        let rows_changed = revision != self.repos_seen;
+        if !rows_changed && status == self.status && note == self.note {
+            return;
+        }
+        self.status = status;
+        self.note = note;
+        if rows_changed {
+            self.repos_seen = revision;
+            self.choices = Rc::new(
+                data.map(|repos| crate::new_repo::repo_choices(&account, &repos))
+                    .unwrap_or_default(),
+            );
+            self.rebuild_list(window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn lists_accounts(mode: PaletteMode) -> bool {
@@ -771,7 +969,7 @@ impl Palette {
                         }
                         this.status = None;
                         this.choices = Rc::new(owner.read(cx).choices_for(mode));
-                        owner.update(cx, |o, cx| o.prefetch_hub_repos(cx));
+                        owner.update(cx, |o, cx| o.warm_gh_repos(cx));
                         this.rebuild_list(window, cx);
                         true
                     })
@@ -795,9 +993,17 @@ impl Palette {
     /// Matching choices grouped by section, in their listed order.
     fn choice_sections(&self, cx: &App) -> Vec<(SharedString, Vec<usize>)> {
         let query = self.query_text(cx);
+        let root = self.mode == PaletteMode::Root;
         let mut out: Vec<(SharedString, Vec<usize>)> = Vec::new();
         for (ix, c) in self.choices.iter().enumerate() {
-            if !c.matches(&query) {
+            // From the commands list only the row's own name counts: a branch's last commit
+            // or a submenu's name would bring in rows nobody searched for.
+            let hit = if root {
+                label_matches(&c.label, &query)
+            } else {
+                c.matches(&query)
+            };
+            if !hit {
                 continue;
             }
             match out.iter_mut().find(|(s, _)| *s == c.section) {
@@ -810,6 +1016,23 @@ impl Palette {
 
     fn query_text(&self, cx: &App) -> String {
         self.query.read(cx).value().to_string()
+    }
+
+    /// The shortcut for `mode` pressed while the palette is open: close it when it already
+    /// shows `mode`, else switch to it.
+    fn toggle(&mut self, mode: PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        let has_project = self
+            .owner
+            .upgrade()
+            .is_some_and(|o| o.read(cx).active_project().is_some());
+        if mode.needs_project() && !has_project {
+            return;
+        }
+        if self.mode == mode {
+            window.close_dialog(cx);
+        } else {
+            self.enter(mode, window, cx);
+        }
     }
 
     /// Switch to `mode` with an empty query.
@@ -913,17 +1136,9 @@ impl Palette {
                     return;
                 }
                 window.close_dialog(cx);
-                let _ = self.owner.update(cx, |o, cx| match pick {
-                    ChoicePick::CloneOther => o.prompt_clone(None, window, cx),
-                    ChoicePick::CloneRepo(account, repo) => {
-                        o.prompt_clone(Some((account, repo)), window, cx)
-                    }
-                    ChoicePick::CreateAccount(account) => {
-                        o.prompt_create(Some(account), window, cx)
-                    }
-                    ChoicePick::CreateLocal => o.prompt_create(None, window, cx),
-                    ChoicePick::CloneAccount(_) => {}
-                });
+                let _ = self
+                    .owner
+                    .update(cx, |o, cx| o.run_choice(pick, window, cx));
             }
             Pick::Nothing => {}
         }
@@ -932,27 +1147,31 @@ impl Palette {
     fn choice_item(&self, ix: usize, cx: &App) -> CommandItem {
         let c = self.choices[ix].clone();
         let muted = cx.theme().muted_foreground;
+        let keys = c.action.and_then(|id| crate::keymap::hint(id, cx));
         let id = format!("palette-choice:{}", c.label);
         CommandItem::new()
             .label(c.label.clone())
             .icon(c.icon)
-            .child(move |_, _| {
+            .child(move |_, cx| {
                 h_flex()
-                    .test_id(id.clone())
+                    .test_id(|| id.clone())
                     .w_full()
                     .gap_3()
                     .items_center()
-                    .child(Icon::new(c.icon).xsmall())
-                    .child(div().flex_none().child(c.label.clone()))
+                    .child(Icon::new(c.icon).xsmall().flex_none())
+                    // The name, with what it does or where it is underneath.
                     .child(
-                        div()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(muted)
-                            .children(c.detail.clone()),
+                            .child(div().truncate().child(c.label.clone()))
+                            .when_some(c.detail.clone(), |this, detail| {
+                                this.child(
+                                    div().text_xs().text_color(muted).truncate().child(detail),
+                                )
+                            }),
                     )
+                    .when_some(keys.clone(), |this, k| this.child(key_pill(k, cx)))
                     .when(matches!(c.pick, ChoicePick::CloneAccount(_)), |this| {
                         this.child(Icon::new(Lucide::ChevronRight).xsmall().text_color(muted))
                     })
@@ -973,31 +1192,34 @@ impl Palette {
     fn command_item(&self, ix: usize, cx: &App) -> CommandItem {
         let c = &self.commands[ix];
         let muted = cx.theme().muted_foreground;
-        let mono = cx.theme().mono_font_family.clone();
         let keys = c.action.and_then(|id| crate::keymap::hint(id, cx));
         let (label, icon, group) = (c.label, c.icon, c.group);
         let submenu = matches!(c.target, Target::Submenu(_));
+        let show_group = self
+            .owner
+            .upgrade()
+            .is_some_and(|o| o.read(cx).settings.palette.show_categories);
         CommandItem::new()
             .label(label)
             .icon(icon)
-            .child(move |_, _| {
+            .child(move |_, cx| {
                 h_flex()
-                    .test_id(format!("palette-command:{label}"))
+                    .test_id(|| format!("palette-command:{label}"))
                     .w_full()
                     .gap_3()
                     .items_center()
                     .child(Icon::new(icon).xsmall())
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    .child(div().text_xs().text_color(muted).child(group))
-                    .when_some(keys.clone(), |this, k| {
+                    .when(show_group, |this| {
                         this.child(
                             div()
+                                .test_id(|| format!("palette-category:{label}"))
                                 .text_xs()
                                 .text_color(muted)
-                                .font_family(mono.clone())
-                                .child(k),
+                                .child(group),
                         )
                     })
+                    .when_some(keys.clone(), |this, k| this.child(key_pill(k, cx)))
                     .when(submenu, |this| {
                         this.child(Icon::new(Lucide::ChevronRight).xsmall().text_color(muted))
                     })
@@ -1016,6 +1238,7 @@ impl Palette {
 /// (its `header` slot) on each of its renders, so it holds no state of its own.
 fn render_query(
     badge: Option<SharedString>,
+    note: Option<SharedString>,
     query: &Entity<InputState>,
     palette: &WeakEntity<Palette>,
     cx: &App,
@@ -1058,6 +1281,20 @@ fn render_query(
             None => cx.propagate(),
         })
         .child(Input::new(query).prefix(prefix).appearance(false).p_0())
+        // While a cached list is checked for new entries ("Checking for new repositories…").
+        .when_some(note, |this, note| {
+            this.child(
+                h_flex()
+                    .test_id("palette-note")
+                    .pb_2()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(gpui_kit::component::spinner::Spinner::new().xsmall())
+                    .child(note),
+            )
+        })
         .into_any_element()
 }
 
@@ -1080,10 +1317,33 @@ impl Render for Palette {
                 let rows: Vec<usize> = (0..self.commands.len())
                     .filter(|&ix| self.commands[ix].matches(&query))
                     .collect();
-                for &ix in &rows {
-                    command = command.item(self.command_item(ix, cx));
+                command = command.group(
+                    CommandGroup::new().items(rows.iter().map(|&ix| self.command_item(ix, cx))),
+                );
+                let mut picks: Vec<Vec<Pick>> = vec![rows.into_iter().map(Pick::Command).collect()];
+                // `palette.search_submenus`: matching submenu rows, after every command.
+                if !query.trim().is_empty() {
+                    let projects: Vec<usize> = (0..self.projects.len())
+                        .filter(|&ix| label_matches(&self.projects[ix].name, &query))
+                        .collect();
+                    if !projects.is_empty() {
+                        command = command.group(
+                            CommandGroup::new()
+                                .label("Switch project")
+                                .items(projects.iter().map(|&ix| self.project_item(ix))),
+                        );
+                        picks.push(projects.into_iter().map(Pick::Project).collect());
+                    }
+                    for (section, rows) in self.choice_sections(cx) {
+                        command = command.group(
+                            CommandGroup::new()
+                                .label(section)
+                                .items(rows.iter().map(|&ix| self.choice_item(ix, cx))),
+                        );
+                        picks.push(rows.into_iter().map(Pick::Choice).collect());
+                    }
                 }
-                vec![rows.into_iter().map(Pick::Command).collect()]
+                picks
             }
             PaletteMode::SwitchProject => {
                 let sections = self.project_sections(cx);
@@ -1103,11 +1363,12 @@ impl Render for Palette {
                 let sections = self.choice_sections(cx);
                 let mut picks: Vec<Vec<Pick>> = Vec::new();
                 for (section, rows) in &sections {
-                    command = command.group(
-                        CommandGroup::new()
-                            .label(section.clone())
-                            .items(rows.iter().map(|&ix| self.choice_item(ix, cx))),
-                    );
+                    let mut group = CommandGroup::new();
+                    if !section.is_empty() {
+                        group = group.label(section.clone());
+                    }
+                    command =
+                        command.group(group.items(rows.iter().map(|&ix| self.choice_item(ix, cx))));
                     picks.push(rows.iter().map(|&ix| Pick::Choice(ix)).collect());
                 }
                 if let Some(status) = self.status.clone() {
@@ -1120,8 +1381,11 @@ impl Render for Palette {
         };
         let this = cx.weak_entity();
         let (badge, query, header_owner) = (self.badge(), self.query.clone(), this.clone());
+        let note = self.note.clone();
         command
-            .header(move |_, _, cx| render_query(badge.clone(), &query, &header_owner, cx))
+            .header(move |_, _, cx| {
+                render_query(badge.clone(), note.clone(), &query, &header_owner, cx)
+            })
             .on_confirm(move |ix: IndexPath, window, cx| {
                 let Some(pick) = picks.get(ix.section).and_then(|s| s.get(ix.row)).copied() else {
                     return;
@@ -1145,13 +1409,30 @@ mod tests {
         for c in &all {
             assert!(!c.group.is_empty() && !c.label.is_empty());
         }
-        let keyed = all.iter().filter(|c| c.action.is_some()).count();
-        let ids: Vec<&str> = crate::keymap::actions().iter().map(|a| a.id).collect();
+        let specs = crate::keymap::actions();
         for c in &all {
-            if let Some(id) = c.action {
-                assert!(ids.contains(&id), "palette points at unknown action {id}");
-            }
+            // Every command can be given a key: its own action, or a `PaletteAction`.
+            let id = c
+                .action
+                .unwrap_or_else(|| panic!("{:?} has no keymap action", c.label));
+            let spec = specs
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("palette points at unknown action {id}"));
+            // Same name in Settings > Keymap, "…" included: it says a dialog or a choice
+            // follows.
+            assert_eq!(spec.name, c.label, "keymap name of {id}");
         }
-        assert!(keyed >= 15, "{keyed} commands carry a shortcut hint");
+        // Each palette-only action belongs to exactly one command, under the same name.
+        for spec in crate::keymap::palette_specs() {
+            let owners: Vec<&super::PaletteCommand> =
+                all.iter().filter(|c| c.action == Some(spec.id)).collect();
+            assert_eq!(owners.len(), 1, "{} is used by one command", spec.id);
+            assert_eq!(owners[0].label, spec.name);
+            assert!(matches!(
+                (spec.make)().as_any().downcast_ref::<super::PaletteAction>(),
+                Some(a) if a.id == spec.id
+            ));
+        }
     }
 }
