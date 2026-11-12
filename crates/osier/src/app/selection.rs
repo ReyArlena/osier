@@ -197,6 +197,7 @@ impl Osier {
     /// Load the diff for the active project's selection into the diff pane.
     pub(crate) fn reload_selection(&mut self, cx: &mut Context<Self>) {
         self.blame = None;
+        self.diff_unchanged = None;
         self.diff_key = self.active_project().map(|p| p.content_key(&p.selection));
         self.diff_revision += 1;
         let revision = self.diff_revision;
@@ -289,6 +290,12 @@ impl Osier {
                     }
                     Err(LoadError::NoMarkers) => {
                         this.diff_no_markers = true;
+                        this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.diff_staging = None;
+                        this.set_diff_files(Vec::new(), cx);
+                    }
+                    Err(LoadError::Unchanged(reason)) => {
+                        this.diff_unchanged = Some(reason);
                         this.diff_model = std::rc::Rc::new(Vec::new());
                         this.diff_staging = None;
                         this.set_diff_files(Vec::new(), cx);
@@ -429,6 +436,9 @@ pub(crate) enum LoadError {
     Git(String),
     /// A conflicted file whose working copy has no conflict markers left.
     NoMarkers,
+    /// A changed file whose text is the same in HEAD and the working tree, and why git
+    /// lists it.
+    Unchanged(osier_git::staging::Unchanged),
 }
 
 impl From<osier_git::GitError> for LoadError {
@@ -498,7 +508,11 @@ fn load_patch(
     {
         let Some(staging) = osier_git::staging::file_staging(repo, path, orig_path, context)?
         else {
-            return Ok((Vec::new(), Vec::new(), None));
+            // Nothing to show: say why the file is listed, when git knows.
+            return match osier_git::staging::unchanged_reason(repo, path, orig_path)? {
+                Some(reason) => Err(LoadError::Unchanged(reason)),
+                None => Ok((Vec::new(), Vec::new(), None)),
+            };
         };
         let files =
             DiffFile::parse(&staging.shown_text).map_err(|e| LoadError::Git(e.to_string()))?;

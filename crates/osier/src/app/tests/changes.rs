@@ -1114,3 +1114,60 @@ fn ui_group_checkbox_copes_with_staged_deletions_and_renames(cx: &mut TestAppCon
         "nothing staged, the rename's old path included"
     );
 }
+
+fn unchanged(h: &Harness, cx: &mut TestAppContext) -> Option<osier_git::staging::Unchanged> {
+    h.read(cx, |osier, _| osier.diff_unchanged.clone())
+}
+
+#[gpui::test]
+fn ui_a_staged_change_undone_in_the_file_says_why_it_is_listed(cx: &mut TestAppContext) {
+    use osier_git::staging::Unchanged;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.commit_file("b.txt", "b\n", "second");
+    repo.write("a.txt", "two\n");
+    repo.git(["add", "a.txt"]);
+    repo.write("a.txt", "one\n");
+    repo.write("b.txt", "B\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:a.txt");
+    assert_eq!(unchanged(&h, cx), Some(Unchanged::StagedOnly));
+    h.read(cx, |osier, _| assert_eq!(osier.diff_files, 0));
+    // A file with a real diff has no such note.
+    h.click(cx, "change-row:changes:b.txt");
+    assert_eq!(unchanged(&h, cx), None);
+    h.read(cx, |osier, _| assert_eq!(osier.diff_files, 1));
+    // What the note promises: the checkbox stages the file as it is and the row goes.
+    h.click(cx, "change-row:changes:a.txt");
+    h.click(cx, "change-stage:changes:a.txt");
+    assert_eq!(repo.git(["status", "--porcelain"]).trim(), "M b.txt");
+    assert!(h.bounds(cx, "change-row:changes:a.txt").is_none());
+}
+
+#[cfg(unix)]
+#[gpui::test]
+fn ui_a_permissions_only_change_says_so(cx: &mut TestAppContext) {
+    use osier_git::staging::Unchanged;
+    use std::os::unix::fs::PermissionsExt as _;
+    let repo = TempRepo::new();
+    repo.commit_file("run.sh", "echo hi\n", "first");
+    std::fs::set_permissions(
+        repo.path().join("run.sh"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    repo.git(["add", "run.sh"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:run.sh");
+    let reason = unchanged(&h, cx).expect("a reason");
+    assert_eq!(
+        reason,
+        Unchanged::Mode {
+            old: "100644".into(),
+            new: "100755".into()
+        }
+    );
+    let (title, hint) = crate::views::diff_pane::unchanged_text(&reason);
+    assert_eq!(title, "Only the permissions changed");
+    assert!(hint.starts_with("This file was made executable."), "{hint}");
+}

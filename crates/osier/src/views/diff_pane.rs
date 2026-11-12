@@ -23,6 +23,41 @@ use crate::app::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 
+/// Title and explanation for a changed file with no diff to show: why it is in the list.
+pub(crate) fn unchanged_text(reason: &osier_git::staging::Unchanged) -> (&'static str, String) {
+    use osier_git::staging::Unchanged as U;
+    const SAME: &str = "Its text is the same as in the last commit.";
+    match reason {
+        U::Mode { old, new } => {
+            let what = match (old.as_str(), new.as_str()) {
+                ("100644", "100755") => "This file was made executable.".to_string(),
+                ("100755", "100644") => "This file is no longer executable.".to_string(),
+                _ => format!("The file mode changed from {old} to {new}."),
+            };
+            ("Only the permissions changed", format!("{what} {SAME}"))
+        }
+        U::Renamed { from } => (
+            "Moved without changes",
+            format!("This file came from {from}. {SAME}"),
+        ),
+        U::EmptyAdded => (
+            "New empty file",
+            "This file is new and has nothing in it.".to_string(),
+        ),
+        U::EmptyDeleted => (
+            "Empty file deleted",
+            "This file was deleted and had nothing in it.".to_string(),
+        ),
+        U::StagedOnly => (
+            "Changed on disk since it was staged",
+            "This file was changed on disk after it was staged, and now matches the last \
+             commit again. The staged version is out of date and would still be committed. \
+             Click its checkbox to drop it."
+                .to_string(),
+        ),
+    }
+}
+
 impl Osier {
     pub(crate) fn render_diff_pane(
         &mut self,
@@ -270,8 +305,15 @@ impl Osier {
             };
             self.empty_state(title, hint, cx).into_any_element()
         } else if self.diff_files == 0 {
-            self.empty_state("No changes", "This selection has no textual changes.", cx)
-                .into_any_element()
+            match &self.diff_unchanged {
+                Some(reason) => {
+                    let (title, hint) = unchanged_text(reason);
+                    self.empty_state(title, &hint, cx).into_any_element()
+                }
+                None => self
+                    .empty_state("No changes", "This selection has no textual changes.", cx)
+                    .into_any_element(),
+            }
         } else {
             let mut view = Diff::new(&self.diff)
                 .line_number(self.settings.diff.line_numbers)

@@ -14,6 +14,10 @@ All notable changes to Osier are documented here. The format follows
 - The line under the pointer is highlighted in every code editor: the file viewer, the edit
   pane and the three panes of the merge tool.
 
+- A changed file with no diff to show says why it is in the list: only its permissions
+  changed, it was moved without an edit, it is a new or deleted empty file, or it was
+  changed back on disk after it was staged.
+
 ### Changed
 
 - The Changes tab is one list, like PhpStorm: each changed file shows once with a checkbox

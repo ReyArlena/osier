@@ -510,3 +510,66 @@ fn property_all_hunks_stage_and_unstage_the_whole_file() {
         "only {checked} cases without index-only lines outside hunks"
     );
 }
+
+fn reason(t: &TempRepo, path: &str, orig: Option<&str>) -> Option<Unchanged> {
+    assert!(
+        file_staging(&t.repo(), path, orig, 3).unwrap().is_none(),
+        "{path} has no diff to show"
+    );
+    unchanged_reason(&t.repo(), path, orig).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_mode_change_alone_is_named_staged_or_not() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let t = TempRepo::new();
+    t.commit_file("run.sh", "echo hi\n", "first");
+    let file = t.path().join("run.sh");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mode = Some(Unchanged::Mode {
+        old: "100644".into(),
+        new: "100755".into(),
+    });
+    assert_eq!(reason(&t, "run.sh", None), mode);
+    t.git(["add", "run.sh"]);
+    assert_eq!(reason(&t, "run.sh", None), mode);
+}
+
+#[test]
+fn a_staged_change_undone_in_the_file_is_staged_only() {
+    let t = TempRepo::new();
+    t.commit_file("a.txt", "one\n", "first");
+    t.write("a.txt", "two\n");
+    t.git(["add", "a.txt"]);
+    t.write("a.txt", "one\n");
+    assert_eq!(reason(&t, "a.txt", None), Some(Unchanged::StagedOnly));
+}
+
+#[test]
+fn empty_new_and_deleted_files_and_plain_renames_are_named() {
+    let t = TempRepo::new();
+    t.commit_file("gone.txt", "", "first");
+    t.commit_file("old.txt", "kept\n", "second");
+    t.write("new.txt", "");
+    t.git(["add", "new.txt"]);
+    t.git(["rm", "-q", "gone.txt"]);
+    t.git(["mv", "old.txt", "moved.txt"]);
+    assert_eq!(reason(&t, "new.txt", None), Some(Unchanged::EmptyAdded));
+    assert_eq!(reason(&t, "gone.txt", None), Some(Unchanged::EmptyDeleted));
+    assert_eq!(
+        reason(&t, "moved.txt", Some("old.txt")),
+        Some(Unchanged::Renamed {
+            from: "old.txt".into()
+        })
+    );
+}
+
+#[test]
+fn a_file_with_a_diff_or_no_change_has_no_reason() {
+    let t = TempRepo::new();
+    t.commit_file("a.txt", "one\n", "first");
+    assert_eq!(unchanged_reason(&t.repo(), "a.txt", None).unwrap(), None);
+    t.write("a.txt", "two\n");
+    assert_eq!(unchanged_reason(&t.repo(), "a.txt", None).unwrap(), None);
+}

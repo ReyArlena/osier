@@ -249,6 +249,9 @@ pub struct Osier {
     pub(crate) diff_expanded: bool,
     /// The selected conflicted file has no conflict markers left (inline view).
     pub(crate) diff_no_markers: bool,
+    /// Why the selected changed file has no diff to show (its text is the same in HEAD and
+    /// the working tree), when git says why.
+    pub(crate) diff_unchanged: Option<osier_git::staging::Unchanged>,
     /// Merged branches with a deleted upstream already offered for deletion this session
     /// (project, branch), so a dismissed offer does not come back after every fetch.
     pub(crate) gone_offered: std::collections::HashSet<(PathBuf, String)>,
@@ -550,6 +553,7 @@ impl Osier {
             merges: crate::app::merge_ops::Merges::default(),
             diff_expanded: false,
             diff_no_markers: false,
+            diff_unchanged: None,
             diff_file_ix: 0,
             gone_offered: std::collections::HashSet::new(),
             viewer: None,

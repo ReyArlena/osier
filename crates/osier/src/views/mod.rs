@@ -4,7 +4,7 @@ mod branches;
 pub(crate) mod changes;
 pub(crate) mod command_log;
 mod commit_details;
-mod diff_pane;
+pub(crate) mod diff_pane;
 pub(crate) mod files_tab;
 mod log_tab;
 mod notices;

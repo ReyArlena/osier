@@ -187,6 +187,67 @@ fn one_file_text(
     Ok((file, text))
 }
 
+/// What the shown diff compares the working tree with: HEAD, or the empty tree on an unborn
+/// branch.
+fn head_or_empty(repo: &Repository) -> Result<String> {
+    Ok(match repo.head_oid()? {
+        Some(_) => "HEAD".to_string(),
+        None => empty_tree(repo)?,
+    })
+}
+
+/// Why git lists a file as changed when its text is the same in HEAD and the working tree, so
+/// there is no diff to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unchanged {
+    /// Only the file mode differs (git modes, such as `100644` and `100755`).
+    Mode { old: String, new: String },
+    /// Moved or copied from `from` without an edit.
+    Renamed { from: String },
+    /// A new file with nothing in it.
+    EmptyAdded,
+    /// A deleted file that had nothing in it.
+    EmptyDeleted,
+    /// The working tree is back at HEAD, but the index still holds a staged change.
+    StagedOnly,
+}
+
+/// The reason [`file_staging`] found nothing to show for `path`. `None` when no reason is
+/// found (the file changed again in the meantime, or git no longer lists it).
+pub fn unchanged_reason(
+    repo: &Repository,
+    path: &str,
+    orig_path: Option<&str>,
+) -> Result<Option<Unchanged>> {
+    let mut paths = vec![path];
+    paths.extend(orig_path);
+    let file_in = |target: DiffTarget| -> Result<Option<DiffFile>> {
+        let mut options = DiffOptions::new(target);
+        options.paths = paths.iter().map(|p| p.to_string()).collect();
+        Ok(parse(&patch_text(repo, &options)?)?
+            .into_iter()
+            .find(|f| f.path == path))
+    };
+    let Some(file) = file_in(DiffTarget::WorktreeTo(head_or_empty(repo)?))? else {
+        // HEAD and the working tree agree: git lists the file because the index differs.
+        return Ok(file_in(DiffTarget::Staged)?.map(|_| Unchanged::StagedOnly));
+    };
+    if !file.hunks.is_empty() || file.binary {
+        return Ok(None);
+    }
+    Ok(match file.status {
+        crate::diff::FileStatus::Renamed | crate::diff::FileStatus::Copied => {
+            file.old_path.map(|from| Unchanged::Renamed { from })
+        }
+        crate::diff::FileStatus::Added => Some(Unchanged::EmptyAdded),
+        crate::diff::FileStatus::Deleted => Some(Unchanged::EmptyDeleted),
+        _ => match (file.old_mode, file.new_mode) {
+            (Some(old), Some(new)) if old != new => Some(Unchanged::Mode { old, new }),
+            _ => None,
+        },
+    })
+}
+
 /// Context lines of the two diffs the patches are built from: their hunks only need to be
 /// found by `git apply`, whatever context the shown diff uses.
 const PATCH_CONTEXT: u32 = 3;
@@ -202,10 +263,7 @@ pub fn file_staging(
 ) -> Result<Option<FileStaging>> {
     let mut paths = vec![path];
     paths.extend(orig_path);
-    let base = match repo.head_oid()? {
-        Some(_) => "HEAD".to_string(),
-        None => empty_tree(repo)?,
-    };
+    let base = head_or_empty(repo)?;
     let (Some(shown), shown_text) =
         one_file_text(repo, DiffTarget::WorktreeTo(base), &paths, context)?
     else {
