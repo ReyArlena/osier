@@ -93,6 +93,9 @@ impl Osier {
         let Some(range) = self.diff.read(cx).selected_lines().or(picked) else {
             return;
         };
+        // Done with the selection. The reload that follows keeps the diff's files when their
+        // text did not change, so it would not clear it.
+        self.diff.update(cx, |d, cx| d.set_selected_lines(None, cx));
         let path = range.path().to_string();
         let (start, end) = (
             range.start().min(range.end()),

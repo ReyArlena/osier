@@ -225,6 +225,9 @@ pub struct Osier {
     /// back or a file change) keeps it shown instead of the "Reading diff" placeholder, so
     /// the diff does not flicker.
     pub(crate) diff_shown: Option<crate::project::Selection>,
+    /// Hash of the text the diff's files were parsed from (`None` after anything else was
+    /// set): an identical reload keeps the files and their prepared highlights.
+    pub(crate) diff_text_key: Option<u64>,
     /// A reload of `diff_shown` is running (the old diff stays up meanwhile).
     pub(crate) diff_refreshing: bool,
     pub(crate) diff_error: Option<String>,
@@ -623,6 +626,7 @@ impl Osier {
             diff_staging: None,
             diff_loading: false,
             diff_shown: None,
+            diff_text_key: None,
             diff_refreshing: false,
             diff_error: None,
             diff_revision: 0,

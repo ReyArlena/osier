@@ -66,6 +66,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Staging or unstaging a hunk or lines no longer makes the diff's word highlights and syntax
+  colours flicker: when the diff's text is unchanged it is kept as it is, with its expanded
+  sections and scroll.
+
 - Making the window narrower no longer pushes the diff pane off screen. The Changes/Log
   column and the diff pane keep the split you dragged (as a share, not a width) and resize
   together; a sidebar of standard width stays as it is, a wider one shrinks with the window,

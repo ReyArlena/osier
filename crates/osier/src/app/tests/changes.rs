@@ -869,6 +869,51 @@ fn two_hunk_file() -> TempRepo {
     repo
 }
 
+#[gpui::test]
+fn staging_a_hunk_keeps_the_diff_and_its_highlights(cx: &mut TestAppContext) {
+    use gpui_kit::component::diff::{DiffLineRange, DiffSide};
+    use osier_git::staging::Check;
+    let repo = two_hunk_file();
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:f.txt");
+    // Replacing the diff's files clears its line selection (and its prepared word and syntax
+    // highlights, which then flicker back): a selection that survives means they were kept.
+    h.act(cx, |o, _, cx| {
+        o.diff.update(cx, |d, cx| {
+            let range = DiffLineRange::new(
+                gpui_kit::SharedString::from("f.txt"),
+                DiffSide::Modified,
+                2,
+                2,
+            );
+            d.set_selected_lines(Some(range), cx)
+        })
+    });
+    let key = h.read(cx, |o, _| o.diff_text_key);
+    assert!(key.is_some());
+    h.act(cx, |o, window, cx| {
+        o.hunk_action(
+            "f.txt".into(),
+            1,
+            crate::app::hunk_ops::HunkAction::Stage,
+            window,
+            cx,
+        )
+    });
+    h.read(cx, |o, cx| {
+        assert_eq!(
+            o.diff_staging.as_ref().expect("staging").hunk_check(1),
+            Check::Staged,
+            "the hunk was staged and the staging reloaded"
+        );
+        assert_eq!(o.diff_text_key, key, "same text");
+        assert!(
+            o.diff.read(cx).selected_lines().is_some(),
+            "files kept, not replaced"
+        );
+    });
+}
+
 fn has_dialog(h: &Harness, cx: &mut TestAppContext) -> bool {
     cx.update_window(h.window, |_, window, cx| {
         use gpui_kit::component::WindowExt as _;

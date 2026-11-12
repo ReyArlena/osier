@@ -163,6 +163,8 @@ pub struct DiffCache {
     pub files: usize,
     pub error: Option<String>,
     pub too_large: Option<u64>,
+    /// Hash of the text its files were parsed from (`Osier::diff_text_key`).
+    pub text_key: Option<u64>,
     pub viewer: Option<crate::viewer::Viewer>,
     /// `Project::content_key` of what it shows, when it was loaded.
     pub key: String,

@@ -281,12 +281,22 @@ impl Osier {
                 }
                 this.diff_loading = false;
                 this.diff_refreshing = false;
+                // The same selection reloaded to the same text (staging a hunk changes only
+                // which lines are staged): keep the files the diff already has, so its word
+                // and syntax highlights, expanded context and scroll stay instead of being
+                // prepared again (they flickered).
+                let same_selection = this.diff_shown.as_ref() == Some(&shown);
                 this.diff_shown = Some(shown);
                 match result {
-                    Ok((files, model, staging)) => {
+                    Ok((files, model, staging, key)) => {
                         this.diff_model = std::rc::Rc::new(model);
                         this.diff_staging = staging.map(std::rc::Rc::new);
-                        this.set_diff_files(files, cx);
+                        let unchanged =
+                            same_selection && !files.is_empty() && this.diff_text_key == Some(key);
+                        if !unchanged {
+                            this.set_diff_files(files, cx);
+                            this.diff_text_key = Some(key);
+                        }
                     }
                     Err(LoadError::NoMarkers) => {
                         this.diff_no_markers = true;
@@ -320,6 +330,7 @@ impl Osier {
     }
 
     fn set_diff_files(&mut self, files: Vec<DiffFile>, cx: &mut Context<Self>) {
+        self.diff_text_key = None;
         self.diff_files = files.len();
         self.diff.update(cx, |state, cx| state.set_files(files, cx));
     }
@@ -457,13 +468,22 @@ pub(crate) fn whitespace_applies(selection: &Selection) -> bool {
 }
 
 /// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
-/// What a loaded diff gives the pane: gpui-kit's files, our hunk model, and for a changed file
-/// in the Changes tab its staging.
+/// What a loaded diff gives the pane: gpui-kit's files, our hunk model, for a changed file
+/// in the Changes tab its staging, and a hash of the text the files were parsed from.
 type Loaded = (
     Vec<DiffFile>,
     Vec<osier_git::diff::DiffFile>,
     Option<osier_git::staging::FileStaging>,
+    u64,
 );
+
+/// Hash of the text a diff was parsed from: a reload with the same hash shows the same diff.
+fn text_key(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
 
 fn load_patch(
     repo: &Repository,
@@ -498,7 +518,7 @@ fn load_patch(
         }
         let file = DiffFile::parse_conflicts(path.clone(), &text)
             .map_err(|e| LoadError::Git(e.to_string()))?;
-        return Ok((vec![file], Vec::new(), None));
+        return Ok((vec![file], Vec::new(), None, text_key(&text)));
     }
     // A changed file: HEAD against the working tree, every line marked staged or not.
     if let Selection::File {
@@ -511,16 +531,17 @@ fn load_patch(
             // Nothing to show: say why the file is listed, when git knows.
             return match osier_git::staging::unchanged_reason(repo, path, orig_path)? {
                 Some(reason) => Err(LoadError::Unchanged(reason)),
-                None => Ok((Vec::new(), Vec::new(), None)),
+                None => Ok((Vec::new(), Vec::new(), None, 0)),
             };
         };
         let files =
             DiffFile::parse(&staging.shown_text).map_err(|e| LoadError::Git(e.to_string()))?;
         let model = vec![staging.shown.clone()];
-        return Ok((files, model, Some(staging)));
+        let key = text_key(&staging.shown_text);
+        return Ok((files, model, Some(staging), key));
     }
     let patch = match selection {
-        Selection::None => return Ok((Vec::new(), Vec::new(), None)),
+        Selection::None => return Ok((Vec::new(), Vec::new(), None, 0)),
         Selection::File { path, area } => match area {
             Area::Untracked => osier_git::diff::untracked_patch_text(repo, path, context)?,
             Area::Changed | Area::Conflicted => {
@@ -535,7 +556,7 @@ fn load_patch(
             hide(&mut o);
             osier_git::diff::patch_text(repo, &o)?
         }
-        Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new(), None)),
+        Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new(), None, 0)),
         Selection::Patch { file, .. } => osier_git::ops::patches::normalize(
             &std::fs::read_to_string(file)
                 .map_err(|e| LoadError::Git(format!("{}: {e}", file.display())))?,
@@ -563,7 +584,7 @@ fn load_patch(
         }
     };
     if patch.trim().is_empty() {
-        return Ok((Vec::new(), Vec::new(), None));
+        return Ok((Vec::new(), Vec::new(), None, 0));
     }
     let files = DiffFile::parse(&patch).map_err(|e| LoadError::Git(e.to_string()))?;
     // Our parser is stricter; a failure here only disables hunk actions.
@@ -571,5 +592,5 @@ fn load_patch(
         tracing::debug!(error = %e, "hunk model unavailable for this patch");
         Vec::new()
     });
-    Ok((files, model, None))
+    Ok((files, model, None, text_key(&patch)))
 }

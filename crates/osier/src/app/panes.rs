@@ -274,6 +274,7 @@ impl Osier {
                 files: self.diff_files,
                 error: self.diff_error.take(),
                 too_large: self.diff_too_large.take(),
+                text_key: self.diff_text_key.take(),
                 viewer: self.viewer.take(),
                 key: self.diff_key.clone().unwrap_or_default(),
             }
@@ -327,6 +328,7 @@ impl Osier {
             self.diff_files = cache.files;
             self.diff_error = cache.error;
             self.diff_too_large = cache.too_large;
+            self.diff_text_key = cache.text_key;
             self.viewer = cache.viewer;
             self.diff_loading = false;
             self.diff_refreshing = false;
