@@ -35,6 +35,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- The commit details list a commit's refs first, above its hash, author and dates.
+
 - A project refreshing in the background no longer swaps its ahead/behind badge for "…" in
   the sidebar and the project switcher: the counts stay until the new ones are in. Like
   other background work, the refresh shows in the status bar with "Show background tasks"

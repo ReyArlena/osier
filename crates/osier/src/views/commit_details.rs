@@ -1,5 +1,5 @@
 //! Commit details under the Log (toggle: ctrl-shift-d or the header button): the message on
-//! the left, hash, author, dates, parents, refs and the branches containing it on the right.
+//! the left, refs, hash, author, dates, parents and the branches containing it on the right.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -128,6 +128,28 @@ impl Osier {
                     .p_3()
                     .gap_2()
                     .text_sm()
+                    // Refs first: where the commit sits matters most at a glance.
+                    .when(!commit.refs.is_empty(), |this| {
+                        this.child(
+                            v_flex()
+                                .test_id("commit-refs")
+                                .gap_1()
+                                .child(label("Refs", muted)).child(
+                                h_flex()
+                                    .flex_wrap()
+                                    .gap_1()
+                                    .children(commit.refs.iter().map(|r| {
+                                        let is_head = r.starts_with("HEAD");
+                                        let is_tag = r.starts_with("tag: ");
+                                        let name = r
+                                            .trim_start_matches("HEAD -> ")
+                                            .trim_start_matches("tag: ")
+                                            .to_string();
+                                        super::log_tab::ref_tag(name, is_head, is_tag, cx)
+                                    })),
+                            ),
+                        )
+                    })
                     .child(self.meta_hash(&commit, cx))
                     .child(meta_row(
                         "Author",
@@ -161,24 +183,6 @@ impl Osier {
                     })
                     .when(!commit.parents.is_empty(), |this| {
                         this.child(self.meta_parents(&commit, cx))
-                    })
-                    .when(!commit.refs.is_empty(), |this| {
-                        this.child(
-                            v_flex().gap_1().child(label("Refs", muted)).child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .gap_1()
-                                    .children(commit.refs.iter().map(|r| {
-                                        let is_head = r.starts_with("HEAD");
-                                        let is_tag = r.starts_with("tag: ");
-                                        let name = r
-                                            .trim_start_matches("HEAD -> ")
-                                            .trim_start_matches("tag: ")
-                                            .to_string();
-                                        super::log_tab::ref_tag(name, is_head, is_tag, cx)
-                                    })),
-                            ),
-                        )
                     })
                     .child(meta_row(
                         "In branches",

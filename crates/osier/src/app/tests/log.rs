@@ -433,6 +433,21 @@ fn ui_commit_details_panel_shows_toggles_and_remembers(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn ui_commit_details_put_refs_at_the_top(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.git(["tag", "v1"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-log");
+    let refs = h
+        .bounds(cx, "commit-refs")
+        .expect("refs of the latest commit");
+    let date = h.bounds(cx, "commit-date:Date").expect("date");
+    let hash = h.bounds(cx, "copy-commit-hash").expect("hash");
+    assert!(refs.bottom() <= hash.top() && hash.top() < date.top());
+}
+
+#[gpui::test]
 fn ui_commit_details_list_both_dates_only_when_they_differ(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
