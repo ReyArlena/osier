@@ -209,6 +209,67 @@ fn renamed_and_edited_file_stages_by_hunk() {
 }
 
 #[test]
+fn a_small_renamed_file_edited_a_lot_is_still_one_renamed_file() {
+    let t = TempRepo::new();
+    // One of two lines changes: under git's 50% similarity, so plain `-M` reports the old
+    // file deleted and the new one added.
+    t.commit_file("tiny.txt", "Short note.\nTwo lines.\n", "first");
+    t.git(["mv", "tiny.txt", "small.txt"]);
+    t.write("small.txt", "Short note!\nTwo lines.\n");
+    assert_eq!(
+        t.git([
+            "diff",
+            "HEAD",
+            "-M",
+            "--name-status",
+            "--",
+            "small.txt",
+            "tiny.txt"
+        ]),
+        "A\tsmall.txt\nD\ttiny.txt\n",
+        "git alone does not pair them"
+    );
+    let s = file_staging(&t.repo(), "small.txt", Some("tiny.txt"), 3)
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.shown.status, crate::diff::FileStatus::Renamed);
+    assert_eq!(s.shown.old_path.as_deref(), Some("tiny.txt"));
+    assert_eq!(parse(&s.shown_text).unwrap().len(), 1, "one file shown");
+    let changed: Vec<(LineKind, &str)> = s.shown.hunks[0]
+        .lines
+        .iter()
+        .filter(|l| l.kind != LineKind::Context)
+        .map(|l| (l.kind, l.text.as_str()))
+        .collect();
+    assert_eq!(
+        changed,
+        [
+            (LineKind::Removed, "Short note."),
+            (LineKind::Added, "Short note!")
+        ]
+    );
+    assert_eq!(s.check(), Check::Unstaged);
+
+    // Rolling the one changed line back leaves the plain rename.
+    assert!(revert_lines(&t.repo(), &s, "small.txt", Some("tiny.txt"), 3, |_, _| true).unwrap());
+    assert_eq!(t.read("small.txt"), "Short note.\nTwo lines.\n");
+    assert_eq!(
+        reason(&t, "small.txt", Some("tiny.txt")),
+        Some(Unchanged::Renamed {
+            from: "tiny.txt".into()
+        })
+    );
+
+    // Staging it instead puts the edit in the index.
+    t.write("small.txt", "Short note!\nTwo lines.\n");
+    let s = file_staging(&t.repo(), "small.txt", Some("tiny.txt"), 3)
+        .unwrap()
+        .unwrap();
+    assert!(stage_lines(&t.repo(), &s, |_, _| true).unwrap());
+    assert_eq!(t.git(["show", ":small.txt"]), "Short note!\nTwo lines.\n");
+}
+
+#[test]
 fn line_mapping_across_hunks() {
     // Old side 1..=10; one line inserted after 2, line 6 removed.
     let text = "diff --git a/f b/f\n--- a/f\n+++ b/f\n\

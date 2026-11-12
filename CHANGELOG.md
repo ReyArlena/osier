@@ -54,6 +54,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- A file that was moved and then edited shows as one renamed file with only its real changes,
+  even when the file is small or most of it changed. Git reports such a file as one deleted
+  and one added once less than half of it is unchanged, and the Changes diff showed it that
+  way while its row said renamed. (A file with nothing left in common still shows that way.)
+
 - The diff no longer flickers when a change in it is staged, unstaged or rolled back, or when
   the file changes on disk: the diff stays on screen while it reloads.
 

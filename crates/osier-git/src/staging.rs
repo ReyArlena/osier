@@ -177,6 +177,8 @@ fn one_file_text(
     let mut options = DiffOptions::new(target);
     options.context_lines = context;
     options.paths = paths.iter().map(|p| p.to_string()).collect();
+    // With the path a rename came from, the two are one file whatever git's similarity says.
+    options.pair_renames = paths.len() > 1;
     let text = patch_text(repo, &options)?;
     let files = parse(&text)?;
     // A rename lists both paths; the file of interest is the one that ends at `paths[0]`.
@@ -224,6 +226,7 @@ pub fn unchanged_reason(
     let file_in = |target: DiffTarget| -> Result<Option<DiffFile>> {
         let mut options = DiffOptions::new(target);
         options.paths = paths.iter().map(|p| p.to_string()).collect();
+        options.pair_renames = paths.len() > 1;
         Ok(parse(&patch_text(repo, &options)?)?
             .into_iter()
             .find(|f| f.path == path))

@@ -1220,3 +1220,34 @@ fn ui_roll_back_clears_a_staged_only_change_by_default(cx: &mut TestAppContext) 
     assert!(repo.git(["status", "--porcelain"]).trim().is_empty());
     assert_eq!(repo.read("a.txt"), "one\n");
 }
+
+#[gpui::test]
+fn ui_a_small_renamed_and_edited_file_shows_as_one_diff(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("tiny.txt", "Short note.\nTwo lines.\n", "first");
+    repo.git(["mv", "tiny.txt", "small.txt"]);
+    repo.write("small.txt", "Short note!\nTwo lines.\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:small.txt");
+    h.read(cx, |osier, _| {
+        assert_eq!(
+            osier.diff_files, 1,
+            "one file, not one added and one deleted"
+        );
+        let file = &osier.diff_model[0];
+        assert_eq!(file.status, osier_git::diff::FileStatus::Renamed);
+        assert_eq!(file.old_path.as_deref(), Some("tiny.txt"));
+        assert_eq!(file.hunks.len(), 1);
+        assert!(osier.diff_unchanged.is_none());
+    });
+    // Rolling the change back from the diff leaves the plain move.
+    h.click(cx, "hunk-revert:0");
+    h.click(cx, "dialog-ok");
+    assert_eq!(repo.read("small.txt"), "Short note.\nTwo lines.\n");
+    assert_eq!(
+        h.read(cx, |osier, _| osier.diff_unchanged.clone()),
+        Some(osier_git::staging::Unchanged::Renamed {
+            from: "tiny.txt".into()
+        })
+    );
+}
