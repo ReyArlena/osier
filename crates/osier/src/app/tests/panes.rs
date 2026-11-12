@@ -84,6 +84,46 @@ fn center_pane_keeps_its_saved_width_when_the_window_resizes(cx: &mut TestAppCon
     }
 }
 
+#[gpui::test]
+fn a_narrow_window_shrinks_the_center_pane_so_the_diff_pane_stays_on_screen(
+    cx: &mut TestAppContext,
+) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    state.layout.sidebar_width = Some(240.);
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    let center =
+        |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "center-pane").expect("center pane");
+    let resize = |h: &Harness, cx: &mut TestAppContext, w: f32| {
+        h.visual(cx)
+            .simulate_resize(gpui::size(gpui::px(w), gpui::px(800.)));
+        cx.run_until_parked();
+    };
+
+    resize(&h, cx, 1600.);
+    let wide = f32::from(center(&h, cx).size.width);
+    assert!(
+        (wide - 900.).abs() < 2.,
+        "dragged width in a wide window: {wide}"
+    );
+
+    // The dragged width no longer fits beside the diff pane: the center column gives way.
+    resize(&h, cx, 1000.);
+    let right = f32::from(center(&h, cx).right());
+    assert!(
+        right <= 1000. - crate::app::panes::DIFF_MIN + 2.,
+        "the diff pane keeps its narrowest beside a center column ending at {right}"
+    );
+
+    // Wide again: the dragged width comes back.
+    resize(&h, cx, 1600.);
+    let back = f32::from(center(&h, cx).size.width);
+    assert!((back - 900.).abs() < 2., "dragged width restored: {back}");
+}
+
 /// Press at `from`, move to `to` in two steps and release, as dragging an edge does.
 fn drag(
     h: &Harness,
