@@ -1,3 +1,4 @@
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -168,14 +169,15 @@ impl Osier {
             .hover(|this| this.bg(cx.theme().list_hover))
             .child(Icon::new(Lucide::Archive).xsmall())
             .child(div().text_xs().text_color(muted).child(s.selector.clone()))
-            .child(
-                div()
-                    .text_sm()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(s.message.clone()),
-            )
+            .child(div().text_sm().flex_1().min_w_0().end_text(
+                self.settings.appearance.text_overflow,
+                crate::fade::Behind::row(
+                    "row",
+                    self.stash_selected.as_deref() == Some(s.oid.as_str()),
+                    cx,
+                ),
+                s.message.clone(),
+            ))
             .child(
                 super::relative_time_label(("stash-time", s.index), s.created_at, cx)
                     .text_xs()

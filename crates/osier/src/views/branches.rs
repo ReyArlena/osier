@@ -1,3 +1,4 @@
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
@@ -136,8 +137,11 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(format!("{local} local, {remote} remote")),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::plain(cx),
+                                format!("{local} local, {remote} remote"),
+                            ),
                     )
                     .child(
                         Button::new("add-worktree")
@@ -570,9 +574,12 @@ impl Osier {
                             .text_sm()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
                             .when(b.is_head, |this| this.font_medium())
-                            .child(b.name.clone()),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::row("row", row_selected, cx),
+                                b.name.clone(),
+                            ),
                     )
                     .when(b.is_head, |this| {
                         this.child(Tag::primary().xsmall().child("current"))
@@ -744,8 +751,11 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(t.subject.clone()),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::row("row", row_selected, cx),
+                                t.subject.clone(),
+                            ),
                     )
                     .when(t.annotated, |this| {
                         this.child(Tag::secondary().xsmall().child("annotated"))
@@ -803,6 +813,7 @@ impl Osier {
                 h_flex()
                     .id(("worktree", ix))
                     .a11y_item(|| format!("Worktree {}", crate::format::tilde(&w.path)))
+                    .group("row")
                     .px_3()
                     .py_1p5()
                     .gap_2()
@@ -821,8 +832,11 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(crate::format::tilde(&w.path)),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::row("row", false, cx),
+                                crate::format::tilde(&w.path),
+                            ),
                     )
                     .when(is_this, |this| {
                         this.child(Tag::primary().xsmall().child("this"))
@@ -857,6 +871,7 @@ impl Osier {
 
                 h_flex()
                     .id(("submodule", ix))
+                    .group("row")
                     .px_3()
                     .py_1p5()
                     .gap_2()
@@ -870,8 +885,11 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(s.url.clone()),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::row("row", false, cx),
+                                s.url.clone(),
+                            ),
                     )
                     .child(match &s.head {
                         Some(h) => Tag::secondary()
@@ -932,6 +950,7 @@ impl Osier {
                 h_flex()
                     .id(("remote", ix))
                     .a11y_row(|| format!("Remote {}", r.name), row_selected)
+                    .group("row")
                     .cursor_pointer()
                     .when(row_selected, |this| this.bg(cx.theme().list_active))
                     .on_click(cx.listener({
@@ -951,8 +970,11 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(r.fetch_url.clone()),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::row("row", row_selected, cx),
+                                r.fetch_url.clone(),
+                            ),
                     )
                     .child(
                         Button::new(("remote-menu", ix))

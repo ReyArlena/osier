@@ -1,3 +1,4 @@
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
@@ -223,6 +224,7 @@ impl Osier {
             (inner.build())(menu, window, cx)
         });
 
+        let overflow = self.settings.appearance.text_overflow;
         h_flex()
             .id(("patch", ix))
             .test_id(|| format!("patch-row:{}", p.id))
@@ -244,9 +246,17 @@ impl Osier {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .child(div().text_sm().truncate().child(name.clone()))
+                    .child(div().text_sm().min_w_0().end_text(
+                        overflow,
+                        crate::fade::Behind::row("row", selected, cx),
+                        name.clone(),
+                    ))
                     .when(!detail.is_empty(), |this| {
-                        this.child(div().text_xs().text_color(muted).truncate().child(detail))
+                        this.child(div().text_xs().text_color(muted).min_w_0().end_text(
+                            overflow,
+                            crate::fade::Behind::row("row", selected, cx),
+                            detail,
+                        ))
                     }),
             )
             .child(

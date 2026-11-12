@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
@@ -563,12 +564,15 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(if filtering {
-                                format!("{count} of {}", crate::format::count(total, "file"))
-                            } else {
-                                crate::format::count(count, "file")
-                            }),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::plain(cx),
+                                if filtering {
+                                    format!("{count} of {}", crate::format::count(total, "file"))
+                                } else {
+                                    crate::format::count(count, "file")
+                                },
+                            ),
                     )
                     .child(
                         div()

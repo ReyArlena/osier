@@ -68,6 +68,43 @@ fn log_badges_sit_before_the_subject_or_at_the_end(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_long_subject_stays_inside_its_row_in_every_text_ending(cx: &mut TestAppContext) {
+    use osier_config::settings::{LogBadges, TextOverflow};
+    let repo = TempRepo::new();
+    let long = "a commit subject far too long for the narrow center column ".repeat(4);
+    repo.commit_file("a.txt", "a\n", long.trim());
+    repo.git(["tag", "v1"]);
+    repo.commit_file("b.txt", "b\n", long.trim());
+    let mut state = State::default();
+    state.layout.center_width = Some(440.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    for style in [
+        TextOverflow::Fade,
+        TextOverflow::Ellipsis,
+        TextOverflow::Both,
+    ] {
+        for badges in [LogBadges::Left, LogBadges::Right] {
+            h.act(cx, |o, _, cx| {
+                o.settings.appearance.text_overflow = style;
+                o.settings.git.log_badges = badges;
+                cx.notify();
+            });
+            let pane = h.bounds(cx, "center-pane").expect("center pane");
+            // Row 0 has no badge, row 1 the tag.
+            for row in [0, 1] {
+                let id: &'static str = Box::leak(format!("log-subject:{row}").into_boxed_str());
+                let subject = h.bounds(cx, id).expect("subject");
+                assert!(
+                    subject.right() <= pane.right() && subject.size.width > gpui::px(40.),
+                    "{style:?}, badges {badges:?}, row {row}: subject {subject:?} in {pane:?}"
+                );
+            }
+        }
+    }
+}
+
+#[gpui::test]
 fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");

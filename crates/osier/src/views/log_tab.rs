@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
@@ -10,6 +11,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use osier_config::settings::TextOverflow;
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
 
@@ -78,6 +80,11 @@ impl Osier {
         // Colours behind a row, for the fade over clipped badges (see `fade.rs`).
         let row_bg = cx.theme().background;
         let row_hover = row_bg.blend(cx.theme().list_hover);
+        let text_overflow = self.settings.appearance.text_overflow;
+        // An unpushed commit's text, faded when its graph node is dimmed. Set per part, not
+        // on the row's text as a whole: an opacity there would apply to the fades too, and
+        // a faded fade no longer hides the text under it.
+        let dim_opacity = crate::graph::UNPUSHED_TEXT_OPACITY;
         let row_selected = row_bg.blend(cx.theme().list_active);
         let colors = lane_colors(cx);
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
@@ -458,17 +465,16 @@ impl Osier {
                                                         .h_full()
                                                         .gap_2()
                                                         .items_center()
-                                                        .when(dim_text, |this| {
-                                                            this.opacity(
-                                                                crate::graph::UNPUSHED_TEXT_OPACITY,
-                                                            )
-                                                        })
                                                         .child(subject_with_refs(
                                                             ix,
                                                             subject,
                                                             refs,
                                                             badges_right,
-                                                            (fade_base, fade_hover),
+                                                            SubjectLook {
+                                                                fade: (fade_base, fade_hover),
+                                                                overflow: text_overflow,
+                                                                dim: dim_text,
+                                                            },
                                                             cx,
                                                         ))
                                                         .child(
@@ -478,6 +484,9 @@ impl Osier {
                                                                 .flex_none()
                                                                 .max_w(px(110.))
                                                                 .truncate()
+                                                                .when(dim_text, |d| {
+                                                                    d.opacity(dim_opacity)
+                                                                })
                                                                 .child(commit.author_name.clone()),
                                                         )
                                                         .child(
@@ -502,7 +511,10 @@ impl Osier {
                                                             )
                                                             .flex_none()
                                                             .w(px(78.))
-                                                            .text_right(),
+                                                            .text_right()
+                                                            .when(dim_text, |d| {
+                                                                d.opacity(dim_opacity)
+                                                            }),
                                                         )
                                                         .child(
                                                             div()
@@ -510,6 +522,9 @@ impl Osier {
                                                                 .text_xs()
                                                                 .text_color(muted)
                                                                 .flex_none()
+                                                                .when(dim_text, |d| {
+                                                                    d.opacity(dim_opacity)
+                                                                })
                                                                 .child(
                                                                     commit.short_hash().to_string(),
                                                                 ),
@@ -703,6 +718,7 @@ impl Osier {
         h_flex()
             .id(("reflog", ix))
             .test_id(|| format!("reflog-row:{ix}"))
+            .group("row")
             .a11y_item(|| format!("{} {}", e.selector, e.message))
             .px_3()
             .py_1p5()
@@ -717,14 +733,11 @@ impl Osier {
                     .flex_none()
                     .child(e.selector.clone()),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(e.message.clone()),
-            )
+            .child(div().text_sm().flex_1().min_w_0().end_text(
+                self.settings.appearance.text_overflow,
+                crate::fade::Behind::row("row", false, cx),
+                e.message.clone(),
+            ))
             .child(
                 super::relative_time_label(("reflog-time", ix), e.at, cx)
                     .text_xs()
@@ -824,31 +837,56 @@ pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -
     LogBadges { shown, hidden }
 }
 
+/// How a Log row's subject is drawn: the row background for its fades (normal, hover), how
+/// it ends when it does not fit, and whether it is dimmed (an unpushed commit).
+#[derive(Clone, Copy)]
+struct SubjectLook {
+    fade: (Hsla, Hsla),
+    overflow: TextOverflow,
+    dim: bool,
+}
+
 /// A commit subject with up to [`MAX_LOG_BADGES`] ref badges (`git.log_badges`), and a "+N"
-/// badge naming the rest in its tooltip. Without badges the subject ends in an ellipsis.
+/// badge naming the rest in its tooltip. A subject that does not fit ends as
+/// `appearance.text_overflow` says (a fade, an ellipsis, or an ellipsis that fades out).
 ///
-/// Left: badges first, then the subject; the row's end fades out over badges that do not
-/// fit. Right: the subject runs up to the badges at the end of the line and fades out
-/// under their left edge, as sidebar names do before their ahead/behind badges. Badges that
-/// do not fit run into the box's right padding and fade out there; badges that fit end
-/// before it, so the fade covers nothing. `fade` is the row background (normal, hover).
+/// Left: badges first, then the subject; the row's end fades out over the subject or the
+/// badges that do not fit (no fade with an ellipsis). Right: the subject runs up to the
+/// badges at the end of the line and fades out under their left edge, as sidebar names do
+/// before their ahead/behind badges (or ends in its ellipsis before them). Badges that do
+/// not fit run into the box's right padding and fade out there; badges that fit end before
+/// it, so the fade covers nothing.
 fn subject_with_refs(
     ix: usize,
     subject: String,
     refs: LogBadges,
     right: bool,
-    fade: (Hsla, Hsla),
+    look: SubjectLook,
     cx: &App,
 ) -> AnyElement {
-    let (base, hover) = fade;
+    let SubjectLook {
+        fade: (base, hover),
+        overflow,
+        dim,
+    } = look;
+    // Dimmed by colour, not opacity, so the fades over the subject still hide it (see the
+    // caller).
+    let dim_color = cx
+        .theme()
+        .foreground
+        .opacity(crate::graph::UNPUSHED_TEXT_OPACITY);
+    let subject_box = move || {
+        div()
+            .test_id(move || format!("log-subject:{ix}"))
+            .text_sm()
+            .when(dim, |d| d.text_color(dim_color))
+    };
+    let behind = crate::fade::Behind::colors(base, hover, "log-row");
     if refs.shown.is_empty() {
-        return div()
-            .test_id(|| format!("log-subject:{ix}"))
+        return subject_box()
             .flex_1()
             .min_w_0()
-            .text_sm()
-            .truncate()
-            .child(subject)
+            .end_text(overflow, behind, subject)
             .into_any_element();
     }
     let more = (!refs.hidden.is_empty()).then(|| {
@@ -859,6 +897,7 @@ fn subject_with_refs(
             cx,
         )
         .flex_none()
+        .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
         .test_id(|| format!("log-ref-more:{ix}"))
         .child(ref_tag(format!("+{}", refs.hidden.len()), false, false, cx))
         .into_any_element()
@@ -872,6 +911,7 @@ fn subject_with_refs(
             .to_string();
         div()
             .flex_none()
+            .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
             .test_id(|| format!("log-ref:{ix}:{label}"))
             .child(ref_tag(label, is_head, is_tag, cx))
             .into_any_element()
@@ -887,51 +927,56 @@ fn subject_with_refs(
             .items_center()
             .children(badges)
             .child(
-                div()
-                    .test_id(|| format!("log-subject:{ix}"))
-                    .text_sm()
-                    .truncate()
+                subject_box()
                     .min_w_0()
+                    .map(|this| match overflow {
+                        // The cell's fade below ends the text.
+                        TextOverflow::Fade => this.overflow_hidden().whitespace_nowrap(),
+                        TextOverflow::Ellipsis | TextOverflow::Both => this.truncate(),
+                    })
                     .child(subject),
             )
-            .child(
-                crate::fade::fade_right(base)
-                    .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
-            )
+            .children(crate::fade::end_overlay(overflow, behind))
             .into_any_element();
     }
+    let fade_under_badges = overflow == TextOverflow::Fade;
     h_flex()
         .flex_1()
         .min_w_0()
         .gap(px(REF_GAP))
         .items_center()
-        .child(
+        .child(if fade_under_badges {
             // Runs under the gap so the fade, not the clip, ends the text.
-            div()
-                .test_id(|| format!("log-subject:{ix}"))
+            subject_box()
                 .flex_1()
                 .min_w_0()
                 .mr(px(-REF_GAP))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_sm()
-                .child(subject),
-        )
+                .child(subject)
+        } else {
+            subject_box()
+                .flex_1()
+                .min_w_0()
+                .end_text(overflow, behind, subject)
+        })
         .child(
             h_flex()
                 .relative()
                 .flex_none()
                 .max_w(relative(0.45))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(px(-SUBJECT_FADE))
-                        .w(px(SUBJECT_FADE))
-                        .bg(crate::fade::fade_fill(base))
-                        .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
-                )
+                .when(fade_under_badges, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(-SUBJECT_FADE))
+                            .w(px(SUBJECT_FADE))
+                            .bg(crate::fade::fade_fill(base))
+                            .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
+                    )
+                })
                 .child(
                     h_flex()
                         .relative()

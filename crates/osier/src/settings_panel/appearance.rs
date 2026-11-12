@@ -396,6 +396,41 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                      patch rows. Right-clicking a row opens the same menu whether this is on or \
                      off.",
                 ),
+            )
+            .item(
+                SettingItem::new(
+                    "Text that does not fit",
+                    SettingField::dropdown(
+                        vec![
+                            ("fade".into(), "Fade out".into()),
+                            ("ellipsis".into(), "Ellipsis (…)".into()),
+                            ("both".into(), "Fading ellipsis".into()),
+                        ],
+                        get(view, |o| {
+                            use osier_config::settings::TextOverflow as T;
+                            match o.settings.appearance.text_overflow {
+                                T::Fade => "fade",
+                                T::Ellipsis => "ellipsis",
+                                T::Both => "both",
+                            }
+                            .into()
+                        }),
+                        set(view, |o, v: SharedString, _| {
+                            use osier_config::settings::TextOverflow as T;
+                            o.settings.appearance.text_overflow = match v.as_ref() {
+                                "ellipsis" => T::Ellipsis,
+                                "both" => T::Both,
+                                _ => T::Fade,
+                            }
+                        }),
+                    )
+                    .default_value("fade".to_string()),
+                )
+                .description(
+                    "How a commit message, path or name too long for its row ends in the \
+                     Changes, Log, Branches, Stashes and Patches tabs: fading out, cut with an \
+                     ellipsis, or with an ellipsis that fades out.",
+                ),
             ),
         )
         .group(

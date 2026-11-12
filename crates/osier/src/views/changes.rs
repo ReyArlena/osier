@@ -1,4 +1,5 @@
 use crate::checkbox::Checkbox;
+use crate::fade::{Behind, EndText as _};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
@@ -535,7 +536,11 @@ impl Osier {
                                 })),
                         )
                         .child(status_tag(entry, area, cx))
-                        .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
+                        .child(div().text_sm().flex_1().min_w_0().end_text(
+                            this.settings.appearance.text_overflow,
+                            Behind::row("row", selected, cx),
+                            display,
+                        ))
                         .when_some(partial, |this, (some, total)| {
                             this.child(
                                 div()
@@ -686,12 +691,15 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(format!(
-                                "{} changed, {staged_n} staged, {} unversioned",
-                                changed.len(),
-                                untracked.len()
-                            )),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                Behind::plain(cx),
+                                format!(
+                                    "{} changed, {staged_n} staged, {} unversioned",
+                                    changed.len(),
+                                    untracked.len()
+                                ),
+                            ),
                     )
                     .child(
                         Button::new("stage-all")
@@ -737,7 +745,11 @@ impl Osier {
                             .items_center()
                             .text_xs()
                             .text_color(muted)
-                            .child(div().truncate().flex_1().min_w_0().child(identity))
+                            .child(div().flex_1().min_w_0().end_text(
+                                self.settings.appearance.text_overflow,
+                                Behind::plain(cx),
+                                identity,
+                            ))
                             .child({
                                 let messages = self.recent_commit_messages();
                                 let weak = cx.weak_entity();

@@ -110,6 +110,9 @@ pub struct Appearance {
     /// Show a `...` menu button at the end of list rows. Right-click opens the same menu
     /// either way.
     pub row_menu_buttons: bool,
+    /// How a single line of text too long for its row ends in the center tabs: `fade`,
+    /// `ellipsis` or `both` (an ellipsis that fades out).
+    pub text_overflow: TextOverflow,
     /// How long the pointer rests on something before its tooltip shows, in milliseconds.
     pub tooltip_delay_ms: u32,
     /// How long a notification stays in the corner before it slides away, in seconds. 0
@@ -153,6 +156,19 @@ pub enum SystemFallback {
     Light,
 }
 
+/// How text that does not fit its row ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TextOverflow {
+    /// The text fades out into the row's background.
+    #[default]
+    Fade,
+    /// The text ends in "…".
+    Ellipsis,
+    /// The text ends in "…", which fades out.
+    Both,
+}
+
 /// `icon` tints the project's folder icon, `dot` draws a dot before its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -175,6 +191,7 @@ impl Default for Appearance {
             font_size: None,
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
+            text_overflow: TextOverflow::Fade,
             tooltip_delay_ms: 0,
             toast_seconds: 5,
             high_contrast: false,
@@ -591,6 +608,22 @@ mod tests {
         assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Stay);
         let s: Settings = toml::from_str("[projects]\nempty_changes_tab = \"branches\"\n").unwrap();
         assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Branches);
+    }
+
+    #[test]
+    fn text_overflow_defaults_to_fade_and_reads_the_others() {
+        assert_eq!(
+            Settings::default().appearance.text_overflow,
+            TextOverflow::Fade
+        );
+        for (text, style) in [
+            ("ellipsis", TextOverflow::Ellipsis),
+            ("both", TextOverflow::Both),
+        ] {
+            let s: Settings =
+                toml::from_str(&format!("[appearance]\ntext_overflow = \"{text}\"\n")).unwrap();
+            assert_eq!(s.appearance.text_overflow, style);
+        }
     }
 
     #[test]
