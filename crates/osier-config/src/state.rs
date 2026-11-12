@@ -82,6 +82,8 @@ pub struct Layout {
     /// The commit details panel under the Log is shown unless hidden.
     pub log_details_hidden: bool,
     pub log_details_height: Option<f32>,
+    /// Width of the commit details' right column (refs, hash, author, dates), as dragged.
+    pub log_details_meta_width: Option<f32>,
 }
 
 const MAX_RECENT: usize = 30;

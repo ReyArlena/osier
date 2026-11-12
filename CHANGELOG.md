@@ -8,6 +8,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- The divider between the commit message and the details beside it (refs, hash, author,
+  dates) can be dragged; the width is kept.
+
 - Settings > Git > "Badges that do not fit" (`git.log_badge_style`), for a Log row with
   more branch and tag badges than room: collapse them (the default), showing as many as
   fit in 45% of the row and the rest in a "+N" badge that lists them on hover; fade them

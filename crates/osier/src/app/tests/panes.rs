@@ -176,6 +176,38 @@ fn a_wide_sidebar_shrinks_with_the_window_and_a_standard_one_stays(cx: &mut Test
     }
 }
 
+#[gpui::test]
+fn ui_the_commit_details_divider_drags_and_the_width_is_kept(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1400.);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let meta = h.bounds(cx, "commit-details-meta").expect("details column");
+    assert!((f32::from(meta.size.width) - 300.).abs() < 1., "{meta:?}");
+    let from = gpui::point(meta.left() - gpui::px(1.), meta.center().y);
+    drag(&h, cx, from, gpui::point(from.x - gpui::px(120.), from.y));
+    let width = width_of(&h, cx, "commit-details-meta");
+    assert!((width - 420.).abs() < 2., "dragged wider: {width}");
+    let saved = h.read(cx, |o, _| o.state.layout.log_details_meta_width);
+    assert!(saved.is_some_and(|w| (w - width).abs() < 1.), "{saved:?}");
+
+    // A later session starts from it.
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    state.layout.log_details_meta_width = saved;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1400.);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let again = width_of(&h, cx, "commit-details-meta");
+    assert!(
+        (again - width).abs() < 1.,
+        "restored {again}, dragged {width}"
+    );
+}
+
 /// Press at `from`, move to `to` in two steps and release, as dragging an edge does.
 fn drag(
     h: &Harness,
