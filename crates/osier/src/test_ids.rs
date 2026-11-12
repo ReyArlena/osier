@@ -11,7 +11,8 @@
 //! Naming convention, kebab-case, `area-thing`, with a `:`-separated key for repeated rows:
 //! - buttons with a literal element id reuse it (`Button::new("settings")` is `settings`)
 //! - tabs `tab-<label>`; sidebar rows `sidebar-open:<name>`, `sidebar-pinned:<name>`,
-//!   `sidebar-recent:<name>`
+//!   `sidebar-recent:<name>`; an open project's ahead/behind badge `sidebar-arrows:<index>`
+//!   (its index among the open projects)
 //! - Changes rows `change-row:<group>:<path>`, their checkbox `change-stage:<group>:<path>`
 //!   and "N of M changes" `change-partial:<path>` (`<group>` is `conflicts`, `changes` or
 //!   `unversioned`); group checkboxes `change-check-group:<group>`; in the diff of a changed

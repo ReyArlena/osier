@@ -49,7 +49,6 @@ pub(crate) struct ProjectEntry {
     /// Open and pinned: a pin after the name, like the sidebar. Pinned projects that are not
     /// open carry the pin as their icon instead.
     pub pinned: bool,
-    pub loading: bool,
     /// Uncommitted changes, drawn as a coloured icon or a dot per `appearance.changes_indicator`.
     pub dirty: bool,
     pub dot: bool,
@@ -111,10 +110,7 @@ impl ProjectEntry {
                     .when(self.active, |this| {
                         this.child(div().text_xs().text_color(muted).child("current"))
                     })
-                    .when(self.loading, |this| {
-                        this.child(Tag::secondary().xsmall().child("…"))
-                    })
-                    .when_some(self.arrows.clone().filter(|_| !self.loading), |this, a| {
+                    .when_some(self.arrows.clone(), |this, a| {
                         this.child(Tag::secondary().xsmall().child(a))
                     })
                     .when(self.pinned && self.section == Section::Open, |this| {
@@ -147,7 +143,6 @@ impl Osier {
                 icon: Lucide::FolderGit2,
                 active: self.active == Some(ix),
                 pinned: self.state.is_pinned(&project.path),
-                loading: project.loading,
                 dirty,
                 dot: dirty && dot_style,
                 arrows: status.and_then(|s| ahead_behind(s.ahead, s.behind)),
@@ -194,7 +189,6 @@ impl Osier {
             icon,
             active: false,
             pinned: section == Section::Pinned,
-            loading: false,
             dirty,
             dot: dirty && dot_style,
             arrows: badge.and_then(|b| ahead_behind(b.ahead, b.behind)),

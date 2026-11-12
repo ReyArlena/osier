@@ -542,7 +542,6 @@ impl Osier {
                     (!s.status.entries.is_empty(), b.ahead, b.behind)
                 })
                 .unwrap_or_default();
-            let loading = project.loading;
             let path = project.path.clone();
             let by_dot = dirty
                 && self.settings.appearance.changes_indicator
@@ -575,13 +574,16 @@ impl Osier {
                     })
                     .suffix(move |_, _| {
                         // Ahead/behind the upstream, like the status bar, only when non-zero.
+                        // A background refresh keeps the last known counts on screen: it is
+                        // quiet work (the status bar names it with "Show background tasks" on).
                         let arrows = arrows_text(ahead, behind);
                         row_suffix(fade, is_active)
-                            .when(loading, |this| {
-                                this.child(Tag::secondary().xsmall().child("…"))
-                            })
-                            .when_some(arrows.filter(|_| !loading), |this, a| {
-                                this.child(Tag::secondary().xsmall().child(a))
+                            .when_some(arrows, |this, a| {
+                                this.child(
+                                    div()
+                                        .test_id(|| format!("sidebar-arrows:{ix}"))
+                                        .child(Tag::secondary().xsmall().child(a)),
+                                )
                             })
                             .when(pinned, |this| this.child(Icon::new(Lucide::Pin).xsmall()))
                             .into_any_element()

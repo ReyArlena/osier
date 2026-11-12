@@ -826,3 +826,41 @@ fn ui_sidebar_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
     h.click(cx, &first_row);
     assert_eq!(active_name(&h, cx), first_name);
 }
+
+#[gpui::test]
+fn ui_a_background_refresh_keeps_the_ahead_behind_badge(cx: &mut TestAppContext) {
+    // A refresh is quiet work: the sidebar and the switcher keep showing the last known
+    // counts instead of swapping them for a busy marker, and only the status bar names it,
+    // with "Show background tasks" on.
+    let repo = repo_with_upstream(2, false);
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    let arrows = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "sidebar-arrows:0").is_some();
+    let switcher = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |o, _| o.switch_project_entries().remove(0).arrows)
+    };
+    assert!(arrows(&h, cx), "badge once the status is in");
+    assert_eq!(switcher(&h, cx).as_deref(), Some("↑2"));
+
+    // Mid-refresh (the flag a running refresh holds until its result lands).
+    h.act(cx, |o, _, cx| {
+        o.projects[0].loading = true;
+        cx.notify();
+    });
+    assert!(arrows(&h, cx), "badge stays during a refresh");
+    assert_eq!(switcher(&h, cx).as_deref(), Some("↑2"));
+    let labels = |h: &Harness, cx: &mut TestAppContext, on: bool| {
+        h.act(cx, move |o, _, _| {
+            o.settings.appearance.show_background_tasks = on
+        });
+        h.read(cx, |o, _| o.background_labels())
+    };
+    assert!(!labels(&h, cx, false).contains(&"Refreshing".to_string()));
+    assert!(labels(&h, cx, true).contains(&"Refreshing".to_string()));
+
+    // A real refresh ends with the badge still there.
+    h.act(cx, |o, _, cx| o.refresh_active(cx));
+    h.read(cx, |o, _| assert!(!o.projects[0].loading));
+    assert!(arrows(&h, cx));
+}

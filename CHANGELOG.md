@@ -35,6 +35,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- A project refreshing in the background no longer swaps its ahead/behind badge for "…" in
+  the sidebar and the project switcher: the counts stay until the new ones are in. Like
+  other background work, the refresh shows in the status bar with "Show background tasks"
+  on.
+
 - Files in the Changes tab are indented under their group heading (Changes, Unversioned
   Files, Conflicts), so they read as its sub-items.
 
