@@ -752,7 +752,11 @@ impl Osier {
                                                     cx,
                                                 )
                                                 .flex_none()
-                                                .child(tag),
+                                                // Monospace, so every letter's box is the
+                                                // same width.
+                                                .child(tag.font_family(
+                                                    cx.theme().mono_font_family.clone(),
+                                                )),
                                             )
                                         }),
                                 )

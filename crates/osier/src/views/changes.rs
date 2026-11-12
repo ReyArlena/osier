@@ -21,7 +21,9 @@ use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
 
-fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
+/// The letter tag for a change, in the monospace font so every letter's box is the same
+/// width and the paths after them line up.
+fn status_tag(entry: &StatusEntry, area: Area, cx: &App) -> Tag {
     let code = match area {
         // What the file is against HEAD: the index's change when there is one (a new file
         // stays "A" while it is edited further), else the working tree's.
@@ -30,7 +32,7 @@ fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
         Area::Untracked => '?',
         Area::Conflicted => 'U',
     };
-    match code {
+    let tag = match code {
         'A' => Tag::success().xsmall().child("A"),
         '?' => Tag::success().xsmall().child("?"),
         'D' => Tag::danger().xsmall().child("D"),
@@ -39,19 +41,20 @@ fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
         'U' => Tag::danger().xsmall().child("U"),
         'T' => Tag::warning().xsmall().child("T"),
         _ => Tag::warning().xsmall().child("M"),
-    }
+    };
+    tag.font_family(cx.theme().mono_font_family.clone())
 }
 
 /// Height of every row in the Changes list (headings and changes alike).
 const CHANGE_ROW_H: f32 = 28.;
 
-/// A row of the Changes list. `key` names the group in test ids (`conflicts`, `changes`,
-/// `unversioned`).
-#[derive(Clone, Copy)]
 /// Left padding of a change row: the heading's padding (12px) plus one checkbox width
 /// (16px), so a file's checkbox starts where the heading's ends and reads as its sub-item.
 const CHANGE_INDENT: f32 = 28.;
 
+/// A row of the Changes list. `key` names the group in test ids (`conflicts`, `changes`,
+/// `unversioned`).
+#[derive(Clone, Copy)]
 enum ChangeRow {
     Heading {
         area: Area,
@@ -531,7 +534,7 @@ impl Osier {
                                     }
                                 })),
                         )
-                        .child(status_tag(entry, area))
+                        .child(status_tag(entry, area, cx))
                         .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
                         .when_some(partial, |this, (some, total)| {
                             this.child(
