@@ -221,6 +221,12 @@ pub struct Osier {
     /// (`osier_git::staging`), behind the hunk checkboxes and the staged-line tint.
     pub(crate) diff_staging: Option<std::rc::Rc<osier_git::staging::FileStaging>>,
     pub(crate) diff_loading: bool,
+    /// The selection whose diff is on screen. Reloading the same one (after a tick, a roll
+    /// back or a file change) keeps it shown instead of the "Reading diff" placeholder, so
+    /// the diff does not flicker.
+    pub(crate) diff_shown: Option<crate::project::Selection>,
+    /// A reload of `diff_shown` is running (the old diff stays up meanwhile).
+    pub(crate) diff_refreshing: bool,
     pub(crate) diff_error: Option<String>,
     pub(crate) diff_revision: u64,
     pub(crate) log_scroll: UniformListScrollHandle,
@@ -608,6 +614,8 @@ impl Osier {
             diff_model: std::rc::Rc::new(Vec::new()),
             diff_staging: None,
             diff_loading: false,
+            diff_shown: None,
+            diff_refreshing: false,
             diff_error: None,
             diff_revision: 0,
             log_scroll: UniformListScrollHandle::new(),

@@ -1039,6 +1039,43 @@ fn ui_roll_back_sits_above_the_checkbox_for_one_kind_changes(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn ui_reloading_the_same_file_keeps_its_diff_on_screen(cx: &mut TestAppContext) {
+    let repo = two_hunk_file();
+    repo.write("other.txt", "other\n");
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "change-row:changes:f.txt");
+    // Reload without letting it finish: what a tick or a file change does. The diff stays up
+    // (no "Reading diff" placeholder for a frame: the flicker).
+    let reload = |cx: &mut TestAppContext| {
+        let view = h.view.clone();
+        cx.update_window(h.window, |_, _, cx| {
+            view.update(cx, |o, cx| o.reload_selection(cx))
+        })
+        .unwrap();
+    };
+    reload(cx);
+    h.read(cx, |o, _| assert!(!o.diff_loading && o.diff_refreshing));
+    assert!(
+        h.bounds(cx, "hunk-check:0").is_some(),
+        "the diff is still drawn"
+    );
+    cx.run_until_parked();
+    h.read(cx, |o, _| assert!(!o.diff_loading && !o.diff_refreshing));
+    // Another file still shows the placeholder while it loads.
+    h.act(cx, |o, _, cx| {
+        if let Some(p) = o.active_project_mut() {
+            p.selection = crate::project::Selection::File {
+                path: "other.txt".into(),
+                area: crate::project::Area::Untracked,
+            };
+        }
+        let _ = cx;
+    });
+    reload(cx);
+    h.read(cx, |o, _| assert!(o.diff_loading && !o.diff_refreshing));
+}
+
+#[gpui::test]
 fn ui_rolling_back_a_new_file_asks_to_trash_it(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");

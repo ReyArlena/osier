@@ -41,6 +41,11 @@ All notable changes to Osier are documented here. The format follows
   project with every other on each redraw. A hover over a sidebar with ~480 projects went from
   5.5 ms to 1.9 ms to draw.
 
+### Fixed
+
+- The diff no longer flickers when a change in it is staged, unstaged or rolled back, or when
+  the file changes on disk: the diff stays on screen while it reloads.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added

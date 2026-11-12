@@ -205,6 +205,8 @@ impl Osier {
         let Some(project) = self.active_project() else {
             self.diff_model = std::rc::Rc::new(Vec::new());
             self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             return;
         };
@@ -222,27 +224,43 @@ impl Osier {
         if selection == Selection::None {
             self.diff_model = std::rc::Rc::new(Vec::new());
             self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             return;
         }
         if let Selection::WorkFile { path, rev } = &selection {
             self.diff_model = std::rc::Rc::new(Vec::new());
             self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             self.load_viewer(path.clone(), rev.clone(), cx);
             return;
         }
         self.viewer = None;
-        self.diff_loading = true;
-        self.diff_error = None;
-        self.diff_too_large = None;
-        self.diff_no_markers = false;
-        self.diff_file_ix = 0;
+        // The same file again (its content moved): keep its diff up until the new one lands.
+        let refresh = self.diff_shown.as_ref() == Some(&selection)
+            && !self.diff_loading
+            && self.diff_files > 0
+            && self.diff_error.is_none()
+            && self.diff_too_large.is_none()
+            && !self.diff_no_markers;
+        self.diff_refreshing = refresh;
+        if !refresh {
+            self.diff_shown = None;
+            self.diff_loading = true;
+            self.diff_error = None;
+            self.diff_too_large = None;
+            self.diff_no_markers = false;
+            self.diff_file_ix = 0;
+        }
         let limit = if self.diff_force_large {
             u64::MAX
         } else {
             self.settings.diff.large_file_bytes
         };
+        let shown = selection.clone();
         self.diff_task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -261,6 +279,8 @@ impl Osier {
                     return;
                 }
                 this.diff_loading = false;
+                this.diff_refreshing = false;
+                this.diff_shown = Some(shown);
                 match result {
                     Ok((files, model, staging)) => {
                         this.diff_model = std::rc::Rc::new(model);

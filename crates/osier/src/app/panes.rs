@@ -205,7 +205,7 @@ impl Osier {
         let switching = self.projects[ix].pane_tab != Some(tab);
         // The outgoing tab's diff view, kept unless it was still loading (never reuse a
         // half-loaded view).
-        let leaving_diff = (switching && !self.diff_loading).then(|| {
+        let leaving_diff = (switching && !self.diff_loading && !self.diff_refreshing).then(|| {
             let (fresh, fresh_sub) = self.new_diff_view(cx);
             crate::project::DiffCache {
                 state: std::mem::replace(&mut self.diff, fresh),
@@ -273,6 +273,8 @@ impl Osier {
             self.diff_too_large = cache.too_large;
             self.viewer = cache.viewer;
             self.diff_loading = false;
+            self.diff_refreshing = false;
+            self.diff_shown = self.active_project().map(|p| p.selection.clone());
             // A load still running for the tab that was left must not land here.
             self.diff_revision += 1;
             if self.diff.read(cx).mode() != mode {
