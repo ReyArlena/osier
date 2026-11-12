@@ -1220,26 +1220,16 @@ impl Render for Osier {
                                             ))
                                             .child(
                                                 resizable_panel()
-                                                    .size(px(self
-                                                        .state
-                                                        .layout
-                                                        .center_width
-                                                        .unwrap_or(440.)))
+                                                    // The dragged share of the space beside
+                                                    // the sidebar; the panels keep that split
+                                                    // as the window resizes.
+                                                    .size(px(self.center_width(window)))
                                                     // At most what leaves the diff pane its
-                                                    // room (`DIFF_ROOM`), so a smaller window
-                                                    // shrinks this column instead of pushing
-                                                    // the diff pane off screen.
+                                                    // narrowest, so it stays on screen.
                                                     .size_range(
                                                         px(panes::CENTER_MIN)
-                                                            ..px(self
-                                                                .center_width_most(window)
-                                                                .min(1400.)),
+                                                            ..px(self.center_width_most(window)),
                                                     )
-                                                    // Keep the saved width when the window
-                                                    // resizes (a tiling compositor resizes it
-                                                    // right after it opens); the diff pane
-                                                    // takes up the difference.
-                                                    .fixed()
                                                     .child(
                                                         div()
                                                             .test_id("center-pane")
@@ -1250,10 +1240,15 @@ impl Render for Osier {
                                             .child(
                                                 resizable_panel()
                                                     .size_range(px(panes::DIFF_MIN)..px(4000.))
-                                                    .child(crate::pane::cached(
-                                                        &self.panes.diff,
-                                                        window,
-                                                    )),
+                                                    .child(
+                                                        div()
+                                                            .test_id("diff-pane")
+                                                            .size_full()
+                                                            .child(crate::pane::cached(
+                                                                &self.panes.diff,
+                                                                window,
+                                                            )),
+                                                    ),
                                             ),
                                     ),
                                 )

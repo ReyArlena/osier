@@ -13,13 +13,13 @@ use crate::project::{Project, Selection};
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.;
 const SIDEBAR_MIN: f32 = 160.;
 const SIDEBAR_MAX: f32 = 600.;
-/// Narrowest the center column (tabs) and the diff pane can be dragged.
+/// Narrowest the center column (tabs) and the diff pane get. Past the window resizes the
+/// two keep their dragged split (a share, not pixels); a window too narrow for both
+/// minimums narrows the sidebar.
 pub(crate) const CENTER_MIN: f32 = 260.;
 pub(crate) const DIFF_MIN: f32 = 240.;
-/// Room the diff pane keeps when the window is too narrow for the dragged widths: the center
-/// column gives way first (down to `CENTER_MIN`), then the sidebar, so the diff stays on
-/// screen and readable. Widening the window brings the dragged widths back.
-pub(crate) const DIFF_ROOM: f32 = 320.;
+/// The center column's share of the space beside the sidebar until the divider is dragged.
+const CENTER_RATIO: f32 = 0.4;
 /// The same for the height of the bottom panel.
 pub(crate) const BOTTOM_PANEL_HEIGHT: f32 = 220.;
 const BOTTOM_PANEL_MIN: f32 = 100.;
@@ -89,17 +89,23 @@ impl Panes {
 impl Osier {
     /// Width of the project sidebar: the dragged one, kept to a usable size, to half the
     /// window at most, and to what leaves the center column and the diff pane their
-    /// narrowest.
+    /// narrowest. In a window narrower than when it was dragged, a wide sidebar shrinks in
+    /// proportion, but never below the standard width (or the dragged one, when that is
+    /// narrower); a sidebar of standard width stays as it is.
     pub(crate) fn sidebar_width(&self, window: &Window) -> f32 {
         let window_w = f32::from(window.viewport_size().width);
         let most = (window_w / 2.)
-            .min(window_w - CENTER_MIN - DIFF_ROOM)
+            .min(window_w - CENTER_MIN - DIFF_MIN)
             .clamp(SIDEBAR_MIN, SIDEBAR_MAX);
-        self.state
-            .layout
-            .sidebar_width
-            .unwrap_or(SIDEBAR_WIDTH)
-            .clamp(SIDEBAR_MIN, most)
+        let layout = &self.state.layout;
+        let dragged = layout.sidebar_width.unwrap_or(SIDEBAR_WIDTH);
+        let width = match layout.sidebar_window_width {
+            Some(at) if at > 0. && window_w < at => {
+                (dragged * window_w / at).max(dragged.min(SIDEBAR_WIDTH))
+            }
+            _ => dragged,
+        };
+        width.clamp(SIDEBAR_MIN, most)
     }
 
     /// The sidebar's edge was dragged to `width`.
@@ -109,7 +115,9 @@ impl Osier {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        // Stored as dragged, then as `sidebar_width` limits it.
+        // Stored as dragged, then as `sidebar_width` limits it, with the window width it
+        // was dragged in.
+        self.state.layout.sidebar_window_width = Some(f32::from(window.viewport_size().width));
         self.state.layout.sidebar_width = Some(f32::from(width));
         self.state.layout.sidebar_width = Some(self.sidebar_width(window));
         self.state_dirty = true;
@@ -142,22 +150,47 @@ impl Osier {
         cx.notify();
     }
 
-    /// Widest the center column can be in this window: what is left beside the sidebar once
-    /// the diff pane has `DIFF_ROOM`. The dragged width is kept as it is and only limited
-    /// here, so it comes back when the window grows again.
-    pub(crate) fn center_width_most(&self, window: &Window) -> f32 {
+    /// Width of the space beside the sidebar, which the center column and the diff pane
+    /// share.
+    fn beside_sidebar(&self, window: &Window) -> f32 {
         let sidebar = if self.sidebar_visible {
             self.sidebar_width(window)
         } else {
             0.
         };
-        (f32::from(window.viewport_size().width) - sidebar - DIFF_ROOM).max(CENTER_MIN)
+        f32::from(window.viewport_size().width) - sidebar
     }
 
+    /// The center column's width to start from: its dragged share of the space beside the
+    /// sidebar (a width saved by an older version as it was). After the first frame the
+    /// panels keep this split by themselves as the window resizes.
+    pub(crate) fn center_width(&self, window: &Window) -> f32 {
+        let layout = &self.state.layout;
+        let beside = self.beside_sidebar(window);
+        let width = match (layout.center_ratio, layout.center_width) {
+            (Some(ratio), _) => ratio * beside,
+            (None, Some(width)) => width,
+            (None, None) => CENTER_RATIO * beside,
+        };
+        width.clamp(CENTER_MIN, self.center_width_most(window))
+    }
+
+    /// Widest the center column can be in this window: what is left beside the sidebar once
+    /// the diff pane has its narrowest.
+    pub(crate) fn center_width_most(&self, window: &Window) -> f32 {
+        (self.beside_sidebar(window) - DIFF_MIN).max(CENTER_MIN)
+    }
+
+    /// The divider between the center column and the diff pane was dragged: keep the split
+    /// as a share, so both panes resize with the window.
     pub(crate) fn on_pane_resize(&mut self, sizes: &[Pixels]) {
-        if let Some(first) = sizes.first() {
-            self.state.layout.center_width = Some(f32::from(*first));
-            self.state_dirty = true;
+        if let [center, diff, ..] = sizes {
+            let total = f32::from(*center) + f32::from(*diff);
+            if total > 0. {
+                self.state.layout.center_ratio = Some(f32::from(*center) / total);
+                self.state.layout.center_width = None;
+                self.state_dirty = true;
+            }
         }
     }
 

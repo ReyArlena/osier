@@ -66,9 +66,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
-- Making the window narrower no longer pushes the diff pane off screen: the Changes/Log
-  column gives way first, then the sidebar, and both get their dragged widths back when the
-  window grows again.
+- Making the window narrower no longer pushes the diff pane off screen. The Changes/Log
+  column and the diff pane keep the split you dragged (as a share, not a width) and resize
+  together; a sidebar of standard width stays as it is, a wider one shrinks with the window,
+  and both get their dragged widths back when the window grows again.
 
 - A file that was moved and then edited shows as one renamed file with only its real changes,
   even when the file is small or most of it changed. Git reports such a file as one deleted
