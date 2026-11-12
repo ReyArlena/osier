@@ -459,3 +459,40 @@ fn ui_files_long_name_stays_left_of_its_status_letter_in_every_text_ending(
         );
     }
 }
+
+#[gpui::test]
+fn ui_files_fade_follows_the_highlighted_row_onto_a_folder(cx: &mut TestAppContext) {
+    // A name's fade blends into its row's colour. Clicking a folder highlights the folder
+    // and leaves the viewer on its file, so the fade has to follow the highlight, not the
+    // viewed file: otherwise the folder ends in a dark band and the file in a light one.
+    let repo = TempRepo::new();
+    for f in ["docs/d.md", "src/lib.rs"] {
+        repo.commit_file(f, "x\n", f);
+    }
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Files, cx));
+    let fades_selected = |h: &Harness, cx: &mut TestAppContext, id: &str| {
+        h.bounds(cx, &format!("files-row-selected:{id}")).is_some()
+    };
+    let lib = Some("src/lib.rs".to_string());
+
+    // Two top-level folders: both start open.
+    h.click(cx, "files-row:src/lib.rs");
+    assert_eq!(files_cursor(&h, cx), (lib.clone(), lib.clone()));
+    assert!(fades_selected(&h, cx, "src/lib.rs"));
+
+    h.click(cx, "files-row:docs");
+    assert_eq!(
+        files_cursor(&h, cx),
+        (Some("docs".to_string()), lib),
+        "the folder is highlighted, the viewer keeps the file"
+    );
+    assert!(
+        fades_selected(&h, cx, "docs"),
+        "folder fade in the selected colour"
+    );
+    assert!(
+        !fades_selected(&h, cx, "src/lib.rs"),
+        "file fade back to the plain colour"
+    );
+}

@@ -390,7 +390,7 @@ impl Osier {
     }
 
     pub(crate) fn render_files(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (repo, status_src, files, ignored, selection) = {
+        let (repo, status_src, files, ignored) = {
             let Some(project) = self.active_project() else {
                 return self
                     .empty_state(
@@ -425,7 +425,6 @@ impl Osier {
                 snapshot.status.clone(),
                 snapshot.files.clone(),
                 snapshot.ignored.clone().filter(|_| self.show_ignored),
-                project.selection.clone(),
             )
         };
         // Badges and the tracked set are built once per snapshot, in the background: walking
@@ -541,10 +540,6 @@ impl Osier {
 
         let muted = cx.theme().muted_foreground;
         let text_overflow = self.settings.appearance.text_overflow;
-        let selected_path = match &selection {
-            crate::project::Selection::WorkFile { path, .. } => Some(path.clone()),
-            _ => None,
-        };
         let weak = cx.entity().downgrade();
         let count = paths.len();
 
@@ -614,7 +609,7 @@ impl Osier {
                         let status = status.clone();
                         let dirty_dirs = dirty_dirs.clone();
                         let ignored_rows = ignored_rows.clone();
-                        move |ix, entry, _selected, _window, cx| {
+                        move |ix, entry, selected, _window, cx| {
                             let item = entry.item();
                             let id = item.id.to_string();
                             let is_folder = entry.is_folder();
@@ -639,7 +634,10 @@ impl Osier {
                             let dim = ignored_row.is_some();
                             let weak = weak.clone();
                             let click_id = id.clone();
-                            let is_selected = selected_path.as_deref() == Some(id.as_str());
+                            // The tree's own cursor, which is what gpui-kit paints as the
+                            // selected row. Not the file the viewer shows: clicking a folder
+                            // moves the cursor there and leaves the viewer on its file.
+                            let is_selected = selected;
                             // The colours ListItem paints behind the name, for its fade: a
                             // selected row keeps its colour under the pointer.
                             let behind = {
@@ -672,6 +670,11 @@ impl Osier {
                                 .selected(is_selected)
                                 .child(
                                     h_flex()
+                                        // Tests: the row whose fade blends into the selected
+                                        // colour.
+                                        .when(is_selected, |row| {
+                                            row.test_id(|| format!("files-row-selected:{id}"))
+                                        })
                                         .gap_2()
                                         .items_center()
                                         .min_w_0()
