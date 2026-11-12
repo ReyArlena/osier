@@ -30,6 +30,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Files in the Changes tab are indented under their group heading (Changes, Unversioned
+  Files, Conflicts), so they read as its sub-items.
+
 - Checkboxes keep their outlined box when ticked: the tick and the dash are drawn in the
   accent colour instead of filling the box with it, and the box is a little larger with a softer outline.
 

@@ -48,6 +48,10 @@ const CHANGE_ROW_H: f32 = 28.;
 /// A row of the Changes list. `key` names the group in test ids (`conflicts`, `changes`,
 /// `unversioned`).
 #[derive(Clone, Copy)]
+/// Left padding of a change row: the heading's padding (12px) plus one checkbox width
+/// (16px), so a file's checkbox starts where the heading's ends and reads as its sub-item.
+const CHANGE_INDENT: f32 = 28.;
+
 enum ChangeRow {
     Heading {
         area: Area,
@@ -322,7 +326,10 @@ impl Osier {
                             selected,
                         )
                         .group("row")
-                        .px_3()
+                        // Indented past the heading's checkbox, so the files read as its
+                        // sub-items.
+                        .pl(px(CHANGE_INDENT))
+                        .pr_3()
                         .py_1()
                         .gap_2()
                         .items_center()
