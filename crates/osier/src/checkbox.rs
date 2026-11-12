@@ -1,6 +1,7 @@
-//! Osier's checkbox: gpui-kit's look, plus a third state (a dash: "some of it", for partly
-//! staged files and hunks) and a subtle colour change under the pointer, so a box shows it can
-//! be clicked. Use it instead of `gpui_kit::component::checkbox::Checkbox` everywhere.
+//! Osier's checkbox: an outlined box whose tick (or dash: "some of it", for partly staged
+//! files and hunks) is drawn in the accent colour rather than filling the box, plus a subtle
+//! colour change under the pointer, so a box shows it can be clicked. Use it instead of
+//! `gpui_kit::component::checkbox::Checkbox` everywhere.
 //!
 //! Built on gpui-kit's unstyled `base::Checkbox`, which owns toggling, focus, keyboard and the
 //! accessibility state (including "mixed" for the dash).
@@ -117,18 +118,22 @@ impl RenderOnce for Checkbox {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
         let (state, disabled) = (self.state, self.disabled);
-        let marked = state != CheckboxState::Unchecked;
-        let indicator = rems(match self.size {
-            Size::XSmall => 0.75,
-            Size::Small => 0.875,
-            Size::Large => 1.125,
-            _ => 1.,
-        });
+        // The box is a touch larger than the label's text, so it reads clearly.
+        let (box_rems, text_rems) = match self.size {
+            Size::XSmall => (0.875, 0.875),
+            Size::Small => (1., 0.875),
+            Size::Large => (1.25, 1.),
+            _ => (1.125, 1.),
+        };
+        let indicator = rems(box_rems);
+        // Beside a label the box's middle sits a little below the middle of the first line
+        // of text, where it lines up with the lowercase letters.
+        let label_offset = rems(text_rems * 0.625 - box_rems / 2.);
         let radius = theme.radius.min(px(4.));
         let primary = theme.primary;
-        let border = theme.input;
+        // A softer edge than a text field's, so a column of boxes doesn't read as a grid.
+        let border = theme.input.opacity(0.6);
         let empty_bg = theme.input_background();
-        let mark_color = theme.primary_foreground;
         let accessibility_label = self.accessibility_label.or_else(|| self.label.clone());
         let icon = match state {
             CheckboxState::Checked => Some(Lucide::Check),
@@ -167,35 +172,18 @@ impl RenderOnce for Checkbox {
                     .items_center()
                     .justify_center()
                     .size(indicator)
-                    .when(self.label.is_some(), |this| this.mt(indicator * 0.125))
+                    .when(self.label.is_some(), |this| this.mt(label_offset))
                     .flex_shrink_0()
                     .border_1()
                     .rounded(radius)
-                    .map(|this| {
-                        if marked {
-                            this.border_color(primary).bg(primary)
-                        } else {
-                            this.border_color(border).bg(empty_bg)
-                        }
-                    })
-                    .when(disabled, |this| {
-                        if marked {
-                            this.border_color(primary.opacity(0.5))
-                                .bg(primary.opacity(0.5))
-                        } else {
-                            this.border_color(border.opacity(0.5))
-                        }
-                    })
-                    // Under the pointer: an empty box takes a tint and an accent edge, a
-                    // ticked one gets a little lighter.
+                    .border_color(border)
+                    .bg(empty_bg)
+                    .when(disabled, |this| this.border_color(border.opacity(0.5)))
+                    // Under the pointer the box takes a tint and an accent edge, ticked or not.
                     .when(!disabled, |this| {
                         this.group_hover(GROUP, move |s| {
-                            if marked {
-                                s.bg(primary.opacity(0.85))
-                            } else {
-                                s.border_color(primary.opacity(0.7))
-                                    .bg(primary.opacity(0.12))
-                            }
+                            s.border_color(primary.opacity(0.7))
+                                .bg(primary.opacity(0.12))
                         })
                     })
                     .when_some(icon, |this, icon| {
@@ -203,9 +191,9 @@ impl RenderOnce for Checkbox {
                             Icon::new(icon)
                                 .size(indicator * 0.75)
                                 .text_color(if disabled {
-                                    mark_color.opacity(0.5)
+                                    primary.opacity(0.5)
                                 } else {
-                                    mark_color
+                                    primary
                                 }),
                         )
                     }),

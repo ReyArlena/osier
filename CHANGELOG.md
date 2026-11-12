@@ -8,8 +8,8 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
-- Checkboxes change colour under the pointer (an empty box takes an accent edge and a tint,
-  a ticked one lightens), so it is clear they can be clicked.
+- Checkboxes change colour under the pointer (the box takes an accent edge and a tint), so
+  it is clear they can be clicked.
 
 - The line under the pointer is highlighted in every code editor: the file viewer, the edit
   pane and the three panes of the merge tool.
@@ -26,6 +26,9 @@ All notable changes to Osier are documented here. The format follows
   disk.
 
 ### Changed
+
+- Checkboxes keep their outlined box when ticked: the tick and the dash are drawn in the
+  accent colour instead of filling the box with it, and the box is a little larger with a softer outline.
 
 - The Changes tab is one list, like PhpStorm: each changed file shows once with a checkbox
   that is the git index (ticked = staged, a dash = partly staged, with "N of M changes" when
