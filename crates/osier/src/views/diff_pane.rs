@@ -981,8 +981,8 @@ impl Osier {
 
         // Staged lines: their own change colour, stronger (like PhpStorm's included changes).
         let (added_tint, removed_tint) = (
-            cx.theme().success.opacity(0.28),
-            cx.theme().danger.opacity(0.28),
+            cx.theme().success.opacity(0.14),
+            cx.theme().danger.opacity(0.14),
         );
         let line_range = |kind: LineKind, n: u32| {
             let side = if kind == LineKind::Removed {
