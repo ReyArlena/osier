@@ -35,6 +35,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Changed
 
+- Ref badges with long names (in the Log and the commit details) are shortened in the
+  middle, `feature/rew…algorithm`, instead of losing their end, and every badge names its
+  ref in full in a tooltip.
+
 - The commit details list a commit's refs first, above its hash, author and dates.
 
 - A project refreshing in the background no longer swaps its ahead/behind badge for "…" in

@@ -51,7 +51,11 @@ impl Osier {
     }
 
     /// The panel's content for the selected commit.
-    pub(crate) fn render_commit_details(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_commit_details(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let commit = self
             .active_project()
             .and_then(|p| p.selected_commit.and_then(|ix| p.commit_at(ix)))
@@ -134,20 +138,25 @@ impl Osier {
                             v_flex()
                                 .test_id("commit-refs")
                                 .gap_1()
-                                .child(label("Refs", muted)).child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .gap_1()
-                                    .children(commit.refs.iter().map(|r| {
+                                .child(label("Refs", muted))
+                                .child(h_flex().flex_wrap().gap_1().children(
+                                    commit.refs.iter().enumerate().map(|(j, r)| {
                                         let is_head = r.starts_with("HEAD");
                                         let is_tag = r.starts_with("tag: ");
                                         let name = r
                                             .trim_start_matches("HEAD -> ")
-                                            .trim_start_matches("tag: ")
-                                            .to_string();
-                                        super::log_tab::ref_tag(name, is_head, is_tag, cx)
-                                    })),
-                            ),
+                                            .trim_start_matches("tag: ");
+                                        super::log_tab::ref_badge(
+                                            ("commit-ref", j),
+                                            name,
+                                            is_head,
+                                            is_tag,
+                                            px(super::log_tab::REF_TEXT_MAX),
+                                            window,
+                                            cx,
+                                        )
+                                    }),
+                                )),
                         )
                     })
                     .child(self.meta_hash(&commit, cx))

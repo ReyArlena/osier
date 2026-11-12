@@ -169,7 +169,7 @@ impl Osier {
             .child(
                 div().flex_1().min_h_0().child(
                     div().id("log-list").size_full().child(
-                        uniform_list("commits", count, move |range, _, cx| {
+                        uniform_list("commits", count, move |range, window, cx| {
                             range
                                 .map(|ix| {
                                     let commit = &commits[ix];
@@ -475,6 +475,7 @@ impl Osier {
                                                                 overflow: text_overflow,
                                                                 dim: dim_text,
                                                             },
+                                                            window,
                                                             cx,
                                                         ))
                                                         .child(
@@ -782,10 +783,12 @@ fn cut_badges_fade(color: Hsla) -> Background {
     )
 }
 
+/// Widest a ref badge's text gets; longer names are shortened in the middle.
+pub(crate) const REF_TEXT_MAX: f32 = 150.0;
+
 /// The badge for one ref: HEAD's branch solid, tags in the warning colour, other branches
 /// tinted with the primary colour like the sidebar's selected row.
 pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> Tag {
-    let text = div().max_w(px(150.)).truncate().child(label);
     let tag = if is_head {
         Tag::primary()
     } else if is_tag {
@@ -794,7 +797,79 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
         let (bg, border) = crate::themes::badge_tint(cx);
         Tag::custom(bg, cx.theme().foreground, border)
     };
-    tag.xsmall().child(text)
+    tag.xsmall().child(div().whitespace_nowrap().child(label))
+}
+
+/// A ref badge with the full name in its tooltip. A name wider than `max` is shortened in
+/// the middle ("feature/rew…algorithm"): its start and end are what tell ref names apart.
+/// It does not follow `appearance.text_overflow`: a fade inside a small badge reads badly.
+pub(crate) fn ref_badge(
+    id: impl Into<ElementId>,
+    label: &str,
+    is_head: bool,
+    is_tag: bool,
+    max: Pixels,
+    window: &Window,
+    cx: &App,
+) -> Stateful<Div> {
+    let text = shorten_middle(label, max, window, cx);
+    let short = text.len() != label.len();
+    super::hint(id, label.to_string(), "ref-tooltip", cx)
+        .flex_none()
+        .when(short, |d| d.test_id(|| format!("ref-short:{label}")))
+        .child(ref_tag(text, is_head, is_tag, cx))
+}
+
+/// `label` with its middle replaced by "…" so that it fits `max`, keeping as many letters as
+/// fit (one more at the start than at the end when they cannot split evenly).
+fn shorten_middle(label: &str, max: Pixels, window: &Window, cx: &App) -> String {
+    if ref_text_width(label, window, cx) <= max {
+        return label.to_string();
+    }
+    let chars: Vec<char> = label.chars().collect();
+    // The most letters kept that still fit; keeping none ("…") always counts as fitting.
+    let (mut lo, mut hi) = (0, chars.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if ref_text_width(&keep_ends(&chars, mid), window, cx) <= max {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    keep_ends(&chars, lo)
+}
+
+/// The first and last of `keep` letters of `chars` around a "…".
+fn keep_ends(chars: &[char], keep: usize) -> String {
+    let head = keep.div_ceil(2);
+    let tail = keep - head;
+    let mut out: String = chars[..head].iter().collect();
+    out.push('…');
+    out.extend(&chars[chars.len() - tail..]);
+    out
+}
+
+/// The width of a ref badge's text: gpui-kit's `Tag::xsmall()` sets `rems(0.625)` in the
+/// theme font. Shaped lines are cached across frames, so this costs little per row.
+fn ref_text_width(label: &str, window: &Window, cx: &App) -> Pixels {
+    let run = TextRun {
+        len: label.len(),
+        font: font(cx.theme().font_family.clone()),
+        color: cx.theme().foreground,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .layout_line(
+            label,
+            rems(0.625).to_pixels(window.rem_size()),
+            &[run],
+            None,
+        )
+        .width
 }
 
 /// How many ref badges a log row shows before the rest go into a "+N" badge.
@@ -872,6 +947,7 @@ fn subject_with_refs(
     refs: LogBadges,
     right: bool,
     look: SubjectLook,
+    window: &Window,
     cx: &App,
 ) -> AnyElement {
     let SubjectLook {
@@ -912,7 +988,7 @@ fn subject_with_refs(
         .child(ref_tag(format!("+{}", refs.hidden.len()), false, false, cx))
         .into_any_element()
     });
-    let badges = refs.shown.into_iter().map(|r| {
+    let badges = refs.shown.into_iter().enumerate().map(|(j, r)| {
         let is_head = r.starts_with("HEAD");
         let is_tag = r.starts_with("tag: ");
         let label = r
@@ -923,7 +999,15 @@ fn subject_with_refs(
             .flex_none()
             .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
             .test_id(|| format!("log-ref:{ix}:{label}"))
-            .child(ref_tag(label, is_head, is_tag, cx))
+            .child(ref_badge(
+                ("log-ref", j),
+                &label,
+                is_head,
+                is_tag,
+                px(REF_TEXT_MAX),
+                window,
+                cx,
+            ))
             .into_any_element()
     });
     if !right {
@@ -1060,7 +1144,7 @@ fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
 
 #[cfg(test)]
 mod tests {
-    use super::log_badges;
+    use super::{keep_ends, log_badges};
     use osier_git::refs::Remote;
 
     fn refs(v: &[&str]) -> Vec<String> {
@@ -1110,6 +1194,14 @@ mod tests {
         // A local branch that only looks like one is not a remote's HEAD.
         let b = log_badges(&refs(&["upstream/HEAD", "origin/main"]), &origin());
         assert_eq!(b.shown, ["upstream/HEAD", "origin/main"]);
+    }
+
+    #[test]
+    fn shortened_names_keep_both_ends() {
+        let chars: Vec<char> = "feature/rewrite".chars().collect();
+        assert_eq!(keep_ends(&chars, 0), "…");
+        assert_eq!(keep_ends(&chars, 5), "fea…te");
+        assert_eq!(keep_ends(&chars, 6), "fea…ite");
     }
 
     #[test]

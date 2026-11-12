@@ -67,13 +67,13 @@ impl Panes {
             sidebar: pane(|o, window, cx| o.render_sidebar(window, cx)),
             tab_strip: pane(|o, _, cx| o.render_tab_strip(cx)),
             tab: pane(|o, window, cx| o.render_tab(window, cx)),
-            commit_details: pane(|o, _, cx| {
+            commit_details: pane(|o, window, cx| {
                 let border = cx.theme().border;
                 div()
                     .size_full()
                     .border_t_1()
                     .border_color(border)
-                    .child(o.render_commit_details(cx))
+                    .child(o.render_commit_details(window, cx))
                     .into_any_element()
             }),
             diff: pane(|o, window, cx| o.render_diff_pane(window, cx).into_any_element()),

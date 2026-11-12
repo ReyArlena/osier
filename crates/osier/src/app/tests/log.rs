@@ -137,6 +137,50 @@ fn long_left_badges_leave_room_for_the_subject(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn ui_long_ref_names_are_shortened_and_shown_in_full_on_hover(cx: &mut TestAppContext) {
+    // Only a name too wide for its badge is shortened (in the middle, whatever the text
+    // ending setting); every badge, in the Log and the commit details, names its ref in full
+    // in a tooltip.
+    let long = "feature/a-very-long-descriptive-branch-name-that-overflows";
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.branch(long);
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let badge = h
+        .bounds(cx, &format!("log-ref:0:{long}"))
+        .expect("long badge");
+    assert!(badge.size.width < gpui::px(180.), "{badge:?}");
+    assert!(h.bounds(cx, "ref-short:main").is_none());
+    let short = h
+        .bounds(cx, &format!("ref-short:{long}"))
+        .expect("shortened, in the Log and the details");
+    let hover = |h: &Harness, cx: &mut TestAppContext, at| {
+        h.visual(cx)
+            .simulate_mouse_move(at, None, gpui::Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+    };
+    hover(&h, cx, short.center());
+    assert!(h.bounds(cx, "ref-tooltip").is_some(), "Log badge tooltip");
+    hover(&h, cx, gpui::point(gpui::px(1.), gpui::px(1.)));
+    let refs = h.bounds(cx, "commit-refs").expect("details refs");
+    // The first badge in the details: the checked-out `main`.
+    hover(
+        &h,
+        cx,
+        gpui::point(refs.left() + gpui::px(12.), refs.bottom() - gpui::px(8.)),
+    );
+    assert!(
+        h.bounds(cx, "ref-tooltip").is_some(),
+        "details badge tooltip"
+    );
+}
+
+#[gpui::test]
 fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");

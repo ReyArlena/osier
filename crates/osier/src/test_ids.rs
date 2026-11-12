@@ -17,7 +17,8 @@
 //!   and "N of M changes" `change-partial:<path>` (`<group>` is `conflicts`, `changes` or
 //!   `unversioned`); group checkboxes `change-check-group:<group>`; in the diff of a changed
 //!   file, per hunk `hunk-check:<index>` and `hunk-revert:<index>`
-//! - the commit details' refs `commit-refs`
+//! - a ref badge whose name is shortened (Log rows, commit details) `ref-short:<name>`; a
+//!   badge's tooltip `ref-tooltip`; the commit details' refs `commit-refs`
 //! - Log rows `log-row:<index>`, reflog rows `reflog-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
 //!   branch menu buttons `branch-menu:<name>`, Stashes `stash-row:<index>`, Patches `patch-row:<id>`, command log `command-row:<record id>`
 //! - Files rows `files-row:<path>`, the name `files-name:<path>` and status letter
