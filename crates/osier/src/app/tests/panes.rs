@@ -114,8 +114,8 @@ fn a_narrow_window_shrinks_the_center_pane_so_the_diff_pane_stays_on_screen(
     resize(&h, cx, 1000.);
     let right = f32::from(center(&h, cx).right());
     assert!(
-        right <= 1000. - crate::app::panes::DIFF_MIN + 2.,
-        "the diff pane keeps its narrowest beside a center column ending at {right}"
+        right <= 1000. - crate::app::panes::DIFF_ROOM + 2.,
+        "the diff pane keeps its room beside a center column ending at {right}"
     );
 
     // Wide again: the dragged width comes back.

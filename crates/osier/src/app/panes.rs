@@ -13,11 +13,13 @@ use crate::project::{Project, Selection};
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.;
 const SIDEBAR_MIN: f32 = 160.;
 const SIDEBAR_MAX: f32 = 600.;
-/// Narrowest the center column (tabs) and the diff pane get. When the window is too narrow
-/// for the dragged widths, the center column gives way first, then the sidebar, so the diff
-/// pane stays on screen; widening the window brings the dragged widths back.
+/// Narrowest the center column (tabs) and the diff pane can be dragged.
 pub(crate) const CENTER_MIN: f32 = 260.;
 pub(crate) const DIFF_MIN: f32 = 240.;
+/// Room the diff pane keeps when the window is too narrow for the dragged widths: the center
+/// column gives way first (down to `CENTER_MIN`), then the sidebar, so the diff stays on
+/// screen and readable. Widening the window brings the dragged widths back.
+pub(crate) const DIFF_ROOM: f32 = 320.;
 /// The same for the height of the bottom panel.
 pub(crate) const BOTTOM_PANEL_HEIGHT: f32 = 220.;
 const BOTTOM_PANEL_MIN: f32 = 100.;
@@ -91,7 +93,7 @@ impl Osier {
     pub(crate) fn sidebar_width(&self, window: &Window) -> f32 {
         let window_w = f32::from(window.viewport_size().width);
         let most = (window_w / 2.)
-            .min(window_w - CENTER_MIN - DIFF_MIN)
+            .min(window_w - CENTER_MIN - DIFF_ROOM)
             .clamp(SIDEBAR_MIN, SIDEBAR_MAX);
         self.state
             .layout
@@ -141,7 +143,7 @@ impl Osier {
     }
 
     /// Widest the center column can be in this window: what is left beside the sidebar once
-    /// the diff pane has its narrowest. The dragged width is kept as it is and only limited
+    /// the diff pane has `DIFF_ROOM`. The dragged width is kept as it is and only limited
     /// here, so it comes back when the window grows again.
     pub(crate) fn center_width_most(&self, window: &Window) -> f32 {
         let sidebar = if self.sidebar_visible {
@@ -149,7 +151,7 @@ impl Osier {
         } else {
             0.
         };
-        (f32::from(window.viewport_size().width) - sidebar - DIFF_MIN).max(CENTER_MIN)
+        (f32::from(window.viewport_size().width) - sidebar - DIFF_ROOM).max(CENTER_MIN)
     }
 
     pub(crate) fn on_pane_resize(&mut self, sizes: &[Pixels]) {

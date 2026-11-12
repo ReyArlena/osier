@@ -1226,9 +1226,9 @@ impl Render for Osier {
                                                         .center_width
                                                         .unwrap_or(440.)))
                                                     // At most what leaves the diff pane its
-                                                    // narrowest, so a smaller window shrinks
-                                                    // this column instead of pushing the diff
-                                                    // pane off screen.
+                                                    // room (`DIFF_ROOM`), so a smaller window
+                                                    // shrinks this column instead of pushing
+                                                    // the diff pane off screen.
                                                     .size_range(
                                                         px(panes::CENTER_MIN)
                                                             ..px(self
