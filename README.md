@@ -112,7 +112,7 @@ Installed with a package manager, Flatpak or cargo? Update it that way; `osier -
 says so. Settings > About shows how Osier was installed.
 
 Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directories for them
-(Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
+(Settings > Projects); new repositories there show up on their own. `ctrl-o` switches project: it searches the open, pinned and recent
 projects in the command palette. `ctrl-shift-b` does the same for branches. In the palette,
 Fetch…, Pull…, Push… and Update branch… offer the same choices as the title bar's menus. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
 `ctrl-t` and `ctrl-shift-f/l/p` open the update branch/fetch/pull/push choices (Enter runs the first), `` ctrl-` `` shows the git command log, `ctrl-p` or

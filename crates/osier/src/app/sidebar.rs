@@ -15,12 +15,15 @@ use crate::sidebar_query::{self, Query, RowStatus};
 impl Osier {
     /// Scan the configured directories for repositories, off the UI thread. The last result
     /// for these directories (kept on disk, `cached_list.rs`) shows at once, so the sidebar
-    /// is filled at startup before the scan is back; the fresh result replaces it.
+    /// is filled at startup before the scan is back; the fresh result replaces it. The
+    /// watch on the scan directories is built again too, for the folders as they are now.
     pub(crate) fn rescan_projects(&mut self, cx: &mut Context<Self>) {
         use std::hash::{Hash, Hasher};
         let dirs = self.settings.projects.scan_dirs.clone();
         if dirs.is_empty() {
             self.scan_key = None;
+            self.scan_watch = None;
+            self.scan_watch_key = None;
             return;
         }
         let depth = self.settings.projects.scan_depth.unwrap_or(1);
@@ -29,6 +32,7 @@ impl Osier {
         (&dirs, depth).hash(&mut hasher);
         let key = format!("{:016x}", hasher.finish());
         self.scan_key = Some(key.clone());
+        self.watch_scan_dirs(&key, &dirs, depth, cx);
         self.use_list(
             |o| &mut o.scan_cache,
             &key,
@@ -36,6 +40,37 @@ impl Osier {
             std::sync::Arc::new(move || Ok(osier_config::scan::scan(&dirs, depth))),
             cx,
         );
+    }
+
+    /// Start watching the scan directories for `key` (directories and depth), unless that
+    /// watch is already there: other settings changes rescan without watching again. Built
+    /// off the UI thread; the old watch stays until the new one replaces it.
+    fn watch_scan_dirs(&mut self, key: &str, dirs: &[PathBuf], depth: u8, cx: &mut Context<Self>) {
+        if cfg!(test) || self.scan_watch_key.as_deref() == Some(key) {
+            return;
+        }
+        self.scan_watch_key = Some(key.to_string());
+        let (key, dirs) = (key.to_string(), dirs.to_vec());
+        self.in_background_quiet(
+            move || crate::scan_watch::ScanWatch::new(&dirs, depth),
+            move |this, watch, _| {
+                // Directories changed again while this one was built: a newer build follows.
+                if this.scan_watch_key.as_deref() == Some(key.as_str()) {
+                    this.scan_watch = watch;
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Rescan when the scan directories changed on disk (a repository cloned, created or
+    /// deleted) and things have settled, and watch again: the folders to watch may have
+    /// changed too. Polled by the tick loop.
+    pub(crate) fn poll_scan_watch(&mut self, cx: &mut Context<Self>) {
+        if self.scan_watch.as_ref().is_some_and(|w| w.take_due()) {
+            self.scan_watch_key = None;
+            self.rescan_projects(cx);
+        }
     }
 
     /// Repositories found in the scan directories (the last scan, or its saved copy).

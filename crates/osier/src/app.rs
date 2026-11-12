@@ -324,6 +324,10 @@ pub struct Osier {
     pub(crate) scan_cache: crate::cached_list::CachedLists<Vec<PathBuf>>,
     /// The current scan directories' key in `scan_cache`; `None` with no scan directories.
     pub(crate) scan_key: Option<String>,
+    /// Watches the scan directories so a new or removed repository triggers a rescan.
+    scan_watch: Option<crate::scan_watch::ScanWatch>,
+    /// The `scan_key` that `scan_watch` was built (or is being built) for.
+    scan_watch_key: Option<String>,
     /// Sidebar filter box.
     pub(crate) sidebar_filter: Entity<gpui_kit::component::input::InputState>,
     /// Where the filter box was painted, to anchor the dropdown.
@@ -643,6 +647,8 @@ impl Osier {
                 crate::background::SCAN_DIRS,
             ),
             scan_key: None,
+            scan_watch: None,
+            scan_watch_key: None,
             sidebar_filter,
             sidebar_filter_bounds: Default::default(),
             session_only_accounts: Default::default(),

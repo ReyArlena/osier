@@ -8,6 +8,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Scan directories are watched: a repository cloned, created or deleted in one shows up in
+  (or leaves) the sidebar and the project palette within a second, without a manual rescan.
+
 - Checkboxes change colour under the pointer (the box takes an accent edge and a tint), so
   it is clear they can be clicked.
 

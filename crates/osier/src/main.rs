@@ -43,6 +43,7 @@ mod repo_watch;
 mod row_menu;
 mod runtime_info;
 mod save_queue;
+mod scan_watch;
 mod settings_panel;
 mod sidebar_query;
 mod system_motion;
