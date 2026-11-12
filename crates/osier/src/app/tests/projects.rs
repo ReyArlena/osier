@@ -864,3 +864,33 @@ fn ui_a_background_refresh_keeps_the_ahead_behind_badge(cx: &mut TestAppContext)
     h.read(cx, |o, _| assert!(!o.projects[0].loading));
     assert!(arrows(&h, cx));
 }
+
+#[gpui::test]
+fn a_refresh_redraws_at_its_start_only_when_the_status_bar_shows_it(cx: &mut TestAppContext) {
+    // A notify on `Osier` redraws every pane. The start of a refresh only changes the status
+    // bar's "Refreshing" (with "Show background tasks" on); its result always redraws.
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = count.clone();
+    let _watch = cx.update(|cx| cx.observe(&h.view, move |_, _| seen.set(seen.get() + 1)));
+    for quiet in [false, true] {
+        h.act(cx, |o, _, _| {
+            o.settings.appearance.show_background_tasks = quiet
+        });
+        count.set(0);
+        // Not `act`: that would also run the refresh to its result.
+        cx.update(|cx| h.view.update(cx, |o, cx| o.refresh_active(cx)));
+        assert_eq!(
+            count.get(),
+            usize::from(quiet),
+            "start, background tasks {quiet}"
+        );
+        cx.run_until_parked();
+        assert!(
+            count.get() > usize::from(quiet),
+            "result, background tasks {quiet}"
+        );
+    }
+}
