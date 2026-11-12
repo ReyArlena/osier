@@ -726,17 +726,6 @@ impl Osier {
                                             },
                                         )
                                         .when_some(badge, |this, b| {
-                                            let tag = match b {
-                                                'M' => Tag::warning().xsmall().child("M"),
-                                                'A' | '?' => {
-                                                    Tag::success().xsmall().child(b.to_string())
-                                                }
-                                                'D' => Tag::danger().xsmall().child("D"),
-                                                'U' => Tag::danger().xsmall().child("U"),
-                                                other => Tag::secondary()
-                                                    .xsmall()
-                                                    .child(other.to_string()),
-                                            };
                                             let meaning = match b {
                                                 'M' => "Modified",
                                                 'A' => "Added",
@@ -756,11 +745,8 @@ impl Osier {
                                                     cx,
                                                 )
                                                 .flex_none()
-                                                // Monospace, so every letter's box is the
-                                                // same width.
-                                                .child(tag.font_family(
-                                                    cx.theme().mono_font_family.clone(),
-                                                )),
+                                                .test_id(|| format!("files-status:{id}"))
+                                                .child(super::changes::status_letter(b, cx)),
                                             )
                                         }),
                                 )

@@ -71,6 +71,9 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- The Files tab colours its status letters like the Changes tab: renamed and copied files
+  were grey there instead of blue, type changes grey instead of yellow.
+
 - Staging or unstaging a hunk or lines no longer makes the diff's word highlights and syntax
   colours flicker: when the diff's text is unchanged it is kept as it is, with its expanded
   sections and scroll.

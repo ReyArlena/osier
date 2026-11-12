@@ -6,7 +6,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::tag::Tag;
+use gpui_kit::component::tag::{Tag, TagVariant};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
@@ -22,8 +22,7 @@ use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
 
-/// The letter tag for a change, in the monospace font so every letter's box is the same
-/// width and the paths after them line up.
+/// The letter tag for a change (`status_letter`).
 fn status_tag(entry: &StatusEntry, area: Area, cx: &App) -> Tag {
     let code = match area {
         // What the file is against HEAD: the index's change when there is one (a new file
@@ -33,17 +32,35 @@ fn status_tag(entry: &StatusEntry, area: Area, cx: &App) -> Tag {
         Area::Untracked => '?',
         Area::Conflicted => 'U',
     };
-    let tag = match code {
-        'A' => Tag::success().xsmall().child("A"),
-        '?' => Tag::success().xsmall().child("?"),
-        'D' => Tag::danger().xsmall().child("D"),
-        'R' => Tag::info().xsmall().child("R"),
-        'C' => Tag::info().xsmall().child("C"),
-        'U' => Tag::danger().xsmall().child("U"),
-        'T' => Tag::warning().xsmall().child("T"),
-        _ => Tag::warning().xsmall().child("M"),
+    status_letter(code, cx)
+}
+
+/// The coloured tag for a git status letter, the same in the Changes and Files tabs: added
+/// and untracked green, deleted and conflicted red, renamed and copied blue, modified and
+/// type-changed yellow (anything else too, shown as "M"). In the monospace font, so every
+/// letter's box is the same width and the names after them line up.
+pub(crate) fn status_letter(code: char, cx: &App) -> Tag {
+    let (variant, letter) = status_look(code);
+    Tag::new()
+        .with_variant(variant)
+        .xsmall()
+        .font_family(cx.theme().mono_font_family.clone())
+        .child(letter.to_string())
+}
+
+/// The colour and letter `status_letter` shows for a git status letter.
+fn status_look(code: char) -> (TagVariant, char) {
+    let variant = match code {
+        'A' | '?' => TagVariant::Success,
+        'D' | 'U' => TagVariant::Danger,
+        'R' | 'C' => TagVariant::Info,
+        _ => TagVariant::Warning,
     };
-    tag.font_family(cx.theme().mono_font_family.clone())
+    let letter = match code {
+        'A' | '?' | 'D' | 'U' | 'R' | 'C' | 'T' => code,
+        _ => 'M',
+    };
+    (variant, letter)
 }
 
 /// Height of every row in the Changes list (headings and changes alike).
@@ -856,5 +873,28 @@ impl Osier {
                     ),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TagVariant, status_look};
+
+    #[test]
+    fn status_letters_keep_their_colour_and_unknown_codes_read_as_modified() {
+        use TagVariant::*;
+        for (code, want) in [
+            ('A', (Success, 'A')),
+            ('?', (Success, '?')),
+            ('D', (Danger, 'D')),
+            ('U', (Danger, 'U')),
+            ('R', (Info, 'R')),
+            ('C', (Info, 'C')),
+            ('T', (Warning, 'T')),
+            ('M', (Warning, 'M')),
+            ('X', (Warning, 'M')),
+        ] {
+            assert_eq!(status_look(code), want, "{code}");
+        }
     }
 }
