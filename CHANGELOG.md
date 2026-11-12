@@ -10,8 +10,8 @@ All notable changes to Osier are documented here. The format follows
 
 - Settings > Appearance > Lists > "Text that does not fit" (`appearance.text_overflow`):
   commit messages, paths, names and URLs too long for their row in the Changes, Log,
-  Branches, Stashes and Patches tabs fade out (the default), end in an ellipsis, or end in an
-  ellipsis that fades out.
+  Branches, Stashes, Files and Patches tabs fade out (the default), end in an ellipsis, or end
+  in an ellipsis that fades out.
 
 - Scan directories are watched: a repository cloned, created or deleted in one shows up in
   (or leaves) the sidebar and the project palette within a second, without a manual rescan.

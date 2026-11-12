@@ -540,6 +540,7 @@ impl Osier {
         }
 
         let muted = cx.theme().muted_foreground;
+        let text_overflow = self.settings.appearance.text_overflow;
         let selected_path = match &selection {
             crate::project::Selection::WorkFile { path, .. } => Some(path.clone()),
             _ => None,
@@ -639,9 +640,32 @@ impl Osier {
                             let weak = weak.clone();
                             let click_id = id.clone();
                             let is_selected = selected_path.as_deref() == Some(id.as_str());
+                            // The colours ListItem paints behind the name, for its fade: a
+                            // selected row keeps its colour under the pointer.
+                            let behind = {
+                                let theme = cx.theme();
+                                let bg = theme.background;
+                                let selected_bg = if theme.list.active_highlight {
+                                    theme.list_active
+                                } else {
+                                    theme.accent
+                                };
+                                let base = if is_selected {
+                                    bg.blend(selected_bg)
+                                } else {
+                                    bg
+                                };
+                                let hover = if is_selected {
+                                    base
+                                } else {
+                                    bg.blend(theme.list_hover)
+                                };
+                                crate::fade::Behind::colors(base, hover, "files-row")
+                            };
                             // a11y: the tree names its own items.
                             ListItem::new(ix)
                                 .test_id(|| format!("files-row:{id}"))
+                                .group("files-row")
                                 .w_full()
                                 .px_2()
                                 .pl(px(14.) * entry.depth() + px(8.))
@@ -674,12 +698,16 @@ impl Osier {
                                         })
                                         .child(
                                             div()
+                                                .test_id(|| format!("files-name:{id}"))
                                                 .text_sm()
-                                                .truncate()
                                                 .min_w_0()
                                                 .flex_1()
                                                 .when(dim, |d| d.text_color(muted))
-                                                .child(item.label.clone()),
+                                                .end_text(
+                                                    text_overflow,
+                                                    behind,
+                                                    item.label.clone(),
+                                                ),
                                         )
                                         // Ignored: where the rule lives, the rule itself in
                                         // the tooltip.

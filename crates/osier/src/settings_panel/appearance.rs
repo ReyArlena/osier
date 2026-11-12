@@ -428,8 +428,8 @@ pub(super) fn appearance_page(view: &Entity<Osier>, cx: &App) -> SettingPage {
                 )
                 .description(
                     "How a commit message, path or name too long for its row ends in the \
-                     Changes, Log, Branches, Stashes and Patches tabs: fading out, cut with an \
-                     ellipsis, or with an ellipsis that fades out.",
+                     Changes, Log, Branches, Stashes, Files and Patches tabs: fading out, cut \
+                     with an ellipsis, or with an ellipsis that fades out.",
                 ),
             ),
         )
