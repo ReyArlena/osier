@@ -105,6 +105,71 @@ fn a_long_subject_stays_inside_its_row_in_every_text_ending(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn badge_styles_show_all_fade_or_collapse_into_more(cx: &mut TestAppContext) {
+    use osier_config::settings::{LogBadgeStyle, LogBadges};
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "a subject");
+    let names = ["alpha", "beta", "delta", "epsilon", "gamma"];
+    for b in names {
+        repo.branch(b);
+    }
+    // The centre column's width is taken at startup.
+    let open = |cx: &mut TestAppContext, width: f32| {
+        let mut state = State::default();
+        state.layout.center_width = Some(width);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+        h
+    };
+    let set = |h: &Harness, cx: &mut TestAppContext, style, side| {
+        h.act(cx, move |o, _, cx| {
+            o.settings.git.log_badge_style = style;
+            o.settings.git.log_badges = side;
+            cx.notify();
+        });
+        // "Collapse" fits its badges to the width measured while drawing.
+        cx.run_until_parked();
+    };
+    let shown = |h: &Harness, cx: &mut TestAppContext| {
+        std::iter::once("main")
+            .chain(names)
+            .filter(|b| h.bounds(cx, &format!("log-ref:0:{b}")).is_some())
+            .count()
+    };
+    let more = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "log-ref-more:0");
+    let narrow = open(cx, 440.);
+    let wide = open(cx, 900.);
+
+    // Show them all: every ref, no "+N".
+    set(&narrow, cx, LogBadgeStyle::All, LogBadges::Left);
+    assert_eq!(shown(&narrow, cx), 6);
+    assert!(more(&narrow, cx).is_none());
+
+    // Fade them out: three and "+3".
+    set(&narrow, cx, LogBadgeStyle::Fade, LogBadges::Left);
+    assert_eq!(shown(&narrow, cx), 3);
+    assert!(more(&narrow, cx).is_some());
+
+    // Collapse: what fits beside a "+N" that stays fully visible, more in a wider column.
+    for side in [LogBadges::Left, LogBadges::Right] {
+        set(&narrow, cx, LogBadgeStyle::Collapse, side);
+        let few = shown(&narrow, cx);
+        let plus = more(&narrow, cx).expect("+N in a narrow column");
+        let pane = narrow.bounds(cx, "center-pane").expect("pane");
+        assert!(few >= 1 && plus.right() <= pane.right(), "{side:?}: {few}");
+        if side == LogBadges::Left {
+            let subject = narrow.bounds(cx, "log-subject:0").expect("subject");
+            assert!(plus.right() <= subject.left(), "{plus:?} {subject:?}");
+        }
+        set(&wide, cx, LogBadgeStyle::Collapse, side);
+        assert!(
+            shown(&wide, cx) > few,
+            "{side:?}: wider shows more than {few}"
+        );
+    }
+}
+
+#[gpui::test]
 fn long_left_badges_leave_room_for_the_subject(cx: &mut TestAppContext) {
     use osier_config::settings::TextOverflow;
     // Badges on the left (the default) take at most 45% of the row, as on the right; two
@@ -194,7 +259,11 @@ fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppCon
     let mut state = State::default();
     state.layout.center_width = Some(900.);
     let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
-    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    // "Fade them out": three badges, the rest counted (Collapse fits as many as there is room).
+    h.act(cx, |o, _, cx| {
+        o.settings.git.log_badge_style = osier_config::settings::LogBadgeStyle::Fade;
+        o.set_tab(Tab::Log, cx);
+    });
     // Local branches first, the checked-out one leading, the others by name.
     let x = |h: &Harness, cx: &mut TestAppContext, id: &'static str| {
         h.bounds(cx, id).unwrap_or_else(|| panic!("{id}")).origin.x

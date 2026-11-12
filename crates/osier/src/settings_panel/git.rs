@@ -68,6 +68,39 @@ pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
                 .default_value("left".to_string()),
             ),
             SettingItem::new(
+                "Badges that do not fit",
+                SettingField::dropdown(
+                    vec![
+                        ("all".into(), "Show them all".into()),
+                        ("fade".into(), "Fade them out".into()),
+                        ("collapse".into(), "Collapse into +N".into()),
+                    ],
+                    get(view, |o| {
+                        match o.settings.git.log_badge_style {
+                            osier_config::settings::LogBadgeStyle::All => "all",
+                            osier_config::settings::LogBadgeStyle::Fade => "fade",
+                            osier_config::settings::LogBadgeStyle::Collapse => "collapse",
+                        }
+                        .into()
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.git.log_badge_style = match v.as_ref() {
+                            "all" => osier_config::settings::LogBadgeStyle::All,
+                            "collapse" => osier_config::settings::LogBadgeStyle::Collapse,
+                            "fade" => osier_config::settings::LogBadgeStyle::Fade,
+                            _ => osier_config::settings::LogBadgeStyle::Collapse,
+                        }
+                    }),
+                )
+                .default_value("collapse".to_string()),
+            )
+            .description(
+                "Show them all pushes the subject out of a crowded row. Fade them out shows up \
+                 to three and fades out what passes 45% of the row. Collapse shows as many as \
+                 fit in that space and lists the rest in a +N badge; in a very narrow column \
+                 they fade out too.",
+            ),
+            SettingItem::new(
                 "Commits not pushed yet",
                 SettingField::dropdown(
                     vec![

@@ -358,6 +358,9 @@ pub struct Git {
     pub show_command_log: bool,
     /// Where the Log puts branch and tag badges: before the subject or at the end of the line.
     pub log_badges: LogBadges,
+    /// What the Log does with badges that do not fit: show them all, fade them out, or
+    /// collapse the rest into "+N".
+    pub log_badge_style: LogBadgeStyle,
     /// How the Log graph marks commits that are not on any remote yet.
     pub log_unpushed: UnpushedStyle,
     /// After a pull deletes files that an ignore rule now matches (someone stopped tracking
@@ -393,12 +396,25 @@ pub enum LogBadges {
     Right,
 }
 
+/// `all` shows every ref badge (the subject may get pushed out), `fade` shows up to three
+/// and fades out what passes 45% of the row, `collapse` (default) shows as many as fit in
+/// that 45% and lists the rest in a "+N" badge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogBadgeStyle {
+    All,
+    Fade,
+    #[default]
+    Collapse,
+}
+
 impl Default for Git {
     fn default() -> Self {
         Self {
             log_page_size: 500,
             show_command_log: false,
             log_badges: LogBadges::Left,
+            log_badge_style: LogBadgeStyle::Collapse,
             log_unpushed: UnpushedStyle::Dim,
             offer_keep_ignored: true,
             config_tab: false,
@@ -588,6 +604,19 @@ mod tests {
         {
             let s: Settings = toml::from_str("[git]\nlog_unpushed = \"off\"\n").unwrap();
             assert_eq!(s.git.log_unpushed, UnpushedStyle::Off);
+        }
+    }
+
+    #[test]
+    fn log_badge_style_defaults_to_collapse_and_reads_the_others() {
+        assert_eq!(
+            Settings::default().git.log_badge_style,
+            LogBadgeStyle::Collapse
+        );
+        for (v, style) in [("all", LogBadgeStyle::All), ("fade", LogBadgeStyle::Fade)] {
+            let s: Settings =
+                toml::from_str(&format!("[git]\nlog_badge_style = \"{v}\"\n")).unwrap();
+            assert_eq!(s.git.log_badge_style, style);
         }
     }
 

@@ -8,6 +8,11 @@ All notable changes to Osier are documented here. The format follows
 
 ### Added
 
+- Settings > Git > "Badges that do not fit" (`git.log_badge_style`), for a Log row with
+  more branch and tag badges than room: collapse them (the default), showing as many as
+  fit in 45% of the row and the rest in a "+N" badge that lists them on hover; fade them
+  out (up to three, as before); or show them all (the subject may get pushed out).
+
 - Settings > Appearance > Lists > "Text that does not fit" (`appearance.text_overflow`):
   commit messages, paths, names and URLs too long for their row in the Changes, Log,
   Branches, Stashes, Files and Patches tabs fade out (the default), end in an ellipsis, or end

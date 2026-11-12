@@ -306,6 +306,9 @@ pub struct Osier {
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
     pub(crate) state_dirty: bool,
+    /// Width of a Log row's subject cell as last drawn, for "Collapse" badges (how many
+    /// fit); zero until measured. Set while painting (`log_tab::measure_badge_room`).
+    pub(crate) log_badge_room: std::rc::Rc<std::cell::Cell<Pixels>>,
     /// Running fetch/pull/push, if any.
     pub(crate) remote_job: Option<crate::app::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
@@ -638,6 +641,7 @@ impl Osier {
             diff_force_large: false,
             list_focus: cx.focus_handle(),
             state_dirty: false,
+            log_badge_room: Default::default(),
             remote_job: None,
             gh_accounts: Vec::new(),
             gh_accounts_loaded: false,

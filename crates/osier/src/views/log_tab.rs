@@ -11,7 +11,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use osier_config::settings::TextOverflow;
+use osier_config::settings::{LogBadgeStyle, TextOverflow};
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
 
@@ -96,6 +96,12 @@ impl Osier {
         let count = commits.len();
         let page = project.log_page_size;
         let badges_right = self.settings.git.log_badges == osier_config::settings::LogBadges::Right;
+        let badge_layout = BadgeLayout {
+            right: badges_right,
+            style: self.settings.git.log_badge_style,
+            room: self.log_badge_room.clone(),
+            pane: self.panes.tab.downgrade(),
+        };
 
         v_flex()
             .size_full()
@@ -199,7 +205,7 @@ impl Osier {
                                     } else {
                                         commit.subject.clone()
                                     };
-                                    let refs = log_badges(&commit.refs, &remotes);
+                                    let refs = ordered_refs(&commit.refs, &remotes);
                                     // Pull requests git already knows about: the one a merge or
                                     // squash commit names, and the remote branches on this row.
                                     let pr_number = on_github
@@ -469,12 +475,12 @@ impl Osier {
                                                             ix,
                                                             subject,
                                                             refs,
-                                                            badges_right,
                                                             SubjectLook {
                                                                 fade: (fade_base, fade_hover),
                                                                 overflow: text_overflow,
                                                                 dim: dim_text,
                                                             },
+                                                            badge_layout.clone(),
                                                             window,
                                                             cx,
                                                         ))
@@ -886,8 +892,8 @@ pub(crate) struct LogBadges {
 /// lists other local branches after the remote ones, so a row with a branch, `origin/main`
 /// and `origin/HEAD` used to leave the second local branch out. A remote's `HEAD` (which
 /// branch the remote treats as its default) is dropped when another branch of that remote is
-/// on the same row; it adds nothing there. The first [`MAX_LOG_BADGES`] are shown.
-pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+/// on the same row; it adds nothing there.
+pub(crate) fn ordered_refs(refs: &[String], remotes: &[osier_git::refs::Remote]) -> Vec<String> {
     /// The remote and branch of a remote-tracking ref, `None` for anything else.
     fn remote_of<'a>(
         remotes: &'a [osier_git::refs::Remote],
@@ -917,9 +923,106 @@ pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -
         })
         .collect();
     kept.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
-    let mut shown: Vec<String> = kept.into_iter().cloned().collect();
-    let hidden = shown.split_off(shown.len().min(MAX_LOG_BADGES));
+    kept.into_iter().cloned().collect()
+}
+
+/// [`ordered_refs`] split after the first `count`.
+fn split_badges(mut shown: Vec<String>, count: usize) -> LogBadges {
+    let hidden = shown.split_off(shown.len().min(count));
     LogBadges { shown, hidden }
+}
+
+/// The badges "Fade them out" shows: the first [`MAX_LOG_BADGES`] of [`ordered_refs`].
+#[cfg(test)]
+pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+    split_badges(ordered_refs(refs, remotes), MAX_LOG_BADGES)
+}
+
+/// A ref's badge text and kind: (label, checked out or detached HEAD, tag).
+fn ref_label(r: &str) -> (&str, bool, bool) {
+    let label = r.trim_start_matches("HEAD -> ").trim_start_matches("tag: ");
+    (label, r.starts_with("HEAD"), r.starts_with("tag: "))
+}
+
+/// Narrowest "Collapse" shortens a lone first badge's text to; in a column too narrow even
+/// for that, the badges fade out at the 45% cap like "Fade them out".
+const COLLAPSE_FIRST_MIN: f32 = 64.0;
+
+/// Padding and border around a ref badge's text: gpui-kit's `Tag::xsmall()` (`px_1p5` each
+/// side, a 1 px border).
+const REF_BADGE_CHROME: f32 = 14.0;
+
+/// What a Log row does with badges that do not fit (`git.log_badge_style`). For "Collapse",
+/// the subject cell's width as last drawn (the same on every row), and the pane to redraw
+/// when it changes.
+#[derive(Clone)]
+struct BadgeLayout {
+    /// At the end of the line (`git.log_badges`), not before the subject.
+    right: bool,
+    style: LogBadgeStyle,
+    room: std::rc::Rc<std::cell::Cell<Pixels>>,
+    pane: WeakEntity<crate::pane::Pane<Osier>>,
+}
+
+/// Records the subject cell's width while painting; when it changed (a resize, a first
+/// draw), redraws the Log pane so "Collapse" fits its badges to it. Only that pane redraws,
+/// and only on a change.
+fn measure_badge_room(layout: &BadgeLayout) -> impl IntoElement {
+    let room = layout.room.clone();
+    let pane = layout.pane.clone();
+    canvas(
+        move |bounds, _, cx| {
+            if room.get() != bounds.size.width {
+                room.set(bounds.size.width);
+                cx.defer(move |cx| {
+                    let _ = pane.update(cx, |_, cx| cx.notify());
+                });
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// "Collapse": how many of `labels` fit in `room` with a "+N" badge for the rest (`gap`
+/// between badges), at least one; and how wide the first badge's text may be, so that a lone
+/// badge and its "+N" fit too.
+fn collapse_badges(
+    labels: &[&str],
+    room: Pixels,
+    gap: Pixels,
+    window: &Window,
+    cx: &App,
+) -> (usize, Pixels) {
+    let chrome = px(REF_BADGE_CHROME);
+    let badge = |text: &str| ref_text_width(text, window, cx).min(px(REF_TEXT_MAX)) + chrome;
+    let more = |rest: usize| {
+        if rest == 0 {
+            px(0.)
+        } else {
+            gap + badge(&format!("+{rest}"))
+        }
+    };
+    let n = labels.len();
+    let mut used = px(0.);
+    let mut fit = n;
+    for k in 1..=n {
+        used += badge(labels[k - 1]) + if k > 1 { gap } else { px(0.) };
+        if used + more(n - k) > room {
+            fit = (k - 1).max(1);
+            break;
+        }
+    }
+    let first = if fit == 1 {
+        // Not below a readable few letters: past that the cap's fade ends the row instead.
+        (room - more(n - 1) - chrome).clamp(px(COLLAPSE_FIRST_MIN), px(REF_TEXT_MAX))
+    } else {
+        px(REF_TEXT_MAX)
+    };
+    (fit, first)
 }
 
 /// How a Log row's subject is drawn: the row background for its fades (normal, hover), how
@@ -931,22 +1034,25 @@ struct SubjectLook {
     dim: bool,
 }
 
-/// A commit subject with up to [`MAX_LOG_BADGES`] ref badges (`git.log_badges`), and a "+N"
-/// badge naming the rest in its tooltip. A subject that does not fit ends as
-/// `appearance.text_overflow` says (a fade, an ellipsis, or an ellipsis that fades out).
+/// A commit subject with its ref badges (`git.log_badges` places them, `git.log_badge_style`
+/// says what happens when they do not fit) and a "+N" badge naming the rest in its tooltip.
+/// "Show them all" has no "+N" and no cap, so the subject can get pushed out. "Fade them
+/// out" shows up to [`MAX_LOG_BADGES`] within 45% of the row and fades out what passes it.
+/// "Collapse" shows as many as fit in that 45% (`collapse_badges`), at least one. A subject
+/// that does not fit ends as `appearance.text_overflow` says (a fade, an ellipsis, or an
+/// ellipsis that fades out).
 ///
-/// Left: badges first, at most 45% of the row (the rest fade out at its end), then the
-/// subject; the row's end fades out over the subject (no fade with an ellipsis). Right: the subject runs up to the
-/// badges at the end of the line and fades out under their left edge, as sidebar names do
-/// before their ahead/behind badges (or ends in its ellipsis before them). Badges that do
-/// not fit run into the box's right padding and fade out there; badges that fit end before
-/// it, so the fade covers nothing.
+/// Left: badges first, then the subject; the row's end fades out over the subject (no fade
+/// with an ellipsis). Right: the subject runs up to the badges at the end of the line and
+/// fades out under their left edge, as sidebar names do before their ahead/behind badges (or
+/// ends in its ellipsis before them). Faded badges run into the box's right padding and fade
+/// out there; badges that fit end before it, so the fade covers nothing.
 fn subject_with_refs(
     ix: usize,
     subject: String,
-    refs: LogBadges,
-    right: bool,
+    refs: Vec<String>,
     look: SubjectLook,
+    layout: BadgeLayout,
     window: &Window,
     cx: &App,
 ) -> AnyElement {
@@ -968,13 +1074,37 @@ fn subject_with_refs(
             .when(dim, |d| d.text_color(dim_color))
     };
     let behind = crate::fade::Behind::colors(base, hover, "log-row");
-    if refs.shown.is_empty() {
+    if refs.is_empty() {
         return subject_box()
             .flex_1()
             .min_w_0()
             .end_text(overflow, behind, subject)
             .into_any_element();
     }
+    let (style, right) = (layout.style, layout.right);
+    // Fade and Collapse keep badges within 45% of the row and fade out what passes it (for
+    // Collapse only in a column too narrow for one badge and its "+N").
+    let cap = style != LogBadgeStyle::All;
+    let fade_badges = cap;
+    let gap = px(if right { 4. } else { REF_GAP });
+    let (refs, first_max) = match style {
+        LogBadgeStyle::All => (split_badges(refs, usize::MAX), px(REF_TEXT_MAX)),
+        LogBadgeStyle::Fade => (split_badges(refs, MAX_LOG_BADGES), px(REF_TEXT_MAX)),
+        LogBadgeStyle::Collapse => {
+            let measured = layout.room.get();
+            let labels: Vec<&str> = refs.iter().map(|r| ref_label(r).0).collect();
+            // Before the first measurement: one badge and "+N", fixed on the next frame.
+            let (fit, first) = if measured > px(0.) {
+                // The cap holds the fade's padding too.
+                let room = measured * 0.45 - px(SUBJECT_FADE);
+                collapse_badges(&labels, room, gap, window, cx)
+            } else {
+                (1, px(REF_TEXT_MAX))
+            };
+            (split_badges(refs, fit), first)
+        }
+    };
+    let measure = (style == LogBadgeStyle::Collapse).then(|| measure_badge_room(&layout));
     let more = (!refs.hidden.is_empty()).then(|| {
         super::hint(
             ("log-ref-more", ix),
@@ -989,22 +1119,18 @@ fn subject_with_refs(
         .into_any_element()
     });
     let badges = refs.shown.into_iter().enumerate().map(|(j, r)| {
-        let is_head = r.starts_with("HEAD");
-        let is_tag = r.starts_with("tag: ");
-        let label = r
-            .trim_start_matches("HEAD -> ")
-            .trim_start_matches("tag: ")
-            .to_string();
+        let (label, is_head, is_tag) = ref_label(&r);
+        let max = if j == 0 { first_max } else { px(REF_TEXT_MAX) };
         div()
             .flex_none()
             .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
             .test_id(|| format!("log-ref:{ix}:{label}"))
             .child(ref_badge(
                 ("log-ref", j),
-                &label,
+                label,
                 is_head,
                 is_tag,
-                px(REF_TEXT_MAX),
+                max,
                 window,
                 cx,
             ))
@@ -1024,22 +1150,25 @@ fn subject_with_refs(
                 // run into the right padding and fade out there. The negative margin takes
                 // back as much of the padding as the gap gives, so the subject starts where
                 // the fade ends, not under it; badges that fit sit `SUBJECT_FADE` before it.
+                // "Show them all" has no cap and no fade.
                 h_flex()
                     .relative()
                     .flex_none()
-                    .max_w(relative(0.45))
-                    .overflow_hidden()
-                    .pr(px(SUBJECT_FADE))
-                    .mr(px(-REF_GAP))
-                    .gap(px(REF_GAP))
+                    .when(cap, |this| this.max_w(relative(0.45)).overflow_hidden())
+                    .when(fade_badges, |this| {
+                        this.pr(px(SUBJECT_FADE)).mr(px(-REF_GAP))
+                    })
+                    .gap(gap)
                     .items_center()
                     .children(badges.chain(more))
-                    .child(
-                        crate::fade::fade_right(base)
-                            .w(px(SUBJECT_FADE))
-                            .bg(cut_badges_fade(base))
-                            .group_hover("log-row", move |s| s.bg(cut_badges_fade(hover))),
-                    ),
+                    .when(fade_badges, |this| {
+                        this.child(
+                            crate::fade::fade_right(base)
+                                .w(px(SUBJECT_FADE))
+                                .bg(cut_badges_fade(base))
+                                .group_hover("log-row", move |s| s.bg(cut_badges_fade(hover))),
+                        )
+                    }),
             )
             .child(
                 subject_box()
@@ -1052,12 +1181,16 @@ fn subject_with_refs(
                     .child(subject),
             )
             .children(crate::fade::end_overlay(overflow, behind))
+            .children(measure)
             .into_any_element();
     }
     let fade_under_badges = overflow == TextOverflow::Fade;
     h_flex()
+        .relative()
         .flex_1()
         .min_w_0()
+        // "Show them all" can be wider than the cell: clip it there.
+        .when(!cap, |this| this.overflow_hidden())
         .gap(px(REF_GAP))
         .items_center()
         .child(if fade_under_badges {
@@ -1079,7 +1212,7 @@ fn subject_with_refs(
             h_flex()
                 .relative()
                 .flex_none()
-                .max_w(relative(0.45))
+                .when(cap, |this| this.max_w(relative(0.45)))
                 .when(fade_under_badges, |this| {
                     this.child(
                         div()
@@ -1096,21 +1229,25 @@ fn subject_with_refs(
                     h_flex()
                         .relative()
                         .min_w_0()
-                        .overflow_hidden()
-                        .pr(px(SUBJECT_FADE))
-                        .mr(px(-SUBJECT_FADE / 2.))
-                        .gap_1()
+                        .when(cap, |this| this.overflow_hidden())
+                        .when(fade_badges, |this| {
+                            this.pr(px(SUBJECT_FADE)).mr(px(-SUBJECT_FADE / 2.))
+                        })
+                        .gap(gap)
                         .items_center()
                         .children(badges.chain(more))
-                        .child(
-                            crate::fade::fade_right(base)
-                                .w(px(SUBJECT_FADE))
-                                .group_hover("log-row", move |s| {
-                                    s.bg(crate::fade::fade_fill(hover))
-                                }),
-                        ),
+                        .when(fade_badges, |this| {
+                            this.child(
+                                crate::fade::fade_right(base)
+                                    .w(px(SUBJECT_FADE))
+                                    .group_hover("log-row", move |s| {
+                                        s.bg(crate::fade::fade_fill(hover))
+                                    }),
+                            )
+                        }),
                 ),
         )
+        .children(measure)
         .into_any_element()
 }
 
