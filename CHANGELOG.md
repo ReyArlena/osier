@@ -18,6 +18,13 @@ All notable changes to Osier are documented here. The format follows
   changed, it was moved without an edit, it is a new or deleted empty file, or it was
   changed back on disk after it was staged.
 
+- Settings > Git > Roll back: "Always rewrite files on roll back"
+  (`git.rollback_always_rewrite`, on by default, which is how git behaves). Git replaces a file
+  it rolls back even when its content is already the same, and a program that hot-reloads the
+  file (a desktop environment and its config files, say) can catch the moment it is missing.
+  With the setting off, such a file only has its staged change cleared and is not touched on
+  disk.
+
 ### Changed
 
 - The Changes tab is one list, like PhpStorm: each changed file shows once with a checkbox

@@ -388,10 +388,11 @@ impl Osier {
                     name.clone(),
                     text,
                     move |this, _, window, cx| {
+                        let skip_unchanged = !this.settings.git.rollback_always_rewrite;
                         this.run_op(
                             format!("Shelved \"{name}\""),
                             move |repo| {
-                                discard::discard_all(repo, &t)?;
+                                discard::discard_all(repo, &t, skip_unchanged)?;
                                 discard::trash_untracked(repo, &u)?;
                                 Ok(())
                             },

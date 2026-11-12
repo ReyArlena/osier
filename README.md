@@ -277,6 +277,7 @@ log_badges = "left"           # Log branch/tag badges: left (before the subject)
 log_unpushed = "dim"          # commits not on a remote: dim (graph and, a little, the row) | colour | off
 offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 config_tab = false            # show the Git config panel as a tab (always in the sidebar menu)
+rollback_always_rewrite = true  # false: roll back leaves a file that already matches the last commit untouched on disk (for programs that hot-reload it)
 
 [github]
 list_refresh_minutes = 30     # refresh the cached GitHub lists (repositories, templates); 0 = off

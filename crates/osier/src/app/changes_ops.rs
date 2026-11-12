@@ -277,6 +277,7 @@ impl Osier {
             move |this, window, cx| {
                 let p = path.clone();
                 let summary = format!("Rolled back {p}");
+                let skip_unchanged = !this.settings.git.rollback_always_rewrite;
                 match area {
                     Area::Untracked => this.run_op(
                         format!("Trashed {p}"),
@@ -295,7 +296,7 @@ impl Osier {
                     ),
                     Area::Changed | Area::Conflicted => this.run_op(
                         summary,
-                        move |repo| discard::discard_all(repo, &[p]),
+                        move |repo| discard::discard_all(repo, &[p], skip_unchanged),
                         window,
                         cx,
                     ),

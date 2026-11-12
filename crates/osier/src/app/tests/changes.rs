@@ -1171,3 +1171,52 @@ fn ui_a_permissions_only_change_says_so(cx: &mut TestAppContext) {
     assert_eq!(title, "Only the permissions changed");
     assert!(hint.starts_with("This file was made executable."), "{hint}");
 }
+
+/// A repo whose `a.txt` has a staged change that was undone in the file: on disk it matches
+/// the last commit.
+fn staged_then_undone() -> TempRepo {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.write("a.txt", "two\n");
+    repo.git(["add", "a.txt"]);
+    repo.write("a.txt", "one\n");
+    repo
+}
+
+fn roll_back(h: &Harness, cx: &mut TestAppContext, path: &'static str) {
+    h.click(
+        cx,
+        Box::leak(format!("change-row:changes:{path}").into_boxed_str()),
+    );
+    h.keys(cx, "delete");
+    h.click(cx, "dialog-ok");
+}
+
+#[cfg(unix)]
+#[gpui::test]
+fn ui_roll_back_leaves_a_matching_file_untouched_when_rewriting_is_off(cx: &mut TestAppContext) {
+    use std::os::unix::fs::MetadataExt as _;
+    let repo = staged_then_undone();
+    let inode = || std::fs::metadata(repo.path().join("a.txt")).unwrap().ino();
+    let before = inode();
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |osier, _, _| {
+        osier.settings.git.rollback_always_rewrite = false
+    });
+    roll_back(&h, cx, "a.txt");
+    assert!(repo.git(["status", "--porcelain"]).trim().is_empty());
+    assert_eq!(inode(), before, "the file on disk was not replaced");
+    assert_eq!(repo.read("a.txt"), "one\n");
+}
+
+#[gpui::test]
+fn ui_roll_back_clears_a_staged_only_change_by_default(cx: &mut TestAppContext) {
+    let repo = staged_then_undone();
+    let h = Harness::open(cx, &repo);
+    h.read(cx, |osier, _| {
+        assert!(osier.settings.git.rollback_always_rewrite)
+    });
+    roll_back(&h, cx, "a.txt");
+    assert!(repo.git(["status", "--porcelain"]).trim().is_empty());
+    assert_eq!(repo.read("a.txt"), "one\n");
+}

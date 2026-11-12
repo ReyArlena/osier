@@ -348,6 +348,11 @@ pub struct Git {
     pub offer_keep_ignored: bool,
     /// Show the Git config panel as a tab too (it is always in the project's sidebar menu).
     pub config_tab: bool,
+    /// Rolling back (or shelving) replaces every file on disk, as git does, even one whose
+    /// content already matches the last commit. Programs that reload a file on change can
+    /// catch it while it is gone; with this off, such a file only has its staged change reset
+    /// and is not touched on disk.
+    pub rollback_always_rewrite: bool,
 }
 
 /// `dim` fades unpushed commits in the graph (and their row's text a little), `colour` draws
@@ -380,6 +385,7 @@ impl Default for Git {
             log_unpushed: UnpushedStyle::Dim,
             offer_keep_ignored: true,
             config_tab: false,
+            rollback_always_rewrite: true,
         }
     }
 }
