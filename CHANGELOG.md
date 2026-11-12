@@ -76,6 +76,10 @@ All notable changes to Osier are documented here. The format follows
 
 ### Fixed
 
+- Long branch names in the Log no longer push a commit's subject out of its row when badges
+  sit before the subject (the default). The badges take at most 45% of the row, as they do
+  at the end of the line, and fade out past that.
+
 - The Files tab colours its status letters like the Changes tab: renamed and copied files
   were grey there instead of blue, type changes grey instead of yellow.
 

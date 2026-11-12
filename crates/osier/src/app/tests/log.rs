@@ -105,6 +105,38 @@ fn a_long_subject_stays_inside_its_row_in_every_text_ending(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn long_left_badges_leave_room_for_the_subject(cx: &mut TestAppContext) {
+    use osier_config::settings::TextOverflow;
+    // Badges on the left (the default) take at most 45% of the row, as on the right; two
+    // long branch names used to leave the subject no width at all.
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "a subject that should stay readable");
+    repo.branch("feature/topic-01-a-long-descriptive-branch-name-for-overflow");
+    repo.branch("feature/topic-02-another-long-descriptive-branch-name");
+    let mut state = State::default();
+    state.layout.center_width = Some(440.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    for style in [
+        TextOverflow::Fade,
+        TextOverflow::Ellipsis,
+        TextOverflow::Both,
+    ] {
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.text_overflow = style;
+            cx.notify();
+        });
+        let subject = h.bounds(cx, "log-subject:0").expect("subject");
+        let badge = h.bounds(cx, "log-ref:0:main").expect("branch badge");
+        assert!(badge.right() < subject.left(), "{style:?}: badges first");
+        assert!(
+            subject.size.width > gpui::px(80.),
+            "{style:?}: subject {subject:?}"
+        );
+    }
+}
+
+#[gpui::test]
 fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
@@ -114,7 +146,10 @@ fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppCon
     repo.branch("feat/a");
     repo.branch("feat/b");
     repo.git(["tag", "v1"]);
-    let h = Harness::open(cx, &repo);
+    // Wide enough for the "+N" badge: it sits inside the badges' 45% cap and goes with them.
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
     h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
     // Local branches first, the checked-out one leading, the others by name.
     let x = |h: &Harness, cx: &mut TestAppContext, id: &'static str| {
@@ -134,9 +169,7 @@ fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppCon
     ] {
         assert!(h.bounds(cx, id).is_none(), "{id}");
     }
-    // Its visible left edge: in this narrow window the row's end fade lies over the rest.
-    let more = h.bounds(cx, "log-ref-more:0").expect("+2 badge");
-    let more = gpui::point(more.origin.x + gpui::px(3.), more.center().y);
+    let more = h.bounds(cx, "log-ref-more:0").expect("+2 badge").center();
     h.visual(cx)
         .simulate_mouse_move(more, None, gpui::Modifiers::none());
     cx.executor()

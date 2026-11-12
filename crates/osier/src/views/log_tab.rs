@@ -772,6 +772,16 @@ const REF_GAP: f32 = 8.0;
 /// badges that do not fit.
 const SUBJECT_FADE: f32 = 14.0;
 
+/// The fade over left badges cut off at their 45% cap: solid for its last few pixels, so a
+/// little background shows between the cut badge and the subject right after it.
+fn cut_badges_fade(color: Hsla) -> Background {
+    linear_gradient(
+        90.,
+        linear_color_stop(color.opacity(0.), 0.),
+        linear_color_stop(color, 0.7),
+    )
+}
+
 /// The badge for one ref: HEAD's branch solid, tags in the warning colour, other branches
 /// tinted with the primary colour like the sidebar's selected row.
 pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> Tag {
@@ -850,8 +860,8 @@ struct SubjectLook {
 /// badge naming the rest in its tooltip. A subject that does not fit ends as
 /// `appearance.text_overflow` says (a fade, an ellipsis, or an ellipsis that fades out).
 ///
-/// Left: badges first, then the subject; the row's end fades out over the subject or the
-/// badges that do not fit (no fade with an ellipsis). Right: the subject runs up to the
+/// Left: badges first, at most 45% of the row (the rest fade out at its end), then the
+/// subject; the row's end fades out over the subject (no fade with an ellipsis). Right: the subject runs up to the
 /// badges at the end of the line and fades out under their left edge, as sidebar names do
 /// before their ahead/behind badges (or ends in its ellipsis before them). Badges that do
 /// not fit run into the box's right padding and fade out there; badges that fit end before
@@ -916,7 +926,6 @@ fn subject_with_refs(
             .child(ref_tag(label, is_head, is_tag, cx))
             .into_any_element()
     });
-    let badges = badges.chain(more);
     if !right {
         return h_flex()
             .relative()
@@ -925,7 +934,29 @@ fn subject_with_refs(
             .overflow_hidden()
             .gap(px(REF_GAP))
             .items_center()
-            .children(badges)
+            .child(
+                // At most 45% of the row, like right badges, so long branch names cannot
+                // push the subject out. Badges past that ("+N" included, as on the right)
+                // run into the right padding and fade out there. The negative margin takes
+                // back as much of the padding as the gap gives, so the subject starts where
+                // the fade ends, not under it; badges that fit sit `SUBJECT_FADE` before it.
+                h_flex()
+                    .relative()
+                    .flex_none()
+                    .max_w(relative(0.45))
+                    .overflow_hidden()
+                    .pr(px(SUBJECT_FADE))
+                    .mr(px(-REF_GAP))
+                    .gap(px(REF_GAP))
+                    .items_center()
+                    .children(badges.chain(more))
+                    .child(
+                        crate::fade::fade_right(base)
+                            .w(px(SUBJECT_FADE))
+                            .bg(cut_badges_fade(base))
+                            .group_hover("log-row", move |s| s.bg(cut_badges_fade(hover))),
+                    ),
+            )
             .child(
                 subject_box()
                     .min_w_0()
@@ -986,7 +1017,7 @@ fn subject_with_refs(
                         .mr(px(-SUBJECT_FADE / 2.))
                         .gap_1()
                         .items_center()
-                        .children(badges)
+                        .children(badges.chain(more))
                         .child(
                             crate::fade::fade_right(base)
                                 .w(px(SUBJECT_FADE))
