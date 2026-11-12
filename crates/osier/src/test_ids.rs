@@ -19,6 +19,11 @@
 //!   file, per hunk `hunk-check:<index>` and `hunk-revert:<index>`
 //! - Log rows `log-row:<index>`, reflog rows `reflog-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
 //!   branch menu buttons `branch-menu:<name>`, Stashes `stash-row:<index>`, Patches `patch-row:<id>`, command log `command-row:<record id>`
+//! - Files rows `files-row:<path>`, the name `files-name:<path>` and status letter
+//!   `files-status:<path>`; a folder's "changed files inside" marker (tinted icon or dot)
+//!   `files-dirty:<path>`; an ignored file's rule hint `files-ignored:<path>`;
+//!   `files-row-selected:<path>` marks the highlighted row (its fade blends into the
+//!   selected colour)
 //! - inputs by their container: `commit-message`, `files-filter`, `sidebar-filter`
 //! - the filter dropdown `filter-suggestions`, its rows `filter-suggestion:<term>` and the
 //!   settings link `filter-open-settings`
