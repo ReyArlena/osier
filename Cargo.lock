@@ -4829,7 +4829,7 @@ dependencies = [
 
 [[package]]
 name = "osier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "ashpd 0.14.0",
@@ -4852,7 +4852,7 @@ dependencies = [
 
 [[package]]
 name = "osier-auth"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -4863,7 +4863,7 @@ dependencies = [
 
 [[package]]
 name = "osier-config"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -4877,7 +4877,7 @@ dependencies = [
 
 [[package]]
 name = "osier-git"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -4891,7 +4891,7 @@ dependencies = [
 
 [[package]]
 name = "osier-theme"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "serde",

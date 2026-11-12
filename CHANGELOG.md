@@ -6,6 +6,8 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
 ### Added
 
 - The divider between the commit message and the details beside it (refs, hash, author,
@@ -71,18 +73,23 @@ All notable changes to Osier are documented here. The format follows
   change in the gutter to stage or unstage it, a roll-back arrow that puts the change back as
   in HEAD (staged part included, after a confirmation), and staged lines shown in a stronger
   colour.
+
 - GitHub release notes list every commit in the release, grouped by type, above the list of
   pull requests.
+
 - Hovering list rows redraws only the part of the window under the pointer (the list, the
   sidebar, the diff, the commit details and the bottom panel each redraw on their own), so
   the hover highlight keeps up with the mouse: on the Log tab a hover now takes about a third
   less time to draw.
+
 - The Branches tab builds only the rows on screen, so long lists of branches and tags stay
   quick to hover and scroll, and moving the selection with the arrow keys scrolls it into
   view.
+
 - The reflog, the Stashes and Patches tabs, the git command log and the notification list
   also build only the rows on screen. Moving through stashes with the arrow keys scrolls the
   selected one into view.
+
 - The project sidebar stays quick with hundreds of projects (scan directories): it builds
   only the rows on screen, and listing recent and scanned projects no longer compares every
   project with every other on each redraw. A hover over a sidebar with ~480 projects went from
@@ -508,7 +515,8 @@ First release.
   update check with an "Update available" badge, and updates from Settings or
   `osier --update` for script installs.
 
-[Unreleased]: https://github.com/ReyArlena/osier/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ReyArlena/osier/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ReyArlena/osier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ReyArlena/osier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ReyArlena/osier/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ReyArlena/osier/releases/tag/v0.1.0
