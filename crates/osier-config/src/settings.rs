@@ -110,6 +110,9 @@ pub struct Appearance {
     /// Show a `...` menu button at the end of list rows. Right-click opens the same menu
     /// either way.
     pub row_menu_buttons: bool,
+    /// How a single line of text too long for its row ends in the center tabs: `fade`,
+    /// `ellipsis` or `both` (an ellipsis that fades out).
+    pub text_overflow: TextOverflow,
     /// How long the pointer rests on something before its tooltip shows, in milliseconds.
     pub tooltip_delay_ms: u32,
     /// How long a notification stays in the corner before it slides away, in seconds. 0
@@ -153,6 +156,19 @@ pub enum SystemFallback {
     Light,
 }
 
+/// How text that does not fit its row ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TextOverflow {
+    /// The text fades out into the row's background.
+    #[default]
+    Fade,
+    /// The text ends in "…".
+    Ellipsis,
+    /// The text ends in "…", which fades out.
+    Both,
+}
+
 /// `icon` tints the project's folder icon, `dot` draws a dot before its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -175,6 +191,7 @@ impl Default for Appearance {
             font_size: None,
             changes_indicator: ChangesIndicator::Icon,
             row_menu_buttons: false,
+            text_overflow: TextOverflow::Fade,
             tooltip_delay_ms: 0,
             toast_seconds: 5,
             high_contrast: false,
@@ -341,6 +358,9 @@ pub struct Git {
     pub show_command_log: bool,
     /// Where the Log puts branch and tag badges: before the subject or at the end of the line.
     pub log_badges: LogBadges,
+    /// What the Log does with badges that do not fit: show them all, fade them out, or
+    /// collapse the rest into "+N".
+    pub log_badge_style: LogBadgeStyle,
     /// How the Log graph marks commits that are not on any remote yet.
     pub log_unpushed: UnpushedStyle,
     /// After a pull deletes files that an ignore rule now matches (someone stopped tracking
@@ -348,6 +368,11 @@ pub struct Git {
     pub offer_keep_ignored: bool,
     /// Show the Git config panel as a tab too (it is always in the project's sidebar menu).
     pub config_tab: bool,
+    /// Rolling back (or shelving) replaces every file on disk, as git does, even one whose
+    /// content already matches the last commit. Programs that reload a file on change can
+    /// catch it while it is gone; with this off, such a file only has its staged change reset
+    /// and is not touched on disk.
+    pub rollback_always_rewrite: bool,
 }
 
 /// `dim` fades unpushed commits in the graph (and their row's text a little), `colour` draws
@@ -371,15 +396,29 @@ pub enum LogBadges {
     Right,
 }
 
+/// `all` shows every ref badge (the subject may get pushed out), `fade` shows up to three
+/// and fades out what passes 45% of the row, `collapse` (default) shows as many as fit in
+/// that 45% and lists the rest in a "+N" badge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogBadgeStyle {
+    All,
+    Fade,
+    #[default]
+    Collapse,
+}
+
 impl Default for Git {
     fn default() -> Self {
         Self {
             log_page_size: 500,
             show_command_log: false,
             log_badges: LogBadges::Left,
+            log_badge_style: LogBadgeStyle::Collapse,
             log_unpushed: UnpushedStyle::Dim,
             offer_keep_ignored: true,
             config_tab: false,
+            rollback_always_rewrite: true,
         }
     }
 }
@@ -569,6 +608,19 @@ mod tests {
     }
 
     #[test]
+    fn log_badge_style_defaults_to_collapse_and_reads_the_others() {
+        assert_eq!(
+            Settings::default().git.log_badge_style,
+            LogBadgeStyle::Collapse
+        );
+        for (v, style) in [("all", LogBadgeStyle::All), ("fade", LogBadgeStyle::Fade)] {
+            let s: Settings =
+                toml::from_str(&format!("[git]\nlog_badge_style = \"{v}\"\n")).unwrap();
+            assert_eq!(s.git.log_badge_style, style);
+        }
+    }
+
+    #[test]
     fn log_badges_default_left_and_read_right() {
         assert_eq!(Settings::default().git.log_badges, LogBadges::Left);
         let s: Settings = toml::from_str("[git]\nlog_badges = \"right\"\n").unwrap();
@@ -585,6 +637,22 @@ mod tests {
         assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Stay);
         let s: Settings = toml::from_str("[projects]\nempty_changes_tab = \"branches\"\n").unwrap();
         assert_eq!(s.projects.empty_changes_tab, EmptyChangesTab::Branches);
+    }
+
+    #[test]
+    fn text_overflow_defaults_to_fade_and_reads_the_others() {
+        assert_eq!(
+            Settings::default().appearance.text_overflow,
+            TextOverflow::Fade
+        );
+        for (text, style) in [
+            ("ellipsis", TextOverflow::Ellipsis),
+            ("both", TextOverflow::Both),
+        ] {
+            let s: Settings =
+                toml::from_str(&format!("[appearance]\ntext_overflow = \"{text}\"\n")).unwrap();
+            assert_eq!(s.appearance.text_overflow, style);
+        }
     }
 
     #[test]

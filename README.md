@@ -15,8 +15,10 @@ none of the IDE.
 
 ## Features
 
-- **Visual staging**: stage, unstage and discard whole files, single hunks or selected lines
-  from the diff; untracked files go to the trash, never `rm`.
+- **Visual staging**: one list of changes with checkboxes, like PhpStorm: tick whole files,
+  single hunks (a checkbox in the diff's gutter) or selected lines; a dash marks a partly
+  staged file or hunk, and every hunk can be rolled back. Unversioned files go to the trash,
+  never `rm`.
 - **Commit log with graph**, tags and branch labels, reflog, compare any two refs, file
   history (`log --follow`) and blame with a click through to the commit.
 - **Branches, tags, remotes, worktrees, submodules, stashes** in one place, with the usual
@@ -110,7 +112,7 @@ Installed with a package manager, Flatpak or cargo? Update it that way; `osier -
 says so. Settings > About shows how Osier was installed.
 
 Open repositories from the sidebar (`ctrl-shift-o`), or let Osier scan directories for them
-(Settings > Projects). `ctrl-o` switches project: it searches the open, pinned and recent
+(Settings > Projects); new repositories there show up on their own. `ctrl-o` switches project: it searches the open, pinned and recent
 projects in the command palette. `ctrl-shift-b` does the same for branches. In the palette,
 Fetch…, Pull…, Push… and Update branch… offer the same choices as the title bar's menus. Useful keys: `ctrl-1`..`ctrl-6` switch tabs, `ctrl-enter` commits,
 `ctrl-t` and `ctrl-shift-f/l/p` open the update branch/fetch/pull/push choices (Enter runs the first), `` ctrl-` `` shows the git command log, `ctrl-p` or
@@ -272,9 +274,11 @@ large_file_bytes = 2097152
 log_page_size = 500
 show_command_log = false
 log_badges = "left"           # Log branch/tag badges: left (before the subject) | right
+log_badge_style = "collapse"  # badges that do not fit: collapse (as many as fit in 45% of the row, then +N) | fade (up to 3, fade past 45%) | all (show every one)
 log_unpushed = "dim"          # commits not on a remote: dim (graph and, a little, the row) | colour | off
 offer_keep_ignored = true     # after a pull removes newly ignored files, offer to keep local copies
 config_tab = false            # show the Git config panel as a tab (always in the sidebar menu)
+rollback_always_rewrite = true  # false: roll back leaves a file that already matches the last commit untouched on disk (for programs that hot-reload it)
 
 [github]
 list_refresh_minutes = 30     # refresh the cached GitHub lists (repositories, templates); 0 = off

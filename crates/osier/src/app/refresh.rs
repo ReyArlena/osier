@@ -23,6 +23,7 @@ impl Osier {
         project.revision += 1;
         let revision = project.revision;
         project.loading = true;
+        let first_load = project.snapshot.is_none();
         let repo = project.repo.clone();
         let path = project.path.clone();
         let page = project.log_page_size;
@@ -39,7 +40,14 @@ impl Osier {
                 this.install_snapshot(&path, revision, result, cx)
             });
         });
-        cx.notify();
+        // A notify on `Osier` redraws every pane, and the watcher refreshes often. Once a
+        // project has a snapshot, the start of a refresh shows only as the status bar's
+        // "Refreshing" (quiet work, "Show background tasks" on, active project); the result
+        // notifies in `install_snapshot`.
+        if first_load || (self.settings.appearance.show_background_tasks && self.active == Some(ix))
+        {
+            cx.notify();
+        }
     }
 
     fn install_snapshot(
@@ -275,6 +283,7 @@ impl Osier {
                     }
                     this.pump_recent_status(cx);
                     this.check_missing_projects(cx);
+                    this.poll_scan_watch(cx);
                     this.refresh_lists_on_timer(cx);
                     if this.keymap_watch.as_ref().is_some_and(|w| w.take_dirty()) {
                         this.reload_keymap(window, cx);

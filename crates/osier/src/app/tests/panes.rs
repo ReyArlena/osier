@@ -54,34 +54,158 @@ fn ui_tabs_and_command_palette(cx: &mut TestAppContext) {
     h.read(cx, |osier, _| assert_eq!(osier.tab, Tab::Log));
 }
 
+/// Resize the test window to `w` x 800.
+fn resize(h: &Harness, cx: &mut TestAppContext, w: f32) {
+    h.visual(cx)
+        .simulate_resize(gpui::size(gpui::px(w), gpui::px(800.)));
+    cx.run_until_parked();
+}
+
+fn width_of(h: &Harness, cx: &mut TestAppContext, id: &'static str) -> f32 {
+    f32::from(h.bounds(cx, id).expect(id).size.width)
+}
+
 #[gpui::test]
-fn center_pane_keeps_its_saved_width_when_the_window_resizes(cx: &mut TestAppContext) {
+fn center_and_diff_panes_keep_their_split_when_the_window_resizes(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    state.layout.center_ratio = Some(0.6);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    // 60% of the space beside the 240px sidebar, at every width.
+    for w in [1600., 1000., 1600.] {
+        resize(&h, cx, w);
+        let center = width_of(&h, cx, "center-pane");
+        let expected = 0.6 * (w - 240.);
+        assert!(
+            (center - expected).abs() < 3.,
+            "at {w}: center {center}, expected {expected}"
+        );
+    }
+}
+
+#[gpui::test]
+fn a_width_saved_by_an_older_version_starts_the_split(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
     let mut state = State::default();
     state.layout.sidebar_visible = true;
     state.layout.center_width = Some(320.);
     let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
-    let width = |h: &Harness, cx: &mut TestAppContext| {
-        f32::from(h.bounds(cx, "center-pane").expect("center pane").size.width)
+    let share = |h: &Harness, cx: &mut TestAppContext| {
+        let center = width_of(h, cx, "center-pane");
+        center / (center + width_of(h, cx, "diff-pane"))
     };
     assert!(
-        (width(&h, cx) - 320.).abs() < 2.,
+        (width_of(&h, cx, "center-pane") - 320.).abs() < 2.,
         "restored: {}",
-        width(&h, cx)
+        width_of(&h, cx, "center-pane")
     );
-    for size in [
-        gpui::size(gpui::px(1600.), gpui::px(900.)),
-        gpui::size(gpui::px(1100.), gpui::px(700.)),
-    ] {
-        h.visual(cx).simulate_resize(size);
-        cx.run_until_parked();
+    let before = share(&h, cx);
+    resize(&h, cx, 1600.);
+    let after = share(&h, cx);
+    assert!(
+        (after - before).abs() < 0.01,
+        "share kept: {before} then {after}"
+    );
+}
+
+#[gpui::test]
+fn ui_dragging_the_divider_saves_the_split(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1400.);
+    let center = h.bounds(cx, "center-pane").expect("center pane");
+    let from = gpui::point(center.right() + gpui::px(1.), center.center().y);
+    drag(&h, cx, from, gpui::point(gpui::px(840.), from.y));
+    let width = width_of(&h, cx, "center-pane");
+    h.read(cx, |o, _| {
+        let ratio = o.state.layout.center_ratio.expect("share saved");
+        let expected = width / (1400. - 240.);
         assert!(
-            (width(&h, cx) - 320.).abs() < 2.,
-            "after resize: {}",
-            width(&h, cx)
+            (ratio - expected).abs() < 0.01,
+            "saved {ratio}, expected {expected}"
+        );
+        assert_eq!(o.state.layout.center_width, None, "pixel width dropped");
+    });
+}
+
+#[gpui::test]
+fn a_narrow_window_keeps_the_diff_pane_on_screen(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    state.layout.center_ratio = Some(0.9);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1000.);
+    let right = f32::from(h.bounds(cx, "center-pane").expect("center pane").right());
+    assert!(
+        right <= 1000. - crate::app::panes::DIFF_MIN + 2.,
+        "the diff pane keeps its narrowest beside a center column ending at {right}"
+    );
+}
+
+#[gpui::test]
+fn a_wide_sidebar_shrinks_with_the_window_and_a_standard_one_stays(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    // (dragged width in a 1400px window, width in a 1000px window)
+    for (dragged, narrow) in [(240., 240.), (300., 240.), (500., 500. * 1000. / 1400.)] {
+        let mut state = State::default();
+        state.layout.sidebar_visible = true;
+        state.layout.sidebar_width = Some(dragged);
+        state.layout.sidebar_window_width = Some(1400.);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        resize(&h, cx, 1400.);
+        let wide = width_of(&h, cx, "sidebar-pane");
+        assert!((wide - dragged).abs() < 1., "{dragged} at 1400: {wide}");
+        resize(&h, cx, 1000.);
+        let small = width_of(&h, cx, "sidebar-pane");
+        assert!((small - narrow).abs() < 1., "{dragged} at 1000: {small}");
+        resize(&h, cx, 1400.);
+        let back = width_of(&h, cx, "sidebar-pane");
+        assert!(
+            (back - dragged).abs() < 1.,
+            "{dragged} back at 1400: {back}"
         );
     }
+}
+
+#[gpui::test]
+fn ui_the_commit_details_divider_drags_and_the_width_is_kept(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1400.);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let meta = h.bounds(cx, "commit-details-meta").expect("details column");
+    assert!((f32::from(meta.size.width) - 300.).abs() < 1., "{meta:?}");
+    let from = gpui::point(meta.left() - gpui::px(1.), meta.center().y);
+    drag(&h, cx, from, gpui::point(from.x - gpui::px(120.), from.y));
+    let width = width_of(&h, cx, "commit-details-meta");
+    assert!((width - 420.).abs() < 2., "dragged wider: {width}");
+    let saved = h.read(cx, |o, _| o.state.layout.log_details_meta_width);
+    assert!(saved.is_some_and(|w| (w - width).abs() < 1.), "{saved:?}");
+
+    // A later session starts from it.
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    state.layout.log_details_meta_width = saved;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    resize(&h, cx, 1400.);
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let again = width_of(&h, cx, "commit-details-meta");
+    assert!(
+        (again - width).abs() < 1.,
+        "restored {again}, dragged {width}"
+    );
 }
 
 /// Press at `from`, move to `to` in two steps and release, as dragging an edge does.
@@ -237,10 +361,10 @@ fn ui_each_tab_keeps_its_own_right_pane(cx: &mut TestAppContext) {
     let h = Harness::open(cx, &repo);
     assert_eq!(h.read(cx, |o, _| o.tab), Tab::Changes);
     // Changes starts on its first change; pick the second.
-    h.click(cx, "change-row:unstaged:b.txt");
+    h.click(cx, "change-row:changes:b.txt");
     let b = Selection::File {
         path: "b.txt".into(),
-        area: Area::Unstaged,
+        area: Area::Changed,
     };
     assert_eq!(selection(&h, cx), b);
     // Log starts on the latest commit, not on Changes' file.
@@ -374,7 +498,7 @@ fn the_shown_diff_follows_edits_to_its_file_and_ignores_other_files(cx: &mut Tes
     repo.write("a.txt", "one\n");
     repo.write("b.txt", "other\n");
     let h = Harness::open(cx, &repo);
-    h.click(cx, "change-row:unstaged:a.txt");
+    h.click(cx, "change-row:changes:a.txt");
     let loads = |h: &Harness, cx: &mut TestAppContext| h.read(cx, |o, _| o.diff_revision);
     let added = |h: &Harness, cx: &mut TestAppContext| {
         h.read(cx, |o, _| {
@@ -446,9 +570,11 @@ fn clicking_a_stash_shows_its_changes(cx: &mut TestAppContext) {
 fn tab_overflow_is_measured_and_settles(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "one\n", "first");
-    let h = Harness::open(cx, &repo);
-    // The test layout's centre panel is about 440px: six tabs do not fit, so the strip
-    // scrolls and the menu shows. Redrawing settles (a render loop would never park).
+    let mut state = State::default();
+    state.layout.center_width = Some(440.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    // A 440px centre panel: six tabs do not fit, so the strip scrolls and the menu shows.
+    // Redrawing settles (a render loop would never park).
     h.act(cx, |_, _, cx| cx.notify());
     h.act(cx, |_, _, cx| cx.notify());
     h.read(cx, |o, _| {
@@ -519,7 +645,7 @@ fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestA
         o.set_diff_options(opts, window, cx)
     });
     h.act(cx, |o, _, cx| {
-        o.select_file("a.txt".into(), Area::Unstaged, cx)
+        o.select_file("a.txt".into(), Area::Changed, cx)
     });
     assert_eq!(
         h.read(cx, |o, _| o.diff_files),
@@ -533,7 +659,7 @@ fn ui_changes_never_hide_whitespace_and_file_arrows_walk_the_list(cx: &mut TestA
         selected,
         Selection::File {
             path: "z.txt".into(),
-            area: Area::Unstaged
+            area: Area::Changed
         }
     );
 }

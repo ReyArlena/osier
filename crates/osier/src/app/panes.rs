@@ -1,16 +1,25 @@
 //! Layout: tabs, the right pane kept per tab, diff views, the sidebar and the command log
 //! panel.
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::diff::{DiffEvent, DiffState};
 use gpui_kit::*;
 
 use super::{BottomTab, Osier, Tab};
+use crate::pane::{Pane, RenderFn};
 use crate::project::{Project, Selection};
 
 /// Width of the project sidebar until its edge is dragged, and how far a drag can take it.
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.;
 const SIDEBAR_MIN: f32 = 160.;
 const SIDEBAR_MAX: f32 = 600.;
+/// Narrowest the center column (tabs) and the diff pane get. Past the window resizes the
+/// two keep their dragged split (a share, not pixels); a window too narrow for both
+/// minimums narrows the sidebar.
+pub(crate) const CENTER_MIN: f32 = 260.;
+pub(crate) const DIFF_MIN: f32 = 240.;
+/// The center column's share of the space beside the sidebar until the divider is dragged.
+const CENTER_RATIO: f32 = 0.4;
 /// The same for the height of the bottom panel.
 pub(crate) const BOTTOM_PANEL_HEIGHT: f32 = 220.;
 const BOTTOM_PANEL_MIN: f32 = 100.;
@@ -37,16 +46,66 @@ impl Render for ResizeBottomPanel {
     }
 }
 
+/// The parts of the main window that redraw on their own (`crate::pane`). `Osier::render`
+/// is the shell that lays them out.
+pub(crate) struct Panes {
+    pub(crate) title_bar: Entity<Pane<Osier>>,
+    pub(crate) sidebar: Entity<Pane<Osier>>,
+    pub(crate) tab_strip: Entity<Pane<Osier>>,
+    pub(crate) tab: Entity<Pane<Osier>>,
+    pub(crate) commit_details: Entity<Pane<Osier>>,
+    pub(crate) diff: Entity<Pane<Osier>>,
+    pub(crate) bottom_panel: Entity<Pane<Osier>>,
+    pub(crate) status_bar: Entity<Pane<Osier>>,
+}
+
+impl Panes {
+    pub(crate) fn new(owner: &Entity<Osier>, cx: &mut App) -> Self {
+        let mut pane = |render: RenderFn<Osier>| Pane::new(owner, render, cx);
+        Self {
+            title_bar: pane(|o, _, cx| o.render_title_bar(cx).into_any_element()),
+            sidebar: pane(|o, window, cx| o.render_sidebar(window, cx)),
+            tab_strip: pane(|o, _, cx| o.render_tab_strip(cx)),
+            tab: pane(|o, window, cx| o.render_tab(window, cx)),
+            commit_details: pane(|o, window, cx| {
+                let border = cx.theme().border;
+                div()
+                    .size_full()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(o.render_commit_details(window, cx))
+                    .into_any_element()
+            }),
+            diff: pane(|o, window, cx| o.render_diff_pane(window, cx).into_any_element()),
+            bottom_panel: pane(|o, _, cx| o.render_bottom_panel(cx)),
+            status_bar: pane(|o, _, cx| {
+                let has_project = o.active.is_some();
+                o.render_status_bar(has_project, cx).into_any_element()
+            }),
+        }
+    }
+}
+
 impl Osier {
-    /// Width of the project sidebar: the dragged one, kept to a usable size and to half the
-    /// window at most.
+    /// Width of the project sidebar: the dragged one, kept to a usable size, to half the
+    /// window at most, and to what leaves the center column and the diff pane their
+    /// narrowest. In a window narrower than when it was dragged, a wide sidebar shrinks in
+    /// proportion, but never below the standard width (or the dragged one, when that is
+    /// narrower); a sidebar of standard width stays as it is.
     pub(crate) fn sidebar_width(&self, window: &Window) -> f32 {
-        let most = (f32::from(window.viewport_size().width) / 2.).clamp(SIDEBAR_MIN, SIDEBAR_MAX);
-        self.state
-            .layout
-            .sidebar_width
-            .unwrap_or(SIDEBAR_WIDTH)
-            .clamp(SIDEBAR_MIN, most)
+        let window_w = f32::from(window.viewport_size().width);
+        let most = (window_w / 2.)
+            .min(window_w - CENTER_MIN - DIFF_MIN)
+            .clamp(SIDEBAR_MIN, SIDEBAR_MAX);
+        let layout = &self.state.layout;
+        let dragged = layout.sidebar_width.unwrap_or(SIDEBAR_WIDTH);
+        let width = match layout.sidebar_window_width {
+            Some(at) if at > 0. && window_w < at => {
+                (dragged * window_w / at).max(dragged.min(SIDEBAR_WIDTH))
+            }
+            _ => dragged,
+        };
+        width.clamp(SIDEBAR_MIN, most)
     }
 
     /// The sidebar's edge was dragged to `width`.
@@ -56,7 +115,9 @@ impl Osier {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        // Stored as dragged, then as `sidebar_width` limits it.
+        // Stored as dragged, then as `sidebar_width` limits it, with the window width it
+        // was dragged in.
+        self.state.layout.sidebar_window_width = Some(f32::from(window.viewport_size().width));
         self.state.layout.sidebar_width = Some(f32::from(width));
         self.state.layout.sidebar_width = Some(self.sidebar_width(window));
         self.state_dirty = true;
@@ -89,10 +150,47 @@ impl Osier {
         cx.notify();
     }
 
+    /// Width of the space beside the sidebar, which the center column and the diff pane
+    /// share.
+    fn beside_sidebar(&self, window: &Window) -> f32 {
+        let sidebar = if self.sidebar_visible {
+            self.sidebar_width(window)
+        } else {
+            0.
+        };
+        f32::from(window.viewport_size().width) - sidebar
+    }
+
+    /// The center column's width to start from: its dragged share of the space beside the
+    /// sidebar (a width saved by an older version as it was). After the first frame the
+    /// panels keep this split by themselves as the window resizes.
+    pub(crate) fn center_width(&self, window: &Window) -> f32 {
+        let layout = &self.state.layout;
+        let beside = self.beside_sidebar(window);
+        let width = match (layout.center_ratio, layout.center_width) {
+            (Some(ratio), _) => ratio * beside,
+            (None, Some(width)) => width,
+            (None, None) => CENTER_RATIO * beside,
+        };
+        width.clamp(CENTER_MIN, self.center_width_most(window))
+    }
+
+    /// Widest the center column can be in this window: what is left beside the sidebar once
+    /// the diff pane has its narrowest.
+    pub(crate) fn center_width_most(&self, window: &Window) -> f32 {
+        (self.beside_sidebar(window) - DIFF_MIN).max(CENTER_MIN)
+    }
+
+    /// The divider between the center column and the diff pane was dragged: keep the split
+    /// as a share, so both panes resize with the window.
     pub(crate) fn on_pane_resize(&mut self, sizes: &[Pixels]) {
-        if let Some(first) = sizes.first() {
-            self.state.layout.center_width = Some(f32::from(*first));
-            self.state_dirty = true;
+        if let [center, diff, ..] = sizes {
+            let total = f32::from(*center) + f32::from(*diff);
+            if total > 0. {
+                self.state.layout.center_ratio = Some(f32::from(*center) / total);
+                self.state.layout.center_width = None;
+                self.state_dirty = true;
+            }
         }
     }
 
@@ -163,7 +261,7 @@ impl Osier {
         let switching = self.projects[ix].pane_tab != Some(tab);
         // The outgoing tab's diff view, kept unless it was still loading (never reuse a
         // half-loaded view).
-        let leaving_diff = (switching && !self.diff_loading).then(|| {
+        let leaving_diff = (switching && !self.diff_loading && !self.diff_refreshing).then(|| {
             let (fresh, fresh_sub) = self.new_diff_view(cx);
             crate::project::DiffCache {
                 state: std::mem::replace(&mut self.diff, fresh),
@@ -172,9 +270,11 @@ impl Osier {
                     .replace(fresh_sub)
                     .unwrap_or_else(|| Self::subscribe_diff(&self.diff, cx)),
                 model: std::mem::take(&mut self.diff_model),
+                staging: self.diff_staging.take(),
                 files: self.diff_files,
                 error: self.diff_error.take(),
                 too_large: self.diff_too_large.take(),
+                text_key: self.diff_text_key.take(),
                 viewer: self.viewer.take(),
                 key: self.diff_key.clone().unwrap_or_default(),
             }
@@ -224,11 +324,15 @@ impl Osier {
             self.diff = cache.state;
             self.diff_subscription = Some(cache.subscription);
             self.diff_model = cache.model;
+            self.diff_staging = cache.staging;
             self.diff_files = cache.files;
             self.diff_error = cache.error;
             self.diff_too_large = cache.too_large;
+            self.diff_text_key = cache.text_key;
             self.viewer = cache.viewer;
             self.diff_loading = false;
+            self.diff_refreshing = false;
+            self.diff_shown = self.active_project().map(|p| p.selection.clone());
             // A load still running for the tab that was left must not land here.
             self.diff_revision += 1;
             if self.diff.read(cx).mode() != mode {

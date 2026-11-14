@@ -15,7 +15,7 @@ use super::{get, set};
 pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
     let defaults = Settings::default();
     SettingPage::new("Git")
-        .description("The log, pulling, the Git config tab, prompts and the file viewer.")
+        .description("The log, pulling, rolling back, the Git config tab, prompts and the file viewer.")
         .icon(Icon::new(Lucide::GitBranch))
         .resettable(true)
         .group(SettingGroup::new().title("Log").items(vec![
@@ -68,6 +68,39 @@ pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
                 .default_value("left".to_string()),
             ),
             SettingItem::new(
+                "Badges that do not fit",
+                SettingField::dropdown(
+                    vec![
+                        ("all".into(), "Show them all".into()),
+                        ("fade".into(), "Fade them out".into()),
+                        ("collapse".into(), "Collapse into +N".into()),
+                    ],
+                    get(view, |o| {
+                        match o.settings.git.log_badge_style {
+                            osier_config::settings::LogBadgeStyle::All => "all",
+                            osier_config::settings::LogBadgeStyle::Fade => "fade",
+                            osier_config::settings::LogBadgeStyle::Collapse => "collapse",
+                        }
+                        .into()
+                    }),
+                    set(view, |o, v: SharedString, _| {
+                        o.settings.git.log_badge_style = match v.as_ref() {
+                            "all" => osier_config::settings::LogBadgeStyle::All,
+                            "collapse" => osier_config::settings::LogBadgeStyle::Collapse,
+                            "fade" => osier_config::settings::LogBadgeStyle::Fade,
+                            _ => osier_config::settings::LogBadgeStyle::Collapse,
+                        }
+                    }),
+                )
+                .default_value("collapse".to_string()),
+            )
+            .description(
+                "Show them all pushes the subject out of a crowded row. Fade them out shows up \
+                 to three and fades out what passes 45% of the row. Collapse shows as many as \
+                 fit in that space and lists the rest in a +N badge; in a very narrow column \
+                 they fade out too.",
+            ),
+            SettingItem::new(
                 "Commits not pushed yet",
                 SettingField::dropdown(
                     vec![
@@ -117,6 +150,28 @@ pub(super) fn git_page(view: &Entity<Osier>) -> SettingPage {
                  that were simply deleted stay deleted, and files still on your disk are left \
                  alone. Pulls run outside Osier are not covered. There, run git show \
                  ORIG_HEAD:<path> > <path> right after the pull to bring a file back.",
+            ),
+        ]))
+        .group(SettingGroup::new().title("Roll back").items(vec![
+            SettingItem::new(
+                "Always rewrite files on roll back",
+                SettingField::switch(
+                    get(view, |o| o.settings.git.rollback_always_rewrite),
+                    set(view, |o, v: bool, _| o.settings.git.rollback_always_rewrite = v),
+                )
+                .default_value(defaults.git.rollback_always_rewrite),
+            )
+            .description(
+                "Rolling back a file puts it back as it was in the last commit. With this on, \
+                 git does that its usual way: it replaces the file on disk, even when its \
+                 content is already the same and only a staged change is being dropped. A \
+                 program that reloads the file whenever it changes can catch the moment it is \
+                 missing and report an error: a desktop environment reading its config files, \
+                 for example, or a development server. Turn this off to have Osier check first: \
+                 when the file on disk already matches the last commit, it only clears the \
+                 staged change and does not touch the file. A file that really differs is still \
+                 replaced, so such a program can still notice that. The same goes for shelving \
+                 changes. Off costs one more git command per roll back.",
             ),
         ]))
         .group(SettingGroup::new().title("Git config").items(vec![

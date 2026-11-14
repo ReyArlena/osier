@@ -16,12 +16,10 @@ use crate::test_ids::TestId as _;
 use osier_git::runner::CommandRecord;
 
 impl Osier {
-    /// The bottom panel: a tab row (git commands, notifications), then the chosen list.
-    pub(crate) fn render_bottom_panel(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    /// The bottom panel's content (a pane, `crate::pane`): a tab row (git commands,
+    /// notifications), then the chosen list. [`Self::render_bottom_panel_frame`] gives it
+    /// its height and draggable edge.
+    pub(crate) fn render_bottom_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::app::BottomTab;
         let muted = cx.theme().muted_foreground;
         let tab = self.bottom_tab;
@@ -120,7 +118,7 @@ impl Osier {
                         cx.notify();
                     })),
             );
-        let panel = v_flex()
+        v_flex()
             .size_full()
             .border_t_1()
             .border_color(cx.theme().border)
@@ -129,14 +127,23 @@ impl Osier {
             .child(match tab {
                 BottomTab::Commands => self.render_command_log(cx).into_any_element(),
                 BottomTab::Notifications => self.render_notices(cx).into_any_element(),
-            });
-        // The panel with a draggable top edge, followed here like the sidebar's.
+            })
+            .into_any_element()
+    }
+
+    /// The bottom panel pane with a draggable top edge (shell), followed here like the
+    /// sidebar's.
+    pub(crate) fn render_bottom_panel_frame(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .test_id("bottom-panel")
             .relative()
             .h(px(self.bottom_panel_height(window)))
             .flex_none()
-            .child(panel)
+            .child(crate::pane::cached(&self.panes.bottom_panel, window))
             .child(
                 resize_handle("bottom-panel-edge", Axis::Vertical)
                     .inside(HandleEdge::Leading)
@@ -152,148 +159,174 @@ impl Osier {
             )
     }
 
-    /// The git command list of the bottom panel.
-    fn render_command_log(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The git command list of the bottom panel: its rows are built only while on screen
+    /// (`crate::lazy_list`).
+    fn render_command_log(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
         let failures_only = self.command_log_failures_only;
         // Failures are easy to miss: a refresh right after one runs a dozen routine commands.
         // Only the newest 200 are listed, so only those are taken from the log.
         let records = self.sink.newest(200, failures_only);
+        if records.is_empty() {
+            return div()
+                .flex_1()
+                .p_3()
+                .font_family(mono)
+                .text_xs()
+                .text_color(muted)
+                .child(if failures_only {
+                    "No failed commands."
+                } else {
+                    "No git commands run yet."
+                })
+                .into_any_element();
+        }
         let expanded = self.expanded_command;
-
-        let mut list = v_flex()
+        // An opened row is taller: part of the rows' shape, so the list measures again.
+        let shape: Vec<(u64, bool)> = records
+            .iter()
+            .map(|r| (r.id, expanded == Some(r.id)))
+            .collect();
+        let state = self.command_log_list.sync(&shape, None);
+        let records = std::rc::Rc::new(records);
+        div()
             .flex_1()
             .min_h_0()
-            .id("command-log-list")
-            .overflow_y_scrollbar()
-            .font_family(mono.clone())
-            .text_xs();
-        for rec in records.iter() {
-            let ok = rec.expected;
-            let id = rec.id;
-            let is_open = expanded == Some(id);
-            let shell = rec.as_shell();
-            // Hide the boilerplate prefix in the one-line view.
-            let short = shell
-                .replace(" --no-pager -c color.ui=never -c core.quotePath=false", "")
-                .replace("--no-pager -c color.ui=never -c core.quotePath=false ", "");
-            let ms = rec.duration.as_millis();
-            let started = crate::format::unix_secs(rec.started);
-            list = list.child(
-                v_flex()
-                    .id(("cmd", id as usize))
-                    .test_id(|| format!("command-row:{id}"))
-                    .a11y_item(|| short.clone())
-                    .cursor_pointer()
-                    .hover(|this| this.bg(cx.theme().list_hover))
-                    .when(is_open, |this| this.bg(cx.theme().list_active))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.expanded_command = if this.expanded_command == Some(id) {
-                            None
-                        } else {
-                            Some(id)
-                        };
-                        cx.notify();
-                    }))
-                    .context_menu({
-                        let weak = cx.entity().downgrade();
-                        move |menu, _, _| {
-                            let (w1, w2) = (weak.clone(), weak.clone());
-                            menu.item(PopupMenuItem::new("Copy command").on_click(
-                                move |_, window, cx| {
-                                    let _ = w1.update(cx, |this, cx| {
-                                        this.copy_command_record(id, false, window, cx)
-                                    });
-                                },
-                            ))
-                            .item(
-                                PopupMenuItem::new("Copy details").on_click(
-                                    move |_, window, cx| {
-                                        let _ = w2.update(cx, |this, cx| {
-                                            this.copy_command_record(id, true, window, cx)
-                                        });
-                                    },
-                                ),
-                            )
-                        }
-                    })
-                    .child(
-                        h_flex()
-                            .px_3()
-                            .py_0p5()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_color(muted)
-                                    .flex_none()
-                                    .child(crate::format::clock_time(started)),
-                            )
-                            .child(if ok {
-                                Tag::success()
-                                    .xsmall()
-                                    .child(rec.status.unwrap_or(0).to_string())
-                            } else {
-                                Tag::danger().xsmall().child(
-                                    rec.status
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| "killed".into()),
-                                )
-                            })
-                            .child(div().flex_1().min_w_0().truncate().child(short))
-                            .child(
-                                div()
-                                    .text_color(muted)
-                                    .flex_none()
-                                    .child(format!("{ms} ms")),
-                            ),
-                    )
-                    .when(is_open, |this| {
-                        this.child(
-                            v_flex()
-                                .px_3()
-                                .pb_2()
-                                .gap_1()
-                                .child(div().text_color(muted).child(shell.clone()))
-                                .child(div().text_color(muted).child(format!(
-                                    "started: {}",
-                                    crate::format::full_time(started)
-                                )))
-                                .when_some(rec.cwd.as_ref(), |this, cwd| {
-                                    this.child(
-                                        div()
-                                            .text_color(muted)
-                                            .child(format!("cwd: {}", cwd.display())),
-                                    )
-                                })
-                                .child(
-                                    div()
-                                        .text_color(muted)
-                                        .child(format!("stdout: {} bytes", rec.stdout_len)),
-                                )
-                                .when(!rec.stderr.trim().is_empty(), |this| {
-                                    this.child(
-                                        div()
-                                            .p_2()
-                                            .rounded(cx.theme().radius)
-                                            .bg(cx.theme().muted.opacity(0.4))
-                                            .whitespace_normal()
-                                            .child(rec.stderr.trim().to_string()),
-                                    )
-                                }),
-                        )
+            .font_family(mono)
+            .text_xs()
+            .child(
+                crate::lazy_list::rows(
+                    state.clone(),
+                    cx.processor(move |this, ix: usize, _, cx| {
+                        this.render_command_row(&records[ix], cx)
                     }),
-            );
-        }
-        if records.is_empty() {
-            list = list.child(div().p_3().text_color(muted).child(if failures_only {
-                "No failed commands."
-            } else {
-                "No git commands run yet."
-            }));
-        }
-        list
+                )
+                .size_full(),
+            )
+            .vertical_scrollbar(&state)
+            .into_any_element()
+    }
+
+    /// One row of the git command list.
+    fn render_command_row(&self, rec: &CommandRecord, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let expanded = self.expanded_command;
+
+        let ok = rec.expected;
+        let id = rec.id;
+        let is_open = expanded == Some(id);
+        let shell = rec.as_shell();
+        // Hide the boilerplate prefix in the one-line view.
+        let short = shell
+            .replace(" --no-pager -c color.ui=never -c core.quotePath=false", "")
+            .replace("--no-pager -c color.ui=never -c core.quotePath=false ", "");
+        let ms = rec.duration.as_millis();
+        let started = crate::format::unix_secs(rec.started);
+
+        v_flex()
+            .id(("cmd", id as usize))
+            .test_id(|| format!("command-row:{id}"))
+            .a11y_item(|| short.clone())
+            .cursor_pointer()
+            .hover(|this| this.bg(cx.theme().list_hover))
+            .when(is_open, |this| this.bg(cx.theme().list_active))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.expanded_command = if this.expanded_command == Some(id) {
+                    None
+                } else {
+                    Some(id)
+                };
+                cx.notify();
+            }))
+            .context_menu({
+                let weak = cx.entity().downgrade();
+                move |menu, _, _| {
+                    let (w1, w2) = (weak.clone(), weak.clone());
+                    menu.item(
+                        PopupMenuItem::new("Copy command").on_click(move |_, window, cx| {
+                            let _ = w1.update(cx, |this, cx| {
+                                this.copy_command_record(id, false, window, cx)
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Copy details").on_click(move |_, window, cx| {
+                            let _ = w2.update(cx, |this, cx| {
+                                this.copy_command_record(id, true, window, cx)
+                            });
+                        }),
+                    )
+                }
+            })
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_0p5()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_color(muted)
+                            .flex_none()
+                            .child(crate::format::clock_time(started)),
+                    )
+                    .child(if ok {
+                        Tag::success()
+                            .xsmall()
+                            .child(rec.status.unwrap_or(0).to_string())
+                    } else {
+                        Tag::danger().xsmall().child(
+                            rec.status
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "killed".into()),
+                        )
+                    })
+                    .child(div().flex_1().min_w_0().truncate().child(short))
+                    .child(
+                        div()
+                            .text_color(muted)
+                            .flex_none()
+                            .child(format!("{ms} ms")),
+                    ),
+            )
+            .when(is_open, |this| {
+                this.child(
+                    v_flex()
+                        .px_3()
+                        .pb_2()
+                        .gap_1()
+                        .child(div().text_color(muted).child(shell.clone()))
+                        .child(
+                            div()
+                                .text_color(muted)
+                                .child(format!("started: {}", crate::format::full_time(started))),
+                        )
+                        .when_some(rec.cwd.as_ref(), |this, cwd| {
+                            this.child(
+                                div()
+                                    .text_color(muted)
+                                    .child(format!("cwd: {}", cwd.display())),
+                            )
+                        })
+                        .child(
+                            div()
+                                .text_color(muted)
+                                .child(format!("stdout: {} bytes", rec.stdout_len)),
+                        )
+                        .when(!rec.stderr.trim().is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .p_2()
+                                    .rounded(cx.theme().radius)
+                                    .bg(cx.theme().muted.opacity(0.4))
+                                    .whitespace_normal()
+                                    .child(rec.stderr.trim().to_string()),
+                            )
+                        }),
+                )
+            })
+            .into_any_element()
     }
 
     /// Copy one recorded command: the shell line, or everything the expanded row shows.

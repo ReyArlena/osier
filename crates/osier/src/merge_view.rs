@@ -1204,12 +1204,17 @@ impl Render for MergeView {
                 .h_full()
                 .overflow_hidden()
                 .child(
-                    div().size_full().mt(shift[i]).child(
-                        Editor::new(&self.editors[i])
-                            .readonly(readonly)
-                            .bordered(false)
-                            .size_full(),
-                    ),
+                    div()
+                        .size_full()
+                        .mt(shift[i])
+                        .child(crate::editor_hover::hover_lines(
+                            Editor::new(&self.editors[i])
+                                .readonly(readonly)
+                                .bordered(false)
+                                .size_full(),
+                            &self.editors[i],
+                            cx,
+                        )),
                 )
                 .child(
                     canvas(

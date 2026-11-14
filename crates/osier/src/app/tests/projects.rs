@@ -516,7 +516,7 @@ fn opens_a_repository_and_selects_the_first_change(cx: &mut TestAppContext) {
             project.selection,
             Selection::File {
                 path: "a.txt".into(),
-                area: Area::Unstaged
+                area: Area::Changed
             }
         );
         assert_eq!(osier.diff_files, 1, "diff pane shows the selected file");
@@ -787,4 +787,110 @@ fn scan_dirs_feed_recents_and_filter_and_reorder(cx: &mut TestAppContext) {
             "active follows the moved project"
         );
     });
+}
+
+#[gpui::test]
+fn ui_sidebar_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    // A real repository first (it gets opened below), then plain folders: as many recents as
+    // scanning can bring, more than fit. The sidebar list builds only what is on screen.
+    let first = TempRepo::new();
+    first.commit_file("b.txt", "b\n", "first");
+    let first_name = first
+        .path()
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let dirs = tempfile::tempdir().expect("tempdir");
+    let mut recents = vec![first.path().to_path_buf()];
+    recents.extend((1..30).map(|i| {
+        let p = dirs.path().join(format!("recent-{i:02}"));
+        std::fs::create_dir_all(&p).expect("dir");
+        p
+    }));
+    let h = Harness::open(cx, &repo);
+    h.act(cx, |osier, _, cx| {
+        osier.state.recent.extend(recents.iter().cloned());
+        osier.sidebar_visible = true;
+        cx.notify();
+    });
+    let first_row = format!("sidebar-recent:{first_name}");
+    assert!(h.bounds(cx, &first_row).is_some());
+    assert!(
+        h.bounds(cx, "sidebar-recent:recent-29").is_none(),
+        "rows below the fold are not built"
+    );
+    // Rows still work: a recent row opens its project.
+    h.click(cx, &first_row);
+    assert_eq!(active_name(&h, cx), first_name);
+}
+
+#[gpui::test]
+fn ui_a_background_refresh_keeps_the_ahead_behind_badge(cx: &mut TestAppContext) {
+    // A refresh is quiet work: the sidebar and the switcher keep showing the last known
+    // counts instead of swapping them for a busy marker, and only the status bar names it,
+    // with "Show background tasks" on.
+    let repo = repo_with_upstream(2, false);
+    let mut state = State::default();
+    state.layout.sidebar_visible = true;
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    let arrows = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "sidebar-arrows:0").is_some();
+    let switcher = |h: &Harness, cx: &mut TestAppContext| {
+        h.read(cx, |o, _| o.switch_project_entries().remove(0).arrows)
+    };
+    assert!(arrows(&h, cx), "badge once the status is in");
+    assert_eq!(switcher(&h, cx).as_deref(), Some("↑2"));
+
+    // Mid-refresh (the flag a running refresh holds until its result lands).
+    h.act(cx, |o, _, cx| {
+        o.projects[0].loading = true;
+        cx.notify();
+    });
+    assert!(arrows(&h, cx), "badge stays during a refresh");
+    assert_eq!(switcher(&h, cx).as_deref(), Some("↑2"));
+    let labels = |h: &Harness, cx: &mut TestAppContext, on: bool| {
+        h.act(cx, move |o, _, _| {
+            o.settings.appearance.show_background_tasks = on
+        });
+        h.read(cx, |o, _| o.background_labels())
+    };
+    assert!(!labels(&h, cx, false).contains(&"Refreshing".to_string()));
+    assert!(labels(&h, cx, true).contains(&"Refreshing".to_string()));
+
+    // A real refresh ends with the badge still there.
+    h.act(cx, |o, _, cx| o.refresh_active(cx));
+    h.read(cx, |o, _| assert!(!o.projects[0].loading));
+    assert!(arrows(&h, cx));
+}
+
+#[gpui::test]
+fn a_refresh_redraws_at_its_start_only_when_the_status_bar_shows_it(cx: &mut TestAppContext) {
+    // A notify on `Osier` redraws every pane. The start of a refresh only changes the status
+    // bar's "Refreshing" (with "Show background tasks" on); its result always redraws.
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    let h = Harness::open(cx, &repo);
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = count.clone();
+    let _watch = cx.update(|cx| cx.observe(&h.view, move |_, _| seen.set(seen.get() + 1)));
+    for quiet in [false, true] {
+        h.act(cx, |o, _, _| {
+            o.settings.appearance.show_background_tasks = quiet
+        });
+        count.set(0);
+        // Not `act`: that would also run the refresh to its result.
+        cx.update(|cx| h.view.update(cx, |o, cx| o.refresh_active(cx)));
+        assert_eq!(
+            count.get(),
+            usize::from(quiet),
+            "start, background tasks {quiet}"
+        );
+        cx.run_until_parked();
+        assert!(
+            count.get() > usize::from(quiet),
+            "result, background tasks {quiet}"
+        );
+    }
 }

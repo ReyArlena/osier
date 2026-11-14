@@ -559,6 +559,7 @@ impl Osier {
             Tab::Branches => {
                 let rows = self.ref_rows();
                 self.ref_selected = step(&rows, self.ref_selected.as_ref(), delta);
+                self.branches_list.reveal_selection();
             }
             Tab::Stashes => {
                 let rows: Vec<String> = self
@@ -567,6 +568,7 @@ impl Osier {
                     .map(|s| s.stashes.iter().map(|s| s.oid.clone()).collect())
                     .unwrap_or_default();
                 if let Some(oid) = step(&rows, self.stash_selected.as_ref(), delta) {
+                    self.stashes_list.reveal_selection();
                     self.select_stash(oid, cx);
                     return;
                 }

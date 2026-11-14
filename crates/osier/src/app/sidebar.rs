@@ -1,6 +1,8 @@
 //! The project sidebar: scanning, the filter box and its suggestions, the pinned and recent
 //! lists, reordering.
 
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use gpui_kit::*;
@@ -13,12 +15,15 @@ use crate::sidebar_query::{self, Query, RowStatus};
 impl Osier {
     /// Scan the configured directories for repositories, off the UI thread. The last result
     /// for these directories (kept on disk, `cached_list.rs`) shows at once, so the sidebar
-    /// is filled at startup before the scan is back; the fresh result replaces it.
+    /// is filled at startup before the scan is back; the fresh result replaces it. The
+    /// watch on the scan directories is built again too, for the folders as they are now.
     pub(crate) fn rescan_projects(&mut self, cx: &mut Context<Self>) {
         use std::hash::{Hash, Hasher};
         let dirs = self.settings.projects.scan_dirs.clone();
         if dirs.is_empty() {
             self.scan_key = None;
+            self.scan_watch = None;
+            self.scan_watch_key = None;
             return;
         }
         let depth = self.settings.projects.scan_depth.unwrap_or(1);
@@ -27,6 +32,7 @@ impl Osier {
         (&dirs, depth).hash(&mut hasher);
         let key = format!("{:016x}", hasher.finish());
         self.scan_key = Some(key.clone());
+        self.watch_scan_dirs(&key, &dirs, depth, cx);
         self.use_list(
             |o| &mut o.scan_cache,
             &key,
@@ -34,6 +40,37 @@ impl Osier {
             std::sync::Arc::new(move || Ok(osier_config::scan::scan(&dirs, depth))),
             cx,
         );
+    }
+
+    /// Start watching the scan directories for `key` (directories and depth), unless that
+    /// watch is already there: other settings changes rescan without watching again. Built
+    /// off the UI thread; the old watch stays until the new one replaces it.
+    fn watch_scan_dirs(&mut self, key: &str, dirs: &[PathBuf], depth: u8, cx: &mut Context<Self>) {
+        if cfg!(test) || self.scan_watch_key.as_deref() == Some(key) {
+            return;
+        }
+        self.scan_watch_key = Some(key.to_string());
+        let (key, dirs) = (key.to_string(), dirs.to_vec());
+        self.in_background_quiet(
+            move || crate::scan_watch::ScanWatch::new(&dirs, depth),
+            move |this, watch, _| {
+                // Directories changed again while this one was built: a newer build follows.
+                if this.scan_watch_key.as_deref() == Some(key.as_str()) {
+                    this.scan_watch = watch;
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Rescan when the scan directories changed on disk (a repository cloned, created or
+    /// deleted) and things have settled, and watch again: the folders to watch may have
+    /// changed too. Polled by the tick loop.
+    pub(crate) fn poll_scan_watch(&mut self, cx: &mut Context<Self>) {
+        if self.scan_watch.as_ref().is_some_and(|w| w.take_due()) {
+            self.scan_watch_key = None;
+            self.rescan_projects(cx);
+        }
     }
 
     /// Repositories found in the scan directories (the last scan, or its saved copy).
@@ -112,24 +149,30 @@ impl Osier {
 
     /// Recents and scanned repositories that are not open or pinned, with their scan
     /// directory when one provides them.
+    ///
+    /// Runs on every redraw of the sidebar with hundreds of scanned repositories, so
+    /// membership is checked through hash sets: comparing paths walks their components, and
+    /// checking each repository against every listed one was most of a sidebar hover's time
+    /// (5.5 ms of a hover with ~480 projects, 2026-11-11).
     pub(crate) fn recent_matching(&self, query: &Query) -> Vec<(PathBuf, Option<PathBuf>)> {
+        // Keyed by the raw path bytes: hashing a `Path` walks its components too. The paths
+        // all come from Osier's own state and scans, so they are spelled alike.
+        let open: HashSet<&OsStr> = self
+            .state
+            .open_projects
+            .iter()
+            .map(|p| p.as_os_str())
+            .collect();
+        let pinned: HashSet<&OsStr> = self.state.pinned.iter().map(|p| p.as_os_str()).collect();
+        // Recents first, then scanned repositories that are not recents already.
+        let mut seen: HashSet<&OsStr> = HashSet::new();
         let mut out: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
-        for p in self.state.recent_not_open() {
-            if self.state.is_pinned(p) {
+        for p in self.state.recent.iter().chain(self.scanned()) {
+            let path = p.as_os_str();
+            if open.contains(path) || pinned.contains(path) || !seen.insert(path) {
                 continue;
             }
             if query.matches(p, self.other_row_status(p)) {
-                let provider =
-                    osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
-                out.push((p.clone(), provider));
-            }
-        }
-        for p in self.scanned() {
-            if !self.state.open_projects.contains(p)
-                && !self.state.is_pinned(p)
-                && !out.iter().any(|(q, _)| q == p)
-                && query.matches(p, self.other_row_status(p))
-            {
                 let provider =
                     osier_config::scan::provider(&self.settings.projects.scan_dirs, p).cloned();
                 out.push((p.clone(), provider));

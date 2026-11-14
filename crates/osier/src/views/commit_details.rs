@@ -1,8 +1,9 @@
 //! Commit details under the Log (toggle: ctrl-shift-d or the header button): the message on
-//! the left, hash, author, dates, parents, refs and the branches containing it on the right.
+//! the left, refs, hash, author, dates, parents and the branches containing it on the right.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -10,6 +11,9 @@ use osier_git::log::Commit;
 
 use crate::app::Osier;
 use crate::test_ids::TestId as _;
+
+/// The details column's width until its divider is dragged.
+const DETAILS_META_WIDTH: f32 = 300.;
 
 impl Osier {
     pub(crate) fn toggle_commit_details(&mut self, cx: &mut Context<Self>) {
@@ -51,7 +55,11 @@ impl Osier {
     }
 
     /// The panel's content for the selected commit.
-    pub(crate) fn render_commit_details(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_commit_details(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let commit = self
             .active_project()
             .and_then(|p| p.selected_commit.and_then(|ix| p.commit_at(ix)))
@@ -80,116 +88,157 @@ impl Osier {
             });
         }
         let body = commit.body.trim().to_string();
-        h_flex()
+        let meta_width = self
+            .state
+            .layout
+            .log_details_meta_width
+            .unwrap_or(DETAILS_META_WIDTH);
+        div()
             .test_id("commit-details")
             .size_full()
-            .items_start()
             .bg(bg)
             .child(
-                // Left: the message.
-                v_flex()
-                    .id("commit-details-message")
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .overflow_y_scroll()
-                    .p_3()
-                    .gap_2()
-                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(
-                        if commit.subject.is_empty() {
-                            "(no subject)".to_string()
-                        } else {
-                            commit.subject.clone()
-                        },
-                    ))
-                    .when(!body.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_sm()
-                                .text_color(muted)
-                                .whitespace_normal()
-                                .children(
-                                    body.lines()
-                                        .map(|l| div().min_h(px(16.)).child(l.to_string())),
-                                ),
-                        )
-                    }),
-            )
-            .child(
-                // Right: who, when, where.
-                v_flex()
-                    .id("commit-details-meta")
-                    .w(px(300.))
-                    .flex_none()
-                    .h_full()
-                    .overflow_y_scroll()
-                    .border_l_1()
-                    .border_color(border)
-                    .p_3()
-                    .gap_2()
-                    .text_sm()
-                    .child(self.meta_hash(&commit, cx))
-                    .child(meta_row(
-                        "Author",
-                        format!("{} <{}>", commit.author_name, commit.author_email),
-                        muted,
-                    ))
-                    .child({
-                        let (name, value) = author_date(commit.authored_at, commit.committed_at);
-                        meta_row(name, value, muted).test_id(|| format!("commit-date:{name}"))
-                    })
-                    .when(
-                        commit.committer_name != commit.author_name
-                            || commit.committer_email != commit.author_email,
-                        |this| {
-                            this.child(meta_row(
-                                "Committer",
-                                format!("{} <{}>", commit.committer_name, commit.committer_email),
-                                muted,
-                            ))
-                        },
+                // The message and the details beside it, split by a divider that can be dragged; the
+                // details column keeps its dragged width as the panel resizes.
+                h_resizable("commit-details-split")
+                    .on_resize(cx.listener(|this, state: &Entity<ResizableState>, _, cx| {
+                        if let Some(w) = state.read(cx).sizes().get(1) {
+                            this.state.layout.log_details_meta_width = Some(f32::from(*w));
+                            this.state_dirty = true;
+                        }
+                    }))
+                    .child(
+                        resizable_panel().size_range(px(160.)..px(4000.)).child(
+                            // Left: the message.
+                            v_flex()
+                                .id("commit-details-message")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .p_3()
+                                .gap_2()
+                                .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(
+                                    if commit.subject.is_empty() {
+                                        "(no subject)".to_string()
+                                    } else {
+                                        commit.subject.clone()
+                                    },
+                                ))
+                                .when(!body.is_empty(), |this| {
+                                    this.child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(muted)
+                                            .whitespace_normal()
+                                            .children(body.lines().map(|l| {
+                                                div().min_h(px(16.)).child(l.to_string())
+                                            })),
+                                    )
+                                }),
+                        ),
                     )
-                    .when(commit.committed_at != commit.authored_at, |this| {
-                        this.child(
-                            meta_row(
-                                "Committed",
-                                crate::format::full_time_seconds(commit.committed_at),
-                                muted,
-                            )
-                            .test_id("commit-date:Committed"),
-                        )
-                    })
-                    .when(!commit.parents.is_empty(), |this| {
-                        this.child(self.meta_parents(&commit, cx))
-                    })
-                    .when(!commit.refs.is_empty(), |this| {
-                        this.child(
-                            v_flex().gap_1().child(label("Refs", muted)).child(
-                                h_flex()
-                                    .flex_wrap()
-                                    .gap_1()
-                                    .children(commit.refs.iter().map(|r| {
-                                        let is_head = r.starts_with("HEAD");
-                                        let is_tag = r.starts_with("tag: ");
-                                        let name = r
-                                            .trim_start_matches("HEAD -> ")
-                                            .trim_start_matches("tag: ")
-                                            .to_string();
-                                        super::log_tab::ref_tag(name, is_head, is_tag, cx)
-                                    })),
+                    .child(
+                        resizable_panel()
+                            .size(px(meta_width))
+                            .size_range(px(200.)..px(900.))
+                            .fixed()
+                            .child(
+                                // Right: who, when, where.
+                                v_flex()
+                                    .id("commit-details-meta")
+                                    .test_id("commit-details-meta")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .border_l_1()
+                                    .border_color(border)
+                                    .p_3()
+                                    .gap_2()
+                                    .text_sm()
+                                    // Refs first: where the commit sits matters most at a glance.
+                                    .when(!commit.refs.is_empty(), |this| {
+                                        this.child(
+                                            v_flex()
+                                                .test_id("commit-refs")
+                                                .gap_1()
+                                                .child(label("Refs", muted))
+                                                .child(h_flex().flex_wrap().gap_1().children(
+                                                    commit.refs.iter().enumerate().map(|(j, r)| {
+                                                        let is_head = r.starts_with("HEAD");
+                                                        let is_tag = r.starts_with("tag: ");
+                                                        let name = r
+                                                            .trim_start_matches("HEAD -> ")
+                                                            .trim_start_matches("tag: ");
+                                                        super::log_tab::ref_badge(
+                                                            ("commit-ref", j),
+                                                            name,
+                                                            is_head,
+                                                            is_tag,
+                                                            px(super::log_tab::REF_TEXT_MAX),
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    }),
+                                                )),
+                                        )
+                                    })
+                                    .child(self.meta_hash(&commit, cx))
+                                    .child(meta_row(
+                                        "Author",
+                                        format!("{} <{}>", commit.author_name, commit.author_email),
+                                        muted,
+                                    ))
+                                    .child({
+                                        let (name, value) =
+                                            author_date(commit.authored_at, commit.committed_at);
+                                        meta_row(name, value, muted)
+                                            .test_id(|| format!("commit-date:{name}"))
+                                    })
+                                    .when(
+                                        commit.committer_name != commit.author_name
+                                            || commit.committer_email != commit.author_email,
+                                        |this| {
+                                            this.child(meta_row(
+                                                "Committer",
+                                                format!(
+                                                    "{} <{}>",
+                                                    commit.committer_name, commit.committer_email
+                                                ),
+                                                muted,
+                                            ))
+                                        },
+                                    )
+                                    .when(commit.committed_at != commit.authored_at, |this| {
+                                        this.child(
+                                            meta_row(
+                                                "Committed",
+                                                crate::format::full_time_seconds(
+                                                    commit.committed_at,
+                                                ),
+                                                muted,
+                                            )
+                                            .test_id("commit-date:Committed"),
+                                        )
+                                    })
+                                    .when(!commit.parents.is_empty(), |this| {
+                                        this.child(self.meta_parents(&commit, cx))
+                                    })
+                                    .child(meta_row(
+                                        "In branches",
+                                        match &branches {
+                                            None => "…".to_string(),
+                                            Some(b) if b.is_empty() => {
+                                                "None (not on any branch)".to_string()
+                                            }
+                                            Some(b) if b.len() == 1 => {
+                                                format!("1 branch: {}", b[0])
+                                            }
+                                            Some(b) => {
+                                                format!("{} branches: {}", b.len(), b.join(", "))
+                                            }
+                                        },
+                                        muted,
+                                    )),
                             ),
-                        )
-                    })
-                    .child(meta_row(
-                        "In branches",
-                        match &branches {
-                            None => "…".to_string(),
-                            Some(b) if b.is_empty() => "None (not on any branch)".to_string(),
-                            Some(b) if b.len() == 1 => format!("1 branch: {}", b[0]),
-                            Some(b) => format!("{} branches: {}", b.len(), b.join(", ")),
-                        },
-                        muted,
-                    )),
+                    ),
             )
             .into_any_element()
     }

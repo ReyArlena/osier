@@ -90,10 +90,12 @@ impl Osier {
                 paths: vec![path.to_string()],
                 untracked: vec![path.to_string()],
             },
-            Area::Staged => PatchSource::Staged {
+            // All of a changed file's changes against HEAD, staged or not.
+            Area::Changed => PatchSource::Worktree {
                 paths: vec![path.to_string()],
+                untracked: Vec::new(),
             },
-            Area::Unstaged | Area::Conflicted => PatchSource::Unstaged {
+            Area::Conflicted => PatchSource::Unstaged {
                 paths: vec![path.to_string()],
             },
         }
@@ -386,10 +388,11 @@ impl Osier {
                     name.clone(),
                     text,
                     move |this, _, window, cx| {
+                        let skip_unchanged = !this.settings.git.rollback_always_rewrite;
                         this.run_op(
                             format!("Shelved \"{name}\""),
                             move |repo| {
-                                discard::discard_all(repo, &t)?;
+                                discard::discard_all(repo, &t, skip_unchanged)?;
                                 discard::trash_untracked(repo, &u)?;
                                 Ok(())
                             },

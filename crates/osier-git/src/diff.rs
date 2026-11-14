@@ -50,7 +50,7 @@ pub struct Line {
     pub new_no: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineKind {
     Context,
     Added,
@@ -84,6 +84,8 @@ pub enum DiffTarget {
     Staged,
     /// Working tree against HEAD.
     WorktreeToHead,
+    /// Working tree against a commit or tree (the empty tree on an unborn branch).
+    WorktreeTo(String),
     /// Changes introduced by one commit (against its first parent, or empty tree for a root).
     Commit(String),
     /// Arbitrary `from..to` (two-dot: everything that differs between the two trees).
@@ -103,6 +105,11 @@ pub struct DiffOptions {
     /// `-b`: ignore changes in the amount of whitespace (and at line ends).
     pub ignore_space_change: bool,
     pub detect_renames: bool,
+    /// The paths are the two sides of a rename already known (from the status): have git pair
+    /// them however much the file changed since, where its usual 50% similarity rule would
+    /// report a small or heavily edited file as one deleted and one added. Only for a diff
+    /// limited to those two paths. Files with nothing at all in common still come apart.
+    pub pair_renames: bool,
 }
 
 impl DiffOptions {
@@ -114,6 +121,7 @@ impl DiffOptions {
             ignore_whitespace: false,
             ignore_space_change: false,
             detect_renames: true,
+            pair_renames: false,
         }
     }
 
@@ -144,6 +152,7 @@ fn args_for(options: &DiffOptions) -> Vec<String> {
                 DiffTarget::Unstaged => {}
                 DiffTarget::Staged => args.push("--cached".into()),
                 DiffTarget::WorktreeToHead => args.push("HEAD".into()),
+                DiffTarget::WorktreeTo(rev) => args.push(rev.clone()),
                 DiffTarget::Range { from, to } => args.push(format!("{from}..{to}")),
                 DiffTarget::SinceMergeBase { from, to } => args.push(format!("{from}...{to}")),
                 DiffTarget::Commit(_) => {}
@@ -157,7 +166,9 @@ fn args_for(options: &DiffOptions) -> Vec<String> {
     args.push("--src-prefix=a/".into());
     args.push("--dst-prefix=b/".into());
     args.push(format!("-U{}", options.context_lines));
-    args.push(if options.detect_renames {
+    args.push(if options.detect_renames && options.pair_renames {
+        "-M1%".into()
+    } else if options.detect_renames {
         "-M".into()
     } else {
         "--no-renames".into()

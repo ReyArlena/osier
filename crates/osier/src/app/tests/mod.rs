@@ -59,7 +59,7 @@ impl Harness {
         let sink = Arc::new(UiCommandSink::default());
         let runner = isolated(sink.clone());
         let (handle, view) = cx.update(|cx| {
-            crate::cached_root::open_window(WindowOptions::default(), cx, |window, cx| {
+            crate::pane::open_window(WindowOptions::default(), cx, |window, cx| {
                 cx.new(|cx| {
                     Osier::new(
                         paths,

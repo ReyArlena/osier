@@ -68,12 +68,22 @@ pub struct WindowGeometry {
 pub struct Layout {
     pub sidebar_visible: bool,
     pub sidebar_width: Option<f32>,
+    /// Window width when the sidebar was dragged: a narrower window shrinks a wide sidebar
+    /// in proportion (never below the standard width).
+    pub sidebar_window_width: Option<f32>,
+    /// The center column's share (0..1) of the space beside the sidebar, as dragged. The
+    /// center column and the diff pane keep this split as the window resizes.
+    pub center_ratio: Option<f32>,
+    /// The center column's width in pixels, from versions before `center_ratio`: used once,
+    /// to start from, until the divider is dragged.
     pub center_width: Option<f32>,
     pub command_log_visible: bool,
     pub command_log_height: Option<f32>,
     /// The commit details panel under the Log is shown unless hidden.
     pub log_details_hidden: bool,
     pub log_details_height: Option<f32>,
+    /// Width of the commit details' right column (refs, hash, author, dates), as dragged.
+    pub log_details_meta_width: Option<f32>,
 }
 
 const MAX_RECENT: usize = 30;

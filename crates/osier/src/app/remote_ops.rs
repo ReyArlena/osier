@@ -5,8 +5,8 @@ use crate::app_dialog::AppDialogExt as _;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+use crate::checkbox::Checkbox;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Sizable as _, v_flex};

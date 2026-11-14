@@ -455,10 +455,63 @@ fn ui_context_menu_keys_fire_on_the_selected_row(cx: &mut TestAppContext) {
     repo.write("notes.tmp", "x\n");
     let h = Harness::open(cx, &repo);
     bind(cx, &[("row_add_to_gitignore", &["i"])]);
-    h.click(cx, "change-row:untracked:notes.tmp");
+    h.click(cx, "change-row:unversioned:notes.tmp");
     h.keys(cx, "i");
     let gitignore = std::fs::read_to_string(repo.path().join(".gitignore")).unwrap_or_default();
     assert_eq!(gitignore, "/notes.tmp\n");
+}
+
+#[gpui::test]
+fn ui_branches_list_draws_rows_on_screen_and_follows_the_keyboard(cx: &mut TestAppContext) {
+    use crate::app::row_actions::RefRow;
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    for i in 0..80 {
+        repo.git(["branch", &format!("b-{i:02}")]);
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-branches");
+
+    // Only rows on screen are built.
+    assert!(h.bounds(cx, "branch-row:b-00").is_some());
+    assert!(h.bounds(cx, "branch-row:b-79").is_none());
+
+    // Walking down past the bottom scrolls the selected row into view.
+    h.click(cx, "branch-row:b-00");
+    h.keys(cx, &["down"; 80].join(" "));
+    let selected = h.read(cx, |o, _| match &o.ref_selected {
+        Some(RefRow::Branch { name, .. }) => name.clone(),
+        other => panic!("selected {other:?}"),
+    });
+    assert_ne!(selected, "b-00");
+    assert!(
+        h.bounds(cx, &format!("branch-row:{selected}")).is_some(),
+        "{selected} is drawn"
+    );
+}
+
+#[gpui::test]
+fn ui_stash_list_draws_rows_on_screen_and_follows_the_keyboard(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    for i in 0..40 {
+        repo.write("a.txt", &format!("{i}\n"));
+        repo.git(["stash", "-q"]);
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-stashes");
+    assert!(h.bounds(cx, "stash-row:0").is_some());
+    assert!(
+        h.bounds(cx, "stash-row:39").is_none(),
+        "rows below the fold are not built"
+    );
+
+    h.click(cx, "stash-row:0");
+    h.keys(cx, &["down"; 39].join(" "));
+    assert!(
+        h.bounds(cx, "stash-row:39").is_some(),
+        "the selected stash scrolled into view"
+    );
 }
 
 #[gpui::test]

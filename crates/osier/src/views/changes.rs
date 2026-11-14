@@ -1,16 +1,18 @@
+use crate::checkbox::Checkbox;
+use crate::fade::{Behind, EndText as _};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::tag::Tag;
+use gpui_kit::component::tag::{Tag, TagVariant};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use osier_git::staging::{Check, file_check};
 use osier_git::status::StatusEntry;
 
 use crate::a11y::{A11yName as _, A11yRow as _};
@@ -20,40 +22,68 @@ use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
 use osier_git::ops::integrate::ConflictSide;
 
-fn status_tag(entry: &StatusEntry, area: Area) -> Tag {
+/// The letter tag for a change (`status_letter`).
+fn status_tag(entry: &StatusEntry, area: Area, cx: &App) -> Tag {
     let code = match area {
-        Area::Staged => entry.index,
-        Area::Unstaged => entry.worktree,
+        // What the file is against HEAD: the index's change when there is one (a new file
+        // stays "A" while it is edited further), else the working tree's.
+        Area::Changed if entry.index != '.' => entry.index,
+        Area::Changed => entry.worktree,
         Area::Untracked => '?',
         Area::Conflicted => 'U',
     };
-    match code {
-        'A' => Tag::success().xsmall().child("A"),
-        '?' => Tag::success().xsmall().child("?"),
-        'D' => Tag::danger().xsmall().child("D"),
-        'R' => Tag::info().xsmall().child("R"),
-        'C' => Tag::info().xsmall().child("C"),
-        'U' => Tag::danger().xsmall().child("U"),
-        'T' => Tag::warning().xsmall().child("T"),
-        _ => Tag::warning().xsmall().child("M"),
-    }
+    status_letter(code, cx)
+}
+
+/// The coloured tag for a git status letter, the same in the Changes and Files tabs: added
+/// and untracked green, deleted and conflicted red, renamed and copied blue, modified and
+/// type-changed yellow (anything else too, shown as "M"). In the monospace font, so every
+/// letter's box is the same width and the names after them line up.
+pub(crate) fn status_letter(code: char, cx: &App) -> Tag {
+    let (variant, letter) = status_look(code);
+    Tag::new()
+        .with_variant(variant)
+        .xsmall()
+        .font_family(cx.theme().mono_font_family.clone())
+        .child(letter.to_string())
+}
+
+/// The colour and letter `status_letter` shows for a git status letter.
+fn status_look(code: char) -> (TagVariant, char) {
+    let variant = match code {
+        'A' | '?' => TagVariant::Success,
+        'D' | 'U' => TagVariant::Danger,
+        'R' | 'C' => TagVariant::Info,
+        _ => TagVariant::Warning,
+    };
+    let letter = match code {
+        'A' | '?' | 'D' | 'U' | 'R' | 'C' | 'T' => code,
+        _ => 'M',
+    };
+    (variant, letter)
 }
 
 /// Height of every row in the Changes list (headings and changes alike).
 const CHANGE_ROW_H: f32 = 28.;
 
-/// A row of the Changes list.
+/// Left padding of a change row: the heading's padding (12px) plus one checkbox width
+/// (16px), so a file's checkbox starts where the heading's ends and reads as its sub-item.
+const CHANGE_INDENT: f32 = 28.;
+
+/// A row of the Changes list. `key` names the group in test ids (`conflicts`, `changes`,
+/// `unversioned`).
 #[derive(Clone, Copy)]
 enum ChangeRow {
     Heading {
         area: Area,
         title: &'static str,
+        key: &'static str,
         count: usize,
     },
     /// The `ix`th change of `area`.
     Entry {
         area: Area,
-        title: &'static str,
+        key: &'static str,
         ix: usize,
     },
 }
@@ -62,9 +92,29 @@ enum ChangeRow {
 fn area_slot(area: Area) -> usize {
     match area {
         Area::Conflicted => 0,
-        Area::Staged => 1,
-        Area::Unstaged => 2,
-        Area::Untracked => 3,
+        Area::Changed => 1,
+        Area::Untracked => 2,
+    }
+}
+
+/// Above this many, ticking "Unversioned Files" asks first: a forgotten build folder can hold
+/// thousands of files.
+pub(crate) const ADD_ALL_CONFIRM: usize = 100;
+
+/// The tri-state of a group's checkbox from its files' checks.
+fn group_check(checks: impl Iterator<Item = Option<Check>>) -> Check {
+    let (mut staged, mut unstaged) = (false, false);
+    for c in checks {
+        match c {
+            Some(Check::Staged) => staged = true,
+            Some(Check::Partial) => return Check::Partial,
+            _ => unstaged = true,
+        }
+    }
+    match (staged, unstaged) {
+        (true, false) => Check::Staged,
+        (true, true) => Check::Partial,
+        _ => Check::Unstaged,
     }
 }
 
@@ -81,8 +131,7 @@ impl Osier {
         };
         let entries: Vec<&StatusEntry> = match area {
             Area::Conflicted => status.conflicted().collect(),
-            Area::Staged => status.staged().collect(),
-            Area::Unstaged => status.unstaged().collect(),
+            Area::Changed => status.changed().collect(),
             Area::Untracked => status.untracked().collect(),
         };
         entries.into_iter().map(|e| e.path.clone()).collect()
@@ -107,25 +156,34 @@ impl Osier {
         };
         let status = &snapshot.status;
         let conflicted: Vec<&StatusEntry> = status.conflicted().collect();
-        let staged: Vec<&StatusEntry> = status.staged().collect();
-        let unstaged: Vec<&StatusEntry> = status.unstaged().collect();
+        let changed: Vec<&StatusEntry> = status.changed().collect();
         let untracked: Vec<&StatusEntry> = status.untracked().collect();
-        let total = conflicted.len() + staged.len() + unstaged.len() + untracked.len();
+        let staged_n = status.staged().count();
+        let total = conflicted.len() + changed.len() + untracked.len();
         let muted = cx.theme().muted_foreground;
 
         // One row per group heading and per change, in a virtualised list: only the rows
         // on screen are built each frame, so a big untracked folder or a mass rename stays
         // cheap. All rows share one height (`uniform_list` measures the first one).
         let mut rows: Vec<ChangeRow> = Vec::new();
-        for (area, title, count) in [
-            (Area::Conflicted, "Conflicts", conflicted.len()),
-            (Area::Staged, "Staged", staged.len()),
-            (Area::Unstaged, "Unstaged", unstaged.len()),
-            (Area::Untracked, "Untracked", untracked.len()),
+        for (area, title, key, count) in [
+            (Area::Conflicted, "Conflicts", "conflicts", conflicted.len()),
+            (Area::Changed, "Changes", "changes", changed.len()),
+            (
+                Area::Untracked,
+                "Unversioned Files",
+                "unversioned",
+                untracked.len(),
+            ),
         ] {
             if count > 0 {
-                rows.push(ChangeRow::Heading { area, title, count });
-                rows.extend((0..count).map(|ix| ChangeRow::Entry { area, title, ix }));
+                rows.push(ChangeRow::Heading {
+                    area,
+                    title,
+                    key,
+                    count,
+                });
+                rows.extend((0..count).map(|ix| ChangeRow::Entry { area, key, ix }));
             }
         }
         let rows = std::rc::Rc::new(rows);
@@ -167,15 +225,30 @@ impl Osier {
                                 .map(|p| p.selection.clone())
                                 .unwrap_or_default();
                             // The entries of each area, in display order (cheap: no copies).
-                            let lists: [Vec<&StatusEntry>; 4] = [
+                            let lists: [Vec<&StatusEntry>; 3] = [
                                 status.conflicted().collect(),
-                                status.staged().collect(),
-                                status.unstaged().collect(),
+                                status.changed().collect(),
                                 status.untracked().collect(),
                             ];
                             range
                                 .map(|row_ix| match rows[row_ix] {
-                                    ChangeRow::Heading { area, title, count } => {
+                                    ChangeRow::Heading {
+                                        area,
+                                        title,
+                                        key,
+                                        count,
+                                    } => {
+                                        let check = match area {
+                                            Area::Changed => group_check(
+                                                lists[1].iter().map(|e| file_check(e)),
+                                            ),
+                                            _ => Check::Unstaged,
+                                        };
+                                        let files = if count == 1 {
+                                            "1 file".to_string()
+                                        } else {
+                                            format!("{count} files")
+                                        };
                 h_flex()
                     .w_full()
                     .h(px(CHANGE_ROW_H))
@@ -186,43 +259,67 @@ impl Osier {
                     .text_xs()
                     .font_medium()
                     .text_color(muted)
+                    .when(area != Area::Conflicted, |this| {
+                        this.child(
+                            Checkbox::new(SharedString::from(format!("check-group-{key}")))
+                                .test_id(|| format!("change-check-group:{key}"))
+                                .a11y_name(|| match area {
+                                    Area::Untracked => "Add all unversioned files".to_string(),
+                                    _ if check == Check::Staged => "Unstage all changes".to_string(),
+                                    _ => "Stage all changes".to_string(),
+                                })
+                                .small()
+                                .checked(check == Check::Staged)
+                                .indeterminate(check == Check::Partial)
+                                .on_click(cx.listener(move |this, checked: &bool, window, cx| {
+                                    let paths = this.area_paths(area);
+                                    if !*checked {
+                                        this.unstage_paths(paths, window, cx);
+                                    } else if area == Area::Untracked
+                                        && paths.len() > ADD_ALL_CONFIRM
+                                    {
+                                        let n = paths.len();
+                                        this.confirm(
+                                            "Add all unversioned files?",
+                                            format!(
+                                                "{n} unversioned files will be added to git. \
+                                                 Check that no build output or other generated \
+                                                 files are among them."
+                                            ),
+                                            "Add all",
+                                            false,
+                                            move |this, window, cx| {
+                                                this.stage_paths(paths.clone(), window, cx)
+                                            },
+                                            window,
+                                            cx,
+                                        );
+                                    } else {
+                                        this.stage_paths(paths, window, cx);
+                                    }
+                                })),
+                        )
+                    })
                     .child(title)
-                    .child(div().child(count.to_string()))
-                    .child(div().flex_1())
-                    .when(area == Area::Staged, |this| {
-                        this.child(
-                            Button::new("unstage-group")
-                                .test_id("unstage-group")
-                                .ghost()
-                                .xsmall()
-                                .label("Unstage all")
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    let paths = this.area_paths(area);
-                                    this.unstage_paths(paths, window, cx)
-                                })),
-                        )
-                    })
-                    .when(matches!(area, Area::Unstaged | Area::Untracked), |this| {
-                        this.child(
-                            Button::new(SharedString::from(format!("stage-group-{title}")))
-                                .ghost()
-                                .xsmall()
-                                .label("Stage all")
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    let paths = this.area_paths(area);
-                                    this.stage_paths(paths, window, cx)
-                                })),
-                        )
-                    })
+                    .child(div().font_normal().child(files))
                                         .into_any_element()
                                     }
-                                    ChangeRow::Entry { area, title, ix } => {
+                                    ChangeRow::Entry { area, key, ix } => {
                                         let entry = lists[area_slot(area)][ix];
                                         let has_markers = this
                                             .active_project()
                                             .and_then(|p| p.snapshot.as_ref())
                                             .is_some_and(|s| s.conflict_markers.contains(&entry.path));
                 let selected = matches!(&selection, Selection::File { path, area: a } if path == &entry.path && *a == area);
+                let check = match area {
+                    Area::Changed => file_check(entry).unwrap_or(Check::Unstaged),
+                    _ => Check::Unstaged,
+                };
+                let partial = (check == Check::Partial)
+                    .then(|| this.active_project()
+                        .and_then(|p| p.snapshot.as_ref())
+                        .and_then(|s| s.partial_changes.get(&entry.path).copied()))
+                    .flatten();
                 let path = entry.path.clone();
                 let display = match &entry.orig_path {
                     Some(old) => format!("{old} → {}", entry.path),
@@ -232,13 +329,28 @@ impl Osier {
                 let toggle_path = path.clone();
                 let discard_path = path.clone();
                     h_flex()
-                        .id((title, ix))
+                        .id((key, ix))
                         .w_full()
                     .h(px(CHANGE_ROW_H))
-                        .test_id(|| format!("change-row:{}:{}", title.to_lowercase(), entry.path))
-                        .a11y_row(|| format!("{display}, {}", title.to_lowercase()), selected)
+                        .test_id(|| format!("change-row:{key}:{}", entry.path))
+                        .a11y_row(
+                            || {
+                                let state = match (area, check) {
+                                    (Area::Conflicted, _) => "conflicted",
+                                    (Area::Untracked, _) => "unversioned",
+                                    (_, Check::Staged) => "staged",
+                                    (_, Check::Partial) => "partly staged",
+                                    (_, Check::Unstaged) => "not staged",
+                                };
+                                format!("{display}, {state}")
+                            },
+                            selected,
+                        )
                         .group("row")
-                        .px_3()
+                        // Indented past the heading's checkbox, so the files read as its
+                        // sub-items.
+                        .pl(px(CHANGE_INDENT))
+                        .pr_3()
                         .py_1()
                         .gap_2()
                         .items_center()
@@ -399,7 +511,7 @@ impl Osier {
                                 let discard = if area == Area::Untracked {
                                     "Move to trash…"
                                 } else {
-                                    "Discard changes…"
+                                    "Roll back changes…"
                                 };
                                 Osier::ignore_menu(menu.separator(), w9, path, row)
                                     .separator()
@@ -415,13 +527,18 @@ impl Osier {
                             }
                         })
                         .child(
-                            Checkbox::new(SharedString::from(format!("stage-{title}-{ix}")))
-                                .test_id(|| {
-                                    format!("change-stage:{}:{}", title.to_lowercase(), entry.path)
+                            Checkbox::new(SharedString::from(format!("stage-{key}-{ix}")))
+                                .test_id(|| format!("change-stage:{key}:{}", entry.path))
+                                .a11y_name(|| {
+                                    if check == Check::Staged {
+                                        format!("Unstage {}", entry.path)
+                                    } else {
+                                        format!("Stage {}", entry.path)
+                                    }
                                 })
-                                .a11y_name(|| format!("Stage {}", entry.path))
                                 .small()
-                                .checked(area == Area::Staged)
+                                .checked(check == Check::Staged)
+                                .indeterminate(check == Check::Partial)
                                 .disabled(area == Area::Conflicted)
                                 .on_click(cx.listener(move |this, checked: &bool, window, cx| {
                                     // Staging leaves the selection alone: the row's own click
@@ -435,8 +552,22 @@ impl Osier {
                                     }
                                 })),
                         )
-                        .child(status_tag(entry, area))
-                        .child(div().text_sm().flex_1().min_w_0().truncate().child(display))
+                        .child(status_tag(entry, area, cx))
+                        .child(div().text_sm().flex_1().min_w_0().end_text(
+                            this.settings.appearance.text_overflow,
+                            Behind::row("row", selected, cx),
+                            display,
+                        ))
+                        .when_some(partial, |this, (some, total)| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .test_id(|| format!("change-partial:{}", entry.path))
+                                    .child(format!("{some} of {total} changes")),
+                            )
+                        })
                         .when(area == Area::Conflicted, |this| {
                             let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
 
@@ -499,7 +630,7 @@ impl Osier {
                                     .group_hover("row", |this| this.visible())
                                     .child(
                                         Button::new(SharedString::from(format!(
-                                            "discard-{title}-{ix}"
+                                            "discard-{key}-{ix}"
                                         )))
                                         .ghost()
                                         .xsmall()
@@ -511,7 +642,7 @@ impl Osier {
                                         .tooltip(if area == Area::Untracked {
                                             "Move to trash"
                                         } else {
-                                            "Discard changes"
+                                            "Roll back changes"
                                         })
                                         .on_click(
                                             cx.listener(move |this, _, window, cx| {
@@ -552,7 +683,6 @@ impl Osier {
             .next()
             .map(|l| l.chars().count())
             .unwrap_or(0);
-        let staged_n = staged.len();
         let commit_label = if self.amend {
             "Amend commit".to_string()
         } else if staged_n == 1 {
@@ -578,13 +708,15 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(format!(
-                                "{} staged, {} unstaged, {} untracked",
-                                staged.len(),
-                                unstaged.len(),
-                                untracked.len()
-                            )),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                Behind::plain(cx),
+                                format!(
+                                    "{} changed, {staged_n} staged, {} unversioned",
+                                    changed.len(),
+                                    untracked.len()
+                                ),
+                            ),
                     )
                     .child(
                         Button::new("stage-all")
@@ -593,7 +725,9 @@ impl Osier {
                             .xsmall()
                             .icon(Lucide::ListChecks)
                             .tooltip("Stage all")
-                            .disabled(unstaged.is_empty() && untracked.is_empty())
+                            .disabled(
+                                changed.iter().all(|e| !e.is_unstaged()) && untracked.is_empty(),
+                            )
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.stage_all(window, cx)),
                             ),
@@ -605,7 +739,7 @@ impl Osier {
                             .xsmall()
                             .icon(Lucide::ListX)
                             .tooltip("Unstage all")
-                            .disabled(staged.is_empty())
+                            .disabled(staged_n == 0)
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.unstage_all(window, cx)),
                             ),
@@ -628,7 +762,11 @@ impl Osier {
                             .items_center()
                             .text_xs()
                             .text_color(muted)
-                            .child(div().truncate().flex_1().min_w_0().child(identity))
+                            .child(div().flex_1().min_w_0().end_text(
+                                self.settings.appearance.text_overflow,
+                                Behind::plain(cx),
+                                identity,
+                            ))
                             .child({
                                 let messages = self.recent_commit_messages();
                                 let weak = cx.weak_entity();
@@ -735,5 +873,28 @@ impl Osier {
                     ),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TagVariant, status_look};
+
+    #[test]
+    fn status_letters_keep_their_colour_and_unknown_codes_read_as_modified() {
+        use TagVariant::*;
+        for (code, want) in [
+            ('A', (Success, 'A')),
+            ('?', (Success, '?')),
+            ('D', (Danger, 'D')),
+            ('U', (Danger, 'U')),
+            ('R', (Info, 'R')),
+            ('C', (Info, 'C')),
+            ('T', (Warning, 'T')),
+            ('M', (Warning, 'M')),
+            ('X', (Warning, 'M')),
+        ] {
+            assert_eq!(status_look(code), want, "{code}");
+        }
     }
 }

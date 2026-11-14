@@ -9,7 +9,7 @@ mod askpass;
 mod background;
 mod blame_view;
 mod cached_list;
-mod cached_root;
+mod checkbox;
 mod cli;
 mod command_log;
 mod config_watch;
@@ -18,6 +18,7 @@ mod dialog_hint;
 mod dialog_notice;
 mod dms_cheatsheet;
 mod edit_pane;
+mod editor_hover;
 mod fade;
 mod format;
 mod graph;
@@ -25,12 +26,14 @@ mod inline_code;
 mod install_route;
 mod instance;
 mod keymap;
+mod lazy_list;
 mod merge_view;
 mod merge_window;
 mod new_repo;
 mod notices;
 mod palette;
 mod palette_menus;
+mod pane;
 #[cfg(feature = "profiler")]
 mod profiling;
 mod project;
@@ -40,6 +43,7 @@ mod repo_watch;
 mod row_menu;
 mod runtime_info;
 mod save_queue;
+mod scan_watch;
 mod settings_panel;
 mod sidebar_query;
 mod system_motion;
@@ -230,7 +234,7 @@ fn main() {
             app_id: Some(APP_ID.into()),
             ..TitleBar::window_options()
         };
-        let opened = crate::cached_root::open_window(options, cx, |window, cx| {
+        let opened = crate::pane::open_window(options, cx, |window, cx| {
             cx.new(|cx| {
                 app::Osier::new(
                     paths,

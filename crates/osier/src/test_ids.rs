@@ -11,11 +11,21 @@
 //! Naming convention, kebab-case, `area-thing`, with a `:`-separated key for repeated rows:
 //! - buttons with a literal element id reuse it (`Button::new("settings")` is `settings`)
 //! - tabs `tab-<label>`; sidebar rows `sidebar-open:<name>`, `sidebar-pinned:<name>`,
-//!   `sidebar-recent:<name>`
-//! - Changes rows `change-row:<area>:<path>` and their checkbox `change-stage:<area>:<path>`
-//!   (`<area>` is `conflicts`, `staged`, `unstaged` or `untracked`)
-//! - Log rows `log-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
+//!   `sidebar-recent:<name>`; an open project's ahead/behind badge `sidebar-arrows:<index>`
+//!   (its index among the open projects)
+//! - Changes rows `change-row:<group>:<path>`, their checkbox `change-stage:<group>:<path>`
+//!   and "N of M changes" `change-partial:<path>` (`<group>` is `conflicts`, `changes` or
+//!   `unversioned`); group checkboxes `change-check-group:<group>`; in the diff of a changed
+//!   file, per hunk `hunk-check:<index>` and `hunk-revert:<index>`
+//! - a ref badge whose name is shortened (Log rows, commit details) `ref-short:<name>`; a
+//!   badge's tooltip `ref-tooltip`; the commit details' refs `commit-refs`
+//! - Log rows `log-row:<index>`, reflog rows `reflog-row:<index>`, Branches `branch-row:<name>`, `tag-row:<name>`,
 //!   branch menu buttons `branch-menu:<name>`, Stashes `stash-row:<index>`, Patches `patch-row:<id>`, command log `command-row:<record id>`
+//! - Files rows `files-row:<path>`, the name `files-name:<path>` and status letter
+//!   `files-status:<path>`; a folder's "changed files inside" marker (tinted icon or dot)
+//!   `files-dirty:<path>`; an ignored file's rule hint `files-ignored:<path>`;
+//!   `files-row-selected:<path>` marks the highlighted row (its fade blends into the
+//!   selected colour)
 //! - inputs by their container: `commit-message`, `files-filter`, `sidebar-filter`
 //! - the filter dropdown `filter-suggestions`, its rows `filter-suggestion:<term>` and the
 //!   settings link `filter-open-settings`

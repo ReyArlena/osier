@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
@@ -10,6 +11,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use osier_config::settings::{LogBadgeStyle, TextOverflow};
 use osier_git::graph::Edge;
 use osier_git::ops::reset::ResetMode;
 
@@ -78,6 +80,11 @@ impl Osier {
         // Colours behind a row, for the fade over clipped badges (see `fade.rs`).
         let row_bg = cx.theme().background;
         let row_hover = row_bg.blend(cx.theme().list_hover);
+        let text_overflow = self.settings.appearance.text_overflow;
+        // An unpushed commit's text, faded when its graph node is dimmed. Set per part, not
+        // on the row's text as a whole: an opacity there would apply to the fades too, and
+        // a faded fade no longer hides the text under it.
+        let dim_opacity = crate::graph::UNPUSHED_TEXT_OPACITY;
         let row_selected = row_bg.blend(cx.theme().list_active);
         let colors = lane_colors(cx);
         let max_lanes = graph.iter().map(|r| r.width).max().unwrap_or(1).min(12);
@@ -89,6 +96,12 @@ impl Osier {
         let count = commits.len();
         let page = project.log_page_size;
         let badges_right = self.settings.git.log_badges == osier_config::settings::LogBadges::Right;
+        let badge_layout = BadgeLayout {
+            right: badges_right,
+            style: self.settings.git.log_badge_style,
+            room: self.log_badge_room.clone(),
+            pane: self.panes.tab.downgrade(),
+        };
 
         v_flex()
             .size_full()
@@ -160,9 +173,9 @@ impl Osier {
                     ),
             )
             .child(
-                self.with_commit_details(
+                div().flex_1().min_h_0().child(
                     div().id("log-list").size_full().child(
-                        uniform_list("commits", count, move |range, _, cx| {
+                        uniform_list("commits", count, move |range, window, cx| {
                             range
                                 .map(|ix| {
                                     let commit = &commits[ix];
@@ -192,7 +205,7 @@ impl Osier {
                                     } else {
                                         commit.subject.clone()
                                     };
-                                    let refs = log_badges(&commit.refs, &remotes);
+                                    let refs = ordered_refs(&commit.refs, &remotes);
                                     // Pull requests git already knows about: the one a merge or
                                     // squash commit names, and the remote branches on this row.
                                     let pr_number = on_github
@@ -458,17 +471,17 @@ impl Osier {
                                                         .h_full()
                                                         .gap_2()
                                                         .items_center()
-                                                        .when(dim_text, |this| {
-                                                            this.opacity(
-                                                                crate::graph::UNPUSHED_TEXT_OPACITY,
-                                                            )
-                                                        })
                                                         .child(subject_with_refs(
                                                             ix,
                                                             subject,
                                                             refs,
-                                                            badges_right,
-                                                            (fade_base, fade_hover),
+                                                            SubjectLook {
+                                                                fade: (fade_base, fade_hover),
+                                                                overflow: text_overflow,
+                                                                dim: dim_text,
+                                                            },
+                                                            badge_layout.clone(),
+                                                            window,
                                                             cx,
                                                         ))
                                                         .child(
@@ -478,6 +491,9 @@ impl Osier {
                                                                 .flex_none()
                                                                 .max_w(px(110.))
                                                                 .truncate()
+                                                                .when(dim_text, |d| {
+                                                                    d.opacity(dim_opacity)
+                                                                })
                                                                 .child(commit.author_name.clone()),
                                                         )
                                                         .child(
@@ -502,7 +518,10 @@ impl Osier {
                                                             )
                                                             .flex_none()
                                                             .w(px(78.))
-                                                            .text_right(),
+                                                            .text_right()
+                                                            .when(dim_text, |d| {
+                                                                d.opacity(dim_opacity)
+                                                            }),
                                                         )
                                                         .child(
                                                             div()
@@ -510,6 +529,9 @@ impl Osier {
                                                                 .text_xs()
                                                                 .text_color(muted)
                                                                 .flex_none()
+                                                                .when(dim_text, |d| {
+                                                                    d.opacity(dim_opacity)
+                                                                })
                                                                 .child(
                                                                     commit.short_hash().to_string(),
                                                                 ),
@@ -538,22 +560,33 @@ impl Osier {
                         .track_scroll(&self.log_scroll)
                         .size_full(),
                     ),
-                    cx,
                 ),
             )
             .into_any_element()
     }
 
-    /// The log list, with the commit details panel under it when shown: a vertical split
-    /// whose details height is remembered.
-    fn with_commit_details(&self, list: impl IntoElement, cx: &mut Context<Self>) -> AnyElement {
-        if !self.commit_details_visible() {
-            return div().flex_1().min_h_0().child(list).into_any_element();
-        }
+    /// Whether the Log tab shows the commit details panel under the list: turned on, and a
+    /// list of commits (not the reflog, not an empty state) to show them for.
+    pub(crate) fn log_shows_details(&self) -> bool {
+        self.commit_details_visible()
+            && !self.show_reflog
+            && self
+                .active_project()
+                .and_then(|p| p.snapshot.as_ref())
+                .is_some_and(|s| !s.commits.is_empty())
+    }
+
+    /// The Log tab's list with the commit details panel under it: a vertical split whose
+    /// details height is remembered. Both sides are panes (`crate::pane`).
+    pub(crate) fn with_commit_details(
+        &self,
+        list: AnyElement,
+        details: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let height = self.state.layout.log_details_height.unwrap_or(220.);
         div()
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .child(
                 gpui_kit::component::resizable::v_resizable("log-split")
                     .on_resize(cx.listener(
@@ -577,120 +610,22 @@ impl Osier {
                             .size(px(height))
                             .size_range(px(90.)..px(900.))
                             .fixed()
-                            .child(
-                                div()
-                                    .size_full()
-                                    .border_t_1()
-                                    .border_color(cx.theme().border)
-                                    .child(self.render_commit_details(cx)),
-                            ),
+                            .child(details),
                     ),
             )
             .into_any_element()
     }
 
+    /// The reflog, in place of the Log list: its rows are built only while on screen.
     fn render_reflog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let menu_buttons = self.settings.appearance.row_menu_buttons;
         use gpui_kit::component::scroll::ScrollableElement as _;
         let Some(snapshot) = self.active_project().and_then(|p| p.snapshot.as_ref()) else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let mono = cx.theme().mono_font_family.clone();
-        let owner = cx.entity().downgrade();
-        let mut list = v_flex()
-            .flex_1()
-            .min_h_0()
-            .id("reflog-list")
-            .overflow_y_scrollbar();
-        for (ix, e) in snapshot.reflog.iter().enumerate() {
-            let hash = e.hash.clone();
-            let o = owner.clone();
-            let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
-                let (h1, h2, h3, h4) = (hash.clone(), hash.clone(), hash.clone(), hash.clone());
-                let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
-                menu.item(PopupMenuItem::new("Check out (detached)").on_click(
-                    move |_, window, cx| {
-                        let _ =
-                            o1.update(cx, |this, cx| this.checkout_commit(h1.clone(), window, cx));
-                    },
-                ))
-                .item(
-                    PopupMenuItem::new("New branch here…").on_click(move |_, window, cx| {
-                        let _ = o2.update(cx, |this, cx| {
-                            this.prompt_new_branch(Some(h2.clone()), window, cx)
-                        });
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("Reset current branch here (hard)…").on_click(
-                        move |_, window, cx| {
-                            let _ = o3.update(cx, |this, cx| {
-                                this.confirm_reset(h3.clone(), ResetMode::Hard, window, cx)
-                            });
-                        },
-                    ),
-                )
-                .separator()
-                .item(
-                    PopupMenuItem::new("Copy hash").on_click(move |_, window, cx| {
-                        let _ = o4.update(cx, |this, cx| {
-                            this.copy_to_clipboard(h4.clone(), window, cx)
-                        });
-                    }),
-                )
-            });
-            list = list.child(
-                h_flex()
-                    .id(("reflog", ix))
-                    .a11y_item(|| format!("{} {}", e.selector, e.message))
-                    .px_3()
-                    .py_1p5()
-                    .gap_3()
-                    .items_center()
-                    .hover(|this| this.bg(cx.theme().list_hover))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .w(px(80.))
-                            .flex_none()
-                            .child(e.selector.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(e.message.clone()),
-                    )
-                    .child(
-                        super::relative_time_label(("reflog-time", ix), e.at, cx)
-                            .text_xs()
-                            .text_color(muted)
-                            .flex_none(),
-                    )
-                    .child(
-                        div()
-                            .font_family(mono.clone())
-                            .text_xs()
-                            .text_color(muted)
-                            .flex_none()
-                            .child(e.hash[..7].to_string()),
-                    )
-                    .child(
-                        Button::new(("reflog-menu", ix))
-                            .a11y_name(|| format!("Actions for {}", e.selector))
-                            .when(!menu_buttons, |b| b.hidden())
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide::Ellipsis)
-                            .dropdown_menu(row_menu.build()),
-                    )
-                    .context_menu(row_menu.build()),
-            );
-        }
+        let hashes: Vec<&String> = snapshot.reflog.iter().map(|e| &e.hash).collect();
+        let state = self.reflog_list.sync(&hashes, None);
+
         v_flex()
             .size_full()
             .child(
@@ -721,7 +656,119 @@ impl Osier {
                             })),
                     ),
             )
-            .child(list)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        crate::lazy_list::rows(
+                            state.clone(),
+                            cx.processor(|this, ix: usize, _, cx| this.render_reflog_row(ix, cx)),
+                        )
+                        .size_full(),
+                    )
+                    .vertical_scrollbar(&state),
+            )
+            .into_any_element()
+    }
+
+    /// One reflog row, built only while it is on screen (`crate::lazy_list`).
+    fn render_reflog_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let menu_buttons = self.settings.appearance.row_menu_buttons;
+        let Some(e) = self
+            .active_project()
+            .and_then(|p| p.snapshot.as_ref())
+            .and_then(|s| s.reflog.get(ix))
+        else {
+            return div().into_any_element();
+        };
+        let muted = cx.theme().muted_foreground;
+        let mono = cx.theme().mono_font_family.clone();
+        let owner = cx.entity().downgrade();
+
+        let hash = e.hash.clone();
+        let o = owner.clone();
+        let row_menu = crate::row_menu::RowMenu::new(move |menu, _, _| {
+            let (h1, h2, h3, h4) = (hash.clone(), hash.clone(), hash.clone(), hash.clone());
+            let (o1, o2, o3, o4) = (o.clone(), o.clone(), o.clone(), o.clone());
+            menu.item(
+                PopupMenuItem::new("Check out (detached)").on_click(move |_, window, cx| {
+                    let _ = o1.update(cx, |this, cx| this.checkout_commit(h1.clone(), window, cx));
+                }),
+            )
+            .item(
+                PopupMenuItem::new("New branch here…").on_click(move |_, window, cx| {
+                    let _ = o2.update(cx, |this, cx| {
+                        this.prompt_new_branch(Some(h2.clone()), window, cx)
+                    });
+                }),
+            )
+            .item(
+                PopupMenuItem::new("Reset current branch here (hard)…").on_click(
+                    move |_, window, cx| {
+                        let _ = o3.update(cx, |this, cx| {
+                            this.confirm_reset(h3.clone(), ResetMode::Hard, window, cx)
+                        });
+                    },
+                ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new("Copy hash").on_click(move |_, window, cx| {
+                    let _ = o4.update(cx, |this, cx| {
+                        this.copy_to_clipboard(h4.clone(), window, cx)
+                    });
+                }),
+            )
+        });
+
+        h_flex()
+            .id(("reflog", ix))
+            .test_id(|| format!("reflog-row:{ix}"))
+            .group("row")
+            .a11y_item(|| format!("{} {}", e.selector, e.message))
+            .px_3()
+            .py_1p5()
+            .gap_3()
+            .items_center()
+            .hover(|this| this.bg(cx.theme().list_hover))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .w(px(80.))
+                    .flex_none()
+                    .child(e.selector.clone()),
+            )
+            .child(div().text_sm().flex_1().min_w_0().end_text(
+                self.settings.appearance.text_overflow,
+                crate::fade::Behind::row("row", false, cx),
+                e.message.clone(),
+            ))
+            .child(
+                super::relative_time_label(("reflog-time", ix), e.at, cx)
+                    .text_xs()
+                    .text_color(muted)
+                    .flex_none(),
+            )
+            .child(
+                div()
+                    .font_family(mono.clone())
+                    .text_xs()
+                    .text_color(muted)
+                    .flex_none()
+                    .child(e.hash[..7].to_string()),
+            )
+            .child(
+                Button::new(("reflog-menu", ix))
+                    .a11y_name(|| format!("Actions for {}", e.selector))
+                    .when(!menu_buttons, |b| b.hidden())
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Ellipsis)
+                    .dropdown_menu(row_menu.build()),
+            )
+            .context_menu(row_menu.build())
             .into_any_element()
     }
 }
@@ -732,10 +779,22 @@ const REF_GAP: f32 = 8.0;
 /// badges that do not fit.
 const SUBJECT_FADE: f32 = 14.0;
 
+/// The fade over left badges cut off at their 45% cap: solid for its last few pixels, so a
+/// little background shows between the cut badge and the subject right after it.
+fn cut_badges_fade(color: Hsla) -> Background {
+    linear_gradient(
+        90.,
+        linear_color_stop(color.opacity(0.), 0.),
+        linear_color_stop(color, 0.7),
+    )
+}
+
+/// Widest a ref badge's text gets; longer names are shortened in the middle.
+pub(crate) const REF_TEXT_MAX: f32 = 150.0;
+
 /// The badge for one ref: HEAD's branch solid, tags in the warning colour, other branches
 /// tinted with the primary colour like the sidebar's selected row.
 pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> Tag {
-    let text = div().max_w(px(150.)).truncate().child(label);
     let tag = if is_head {
         Tag::primary()
     } else if is_tag {
@@ -744,7 +803,79 @@ pub(crate) fn ref_tag(label: String, is_head: bool, is_tag: bool, cx: &App) -> T
         let (bg, border) = crate::themes::badge_tint(cx);
         Tag::custom(bg, cx.theme().foreground, border)
     };
-    tag.xsmall().child(text)
+    tag.xsmall().child(div().whitespace_nowrap().child(label))
+}
+
+/// A ref badge with the full name in its tooltip. A name wider than `max` is shortened in
+/// the middle ("feature/rew…algorithm"): its start and end are what tell ref names apart.
+/// It does not follow `appearance.text_overflow`: a fade inside a small badge reads badly.
+pub(crate) fn ref_badge(
+    id: impl Into<ElementId>,
+    label: &str,
+    is_head: bool,
+    is_tag: bool,
+    max: Pixels,
+    window: &Window,
+    cx: &App,
+) -> Stateful<Div> {
+    let text = shorten_middle(label, max, window, cx);
+    let short = text.len() != label.len();
+    super::hint(id, label.to_string(), "ref-tooltip", cx)
+        .flex_none()
+        .when(short, |d| d.test_id(|| format!("ref-short:{label}")))
+        .child(ref_tag(text, is_head, is_tag, cx))
+}
+
+/// `label` with its middle replaced by "…" so that it fits `max`, keeping as many letters as
+/// fit (one more at the start than at the end when they cannot split evenly).
+fn shorten_middle(label: &str, max: Pixels, window: &Window, cx: &App) -> String {
+    if ref_text_width(label, window, cx) <= max {
+        return label.to_string();
+    }
+    let chars: Vec<char> = label.chars().collect();
+    // The most letters kept that still fit; keeping none ("…") always counts as fitting.
+    let (mut lo, mut hi) = (0, chars.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if ref_text_width(&keep_ends(&chars, mid), window, cx) <= max {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    keep_ends(&chars, lo)
+}
+
+/// The first and last of `keep` letters of `chars` around a "…".
+fn keep_ends(chars: &[char], keep: usize) -> String {
+    let head = keep.div_ceil(2);
+    let tail = keep - head;
+    let mut out: String = chars[..head].iter().collect();
+    out.push('…');
+    out.extend(&chars[chars.len() - tail..]);
+    out
+}
+
+/// The width of a ref badge's text: gpui-kit's `Tag::xsmall()` sets `rems(0.625)` in the
+/// theme font. Shaped lines are cached across frames, so this costs little per row.
+fn ref_text_width(label: &str, window: &Window, cx: &App) -> Pixels {
+    let run = TextRun {
+        len: label.len(),
+        font: font(cx.theme().font_family.clone()),
+        color: cx.theme().foreground,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .layout_line(
+            label,
+            rems(0.625).to_pixels(window.rem_size()),
+            &[run],
+            None,
+        )
+        .width
 }
 
 /// How many ref badges a log row shows before the rest go into a "+N" badge.
@@ -761,8 +892,8 @@ pub(crate) struct LogBadges {
 /// lists other local branches after the remote ones, so a row with a branch, `origin/main`
 /// and `origin/HEAD` used to leave the second local branch out. A remote's `HEAD` (which
 /// branch the remote treats as its default) is dropped when another branch of that remote is
-/// on the same row; it adds nothing there. The first [`MAX_LOG_BADGES`] are shown.
-pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+/// on the same row; it adds nothing there.
+pub(crate) fn ordered_refs(refs: &[String], remotes: &[osier_git::refs::Remote]) -> Vec<String> {
     /// The remote and branch of a remote-tracking ref, `None` for anything else.
     fn remote_of<'a>(
         remotes: &'a [osier_git::refs::Remote],
@@ -792,38 +923,188 @@ pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -
         })
         .collect();
     kept.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
-    let mut shown: Vec<String> = kept.into_iter().cloned().collect();
-    let hidden = shown.split_off(shown.len().min(MAX_LOG_BADGES));
+    kept.into_iter().cloned().collect()
+}
+
+/// [`ordered_refs`] split after the first `count`.
+fn split_badges(mut shown: Vec<String>, count: usize) -> LogBadges {
+    let hidden = shown.split_off(shown.len().min(count));
     LogBadges { shown, hidden }
 }
 
-/// A commit subject with up to [`MAX_LOG_BADGES`] ref badges (`git.log_badges`), and a "+N"
-/// badge naming the rest in its tooltip. Without badges the subject ends in an ellipsis.
+/// The badges "Fade them out" shows: the first [`MAX_LOG_BADGES`] of [`ordered_refs`].
+#[cfg(test)]
+pub(crate) fn log_badges(refs: &[String], remotes: &[osier_git::refs::Remote]) -> LogBadges {
+    split_badges(ordered_refs(refs, remotes), MAX_LOG_BADGES)
+}
+
+/// A ref's badge text and kind: (label, checked out or detached HEAD, tag).
+fn ref_label(r: &str) -> (&str, bool, bool) {
+    let label = r.trim_start_matches("HEAD -> ").trim_start_matches("tag: ");
+    (label, r.starts_with("HEAD"), r.starts_with("tag: "))
+}
+
+/// Narrowest "Collapse" shortens a lone first badge's text to; in a column too narrow even
+/// for that, the badges fade out at the 45% cap like "Fade them out".
+const COLLAPSE_FIRST_MIN: f32 = 64.0;
+
+/// Padding and border around a ref badge's text: gpui-kit's `Tag::xsmall()` (`px_1p5` each
+/// side, a 1 px border).
+const REF_BADGE_CHROME: f32 = 14.0;
+
+/// What a Log row does with badges that do not fit (`git.log_badge_style`). For "Collapse",
+/// the subject cell's width as last drawn (the same on every row), and the pane to redraw
+/// when it changes.
+#[derive(Clone)]
+struct BadgeLayout {
+    /// At the end of the line (`git.log_badges`), not before the subject.
+    right: bool,
+    style: LogBadgeStyle,
+    room: std::rc::Rc<std::cell::Cell<Pixels>>,
+    pane: WeakEntity<crate::pane::Pane<Osier>>,
+}
+
+/// Records the subject cell's width while painting; when it changed (a resize, a first
+/// draw), redraws the Log pane so "Collapse" fits its badges to it. Only that pane redraws,
+/// and only on a change.
+fn measure_badge_room(layout: &BadgeLayout) -> impl IntoElement {
+    let room = layout.room.clone();
+    let pane = layout.pane.clone();
+    canvas(
+        move |bounds, _, cx| {
+            if room.get() != bounds.size.width {
+                room.set(bounds.size.width);
+                cx.defer(move |cx| {
+                    let _ = pane.update(cx, |_, cx| cx.notify());
+                });
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// "Collapse": how many of `labels` fit in `room` with a "+N" badge for the rest (`gap`
+/// between badges), at least one; and how wide the first badge's text may be, so that a lone
+/// badge and its "+N" fit too.
+fn collapse_badges(
+    labels: &[&str],
+    room: Pixels,
+    gap: Pixels,
+    window: &Window,
+    cx: &App,
+) -> (usize, Pixels) {
+    let chrome = px(REF_BADGE_CHROME);
+    let badge = |text: &str| ref_text_width(text, window, cx).min(px(REF_TEXT_MAX)) + chrome;
+    let more = |rest: usize| {
+        if rest == 0 {
+            px(0.)
+        } else {
+            gap + badge(&format!("+{rest}"))
+        }
+    };
+    let n = labels.len();
+    let mut used = px(0.);
+    let mut fit = n;
+    for k in 1..=n {
+        used += badge(labels[k - 1]) + if k > 1 { gap } else { px(0.) };
+        if used + more(n - k) > room {
+            fit = (k - 1).max(1);
+            break;
+        }
+    }
+    let first = if fit == 1 {
+        // Not below a readable few letters: past that the cap's fade ends the row instead.
+        (room - more(n - 1) - chrome).clamp(px(COLLAPSE_FIRST_MIN), px(REF_TEXT_MAX))
+    } else {
+        px(REF_TEXT_MAX)
+    };
+    (fit, first)
+}
+
+/// How a Log row's subject is drawn: the row background for its fades (normal, hover), how
+/// it ends when it does not fit, and whether it is dimmed (an unpushed commit).
+#[derive(Clone, Copy)]
+struct SubjectLook {
+    fade: (Hsla, Hsla),
+    overflow: TextOverflow,
+    dim: bool,
+}
+
+/// A commit subject with its ref badges (`git.log_badges` places them, `git.log_badge_style`
+/// says what happens when they do not fit) and a "+N" badge naming the rest in its tooltip.
+/// "Show them all" has no "+N" and no cap, so the subject can get pushed out. "Fade them
+/// out" shows up to [`MAX_LOG_BADGES`] within 45% of the row and fades out what passes it.
+/// "Collapse" shows as many as fit in that 45% (`collapse_badges`), at least one. A subject
+/// that does not fit ends as `appearance.text_overflow` says (a fade, an ellipsis, or an
+/// ellipsis that fades out).
 ///
-/// Left: badges first, then the subject; the row's end fades out over badges that do not
-/// fit. Right: the subject runs up to the badges at the end of the line and fades out
-/// under their left edge, as sidebar names do before their ahead/behind badges. Badges that
-/// do not fit run into the box's right padding and fade out there; badges that fit end
-/// before it, so the fade covers nothing. `fade` is the row background (normal, hover).
+/// Left: badges first, then the subject; the row's end fades out over the subject (no fade
+/// with an ellipsis). Right: the subject runs up to the badges at the end of the line and
+/// fades out under their left edge, as sidebar names do before their ahead/behind badges (or
+/// ends in its ellipsis before them). Faded badges run into the box's right padding and fade
+/// out there; badges that fit end before it, so the fade covers nothing.
 fn subject_with_refs(
     ix: usize,
     subject: String,
-    refs: LogBadges,
-    right: bool,
-    fade: (Hsla, Hsla),
+    refs: Vec<String>,
+    look: SubjectLook,
+    layout: BadgeLayout,
+    window: &Window,
     cx: &App,
 ) -> AnyElement {
-    let (base, hover) = fade;
-    if refs.shown.is_empty() {
-        return div()
-            .test_id(|| format!("log-subject:{ix}"))
+    let SubjectLook {
+        fade: (base, hover),
+        overflow,
+        dim,
+    } = look;
+    // Dimmed by colour, not opacity, so the fades over the subject still hide it (see the
+    // caller).
+    let dim_color = cx
+        .theme()
+        .foreground
+        .opacity(crate::graph::UNPUSHED_TEXT_OPACITY);
+    let subject_box = move || {
+        div()
+            .test_id(move || format!("log-subject:{ix}"))
+            .text_sm()
+            .when(dim, |d| d.text_color(dim_color))
+    };
+    let behind = crate::fade::Behind::colors(base, hover, "log-row");
+    if refs.is_empty() {
+        return subject_box()
             .flex_1()
             .min_w_0()
-            .text_sm()
-            .truncate()
-            .child(subject)
+            .end_text(overflow, behind, subject)
             .into_any_element();
     }
+    let (style, right) = (layout.style, layout.right);
+    // Fade and Collapse keep badges within 45% of the row and fade out what passes it (for
+    // Collapse only in a column too narrow for one badge and its "+N").
+    let cap = style != LogBadgeStyle::All;
+    let fade_badges = cap;
+    let gap = px(if right { 4. } else { REF_GAP });
+    let (refs, first_max) = match style {
+        LogBadgeStyle::All => (split_badges(refs, usize::MAX), px(REF_TEXT_MAX)),
+        LogBadgeStyle::Fade => (split_badges(refs, MAX_LOG_BADGES), px(REF_TEXT_MAX)),
+        LogBadgeStyle::Collapse => {
+            let measured = layout.room.get();
+            let labels: Vec<&str> = refs.iter().map(|r| ref_label(r).0).collect();
+            // Before the first measurement: one badge and "+N", fixed on the next frame.
+            let (fit, first) = if measured > px(0.) {
+                // The cap holds the fade's padding too.
+                let room = measured * 0.45 - px(SUBJECT_FADE);
+                collapse_badges(&labels, room, gap, window, cx)
+            } else {
+                (1, px(REF_TEXT_MAX))
+            };
+            (split_badges(refs, fit), first)
+        }
+    };
+    let measure = (style == LogBadgeStyle::Collapse).then(|| measure_badge_room(&layout));
     let more = (!refs.hidden.is_empty()).then(|| {
         super::hint(
             ("log-ref-more", ix),
@@ -832,24 +1113,29 @@ fn subject_with_refs(
             cx,
         )
         .flex_none()
+        .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
         .test_id(|| format!("log-ref-more:{ix}"))
         .child(ref_tag(format!("+{}", refs.hidden.len()), false, false, cx))
         .into_any_element()
     });
-    let badges = refs.shown.into_iter().map(|r| {
-        let is_head = r.starts_with("HEAD");
-        let is_tag = r.starts_with("tag: ");
-        let label = r
-            .trim_start_matches("HEAD -> ")
-            .trim_start_matches("tag: ")
-            .to_string();
+    let badges = refs.shown.into_iter().enumerate().map(|(j, r)| {
+        let (label, is_head, is_tag) = ref_label(&r);
+        let max = if j == 0 { first_max } else { px(REF_TEXT_MAX) };
         div()
             .flex_none()
+            .when(dim, |d| d.opacity(crate::graph::UNPUSHED_TEXT_OPACITY))
             .test_id(|| format!("log-ref:{ix}:{label}"))
-            .child(ref_tag(label, is_head, is_tag, cx))
+            .child(ref_badge(
+                ("log-ref", j),
+                label,
+                is_head,
+                is_tag,
+                max,
+                window,
+                cx,
+            ))
             .into_any_element()
     });
-    let badges = badges.chain(more);
     if !right {
         return h_flex()
             .relative()
@@ -858,72 +1144,110 @@ fn subject_with_refs(
             .overflow_hidden()
             .gap(px(REF_GAP))
             .items_center()
-            .children(badges)
             .child(
-                div()
-                    .test_id(|| format!("log-subject:{ix}"))
-                    .text_sm()
-                    .truncate()
+                // At most 45% of the row, like right badges, so long branch names cannot
+                // push the subject out. Badges past that ("+N" included, as on the right)
+                // run into the right padding and fade out there. The negative margin takes
+                // back as much of the padding as the gap gives, so the subject starts where
+                // the fade ends, not under it; badges that fit sit `SUBJECT_FADE` before it.
+                // "Show them all" has no cap and no fade.
+                h_flex()
+                    .relative()
+                    .flex_none()
+                    .when(cap, |this| this.max_w(relative(0.45)).overflow_hidden())
+                    .when(fade_badges, |this| {
+                        this.pr(px(SUBJECT_FADE)).mr(px(-REF_GAP))
+                    })
+                    .gap(gap)
+                    .items_center()
+                    .children(badges.chain(more))
+                    .when(fade_badges, |this| {
+                        this.child(
+                            crate::fade::fade_right(base)
+                                .w(px(SUBJECT_FADE))
+                                .bg(cut_badges_fade(base))
+                                .group_hover("log-row", move |s| s.bg(cut_badges_fade(hover))),
+                        )
+                    }),
+            )
+            .child(
+                subject_box()
                     .min_w_0()
+                    .map(|this| match overflow {
+                        // The cell's fade below ends the text.
+                        TextOverflow::Fade => this.overflow_hidden().whitespace_nowrap(),
+                        TextOverflow::Ellipsis | TextOverflow::Both => this.truncate(),
+                    })
                     .child(subject),
             )
-            .child(
-                crate::fade::fade_right(base)
-                    .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
-            )
+            .children(crate::fade::end_overlay(overflow, behind))
+            .children(measure)
             .into_any_element();
     }
+    let fade_under_badges = overflow == TextOverflow::Fade;
     h_flex()
+        .relative()
         .flex_1()
         .min_w_0()
+        // "Show them all" can be wider than the cell: clip it there.
+        .when(!cap, |this| this.overflow_hidden())
         .gap(px(REF_GAP))
         .items_center()
-        .child(
+        .child(if fade_under_badges {
             // Runs under the gap so the fade, not the clip, ends the text.
-            div()
-                .test_id(|| format!("log-subject:{ix}"))
+            subject_box()
                 .flex_1()
                 .min_w_0()
                 .mr(px(-REF_GAP))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_sm()
-                .child(subject),
-        )
+                .child(subject)
+        } else {
+            subject_box()
+                .flex_1()
+                .min_w_0()
+                .end_text(overflow, behind, subject)
+        })
         .child(
             h_flex()
                 .relative()
                 .flex_none()
-                .max_w(relative(0.45))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(px(-SUBJECT_FADE))
-                        .w(px(SUBJECT_FADE))
-                        .bg(crate::fade::fade_fill(base))
-                        .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
-                )
+                .when(cap, |this| this.max_w(relative(0.45)))
+                .when(fade_under_badges, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(-SUBJECT_FADE))
+                            .w(px(SUBJECT_FADE))
+                            .bg(crate::fade::fade_fill(base))
+                            .group_hover("log-row", move |s| s.bg(crate::fade::fade_fill(hover))),
+                    )
+                })
                 .child(
                     h_flex()
                         .relative()
                         .min_w_0()
-                        .overflow_hidden()
-                        .pr(px(SUBJECT_FADE))
-                        .mr(px(-SUBJECT_FADE / 2.))
-                        .gap_1()
+                        .when(cap, |this| this.overflow_hidden())
+                        .when(fade_badges, |this| {
+                            this.pr(px(SUBJECT_FADE)).mr(px(-SUBJECT_FADE / 2.))
+                        })
+                        .gap(gap)
                         .items_center()
-                        .children(badges)
-                        .child(
-                            crate::fade::fade_right(base)
-                                .w(px(SUBJECT_FADE))
-                                .group_hover("log-row", move |s| {
-                                    s.bg(crate::fade::fade_fill(hover))
-                                }),
-                        ),
+                        .children(badges.chain(more))
+                        .when(fade_badges, |this| {
+                            this.child(
+                                crate::fade::fade_right(base)
+                                    .w(px(SUBJECT_FADE))
+                                    .group_hover("log-row", move |s| {
+                                        s.bg(crate::fade::fade_fill(hover))
+                                    }),
+                            )
+                        }),
                 ),
         )
+        .children(measure)
         .into_any_element()
 }
 
@@ -957,7 +1281,7 @@ fn log_menu_kind(label: &str) -> Option<row_actions::RowKind> {
 
 #[cfg(test)]
 mod tests {
-    use super::log_badges;
+    use super::{keep_ends, log_badges};
     use osier_git::refs::Remote;
 
     fn refs(v: &[&str]) -> Vec<String> {
@@ -1007,6 +1331,14 @@ mod tests {
         // A local branch that only looks like one is not a remote's HEAD.
         let b = log_badges(&refs(&["upstream/HEAD", "origin/main"]), &origin());
         assert_eq!(b.shown, ["upstream/HEAD", "origin/main"]);
+    }
+
+    #[test]
+    fn shortened_names_keep_both_ends() {
+        let chars: Vec<char> = "feature/rewrite".chars().collect();
+        assert_eq!(keep_ends(&chars, 0), "…");
+        assert_eq!(keep_ends(&chars, 5), "fea…te");
+        assert_eq!(keep_ends(&chars, 6), "fea…ite");
     }
 
     #[test]

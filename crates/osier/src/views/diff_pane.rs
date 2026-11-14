@@ -1,11 +1,13 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::diff::{Diff, DiffGutterMarker, DiffLinePosition, DiffMode, DiffSide};
+use gpui_kit::component::diff::{
+    Diff, DiffDecoration, DiffGutterMarker, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+};
 use gpui_kit::component::input::Editor;
 use gpui_kit::component::text::TextView;
 
 use crate::viewer::Viewer;
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
@@ -20,6 +22,41 @@ use crate::app::Osier;
 use crate::app::hunk_ops::HunkAction;
 use crate::project::{Area, Selection};
 use crate::test_ids::TestId as _;
+
+/// Title and explanation for a changed file with no diff to show: why it is in the list.
+pub(crate) fn unchanged_text(reason: &osier_git::staging::Unchanged) -> (&'static str, String) {
+    use osier_git::staging::Unchanged as U;
+    const SAME: &str = "Its text is the same as in the last commit.";
+    match reason {
+        U::Mode { old, new } => {
+            let what = match (old.as_str(), new.as_str()) {
+                ("100644", "100755") => "This file was made executable.".to_string(),
+                ("100755", "100644") => "This file is no longer executable.".to_string(),
+                _ => format!("The file mode changed from {old} to {new}."),
+            };
+            ("Only the permissions changed", format!("{what} {SAME}"))
+        }
+        U::Renamed { from } => (
+            "Moved without changes",
+            format!("This file came from {from}. {SAME}"),
+        ),
+        U::EmptyAdded => (
+            "New empty file",
+            "This file is new and has nothing in it.".to_string(),
+        ),
+        U::EmptyDeleted => (
+            "Empty file deleted",
+            "This file was deleted and had nothing in it.".to_string(),
+        ),
+        U::StagedOnly => (
+            "Changed on disk since it was staged",
+            "This file was changed on disk after it was staged, and now matches the last \
+             commit again. The staged version is out of date and would still be committed. \
+             Click its checkbox to drop it."
+                .to_string(),
+        ),
+    }
+}
 
 impl Osier {
     pub(crate) fn render_diff_pane(
@@ -41,9 +78,8 @@ impl Osier {
                 Lucide::FileDiff,
                 path.clone(),
                 Some(match area {
-                    Area::Staged => Tag::success().xsmall().child("staged"),
-                    Area::Unstaged => Tag::warning().xsmall().child("unstaged"),
-                    Area::Untracked => Tag::secondary().xsmall().child("untracked"),
+                    Area::Changed => Tag::warning().xsmall().child("changed"),
+                    Area::Untracked => Tag::secondary().xsmall().child("unversioned"),
                     Area::Conflicted => Tag::danger().xsmall().child("conflict"),
                 }),
             ),
@@ -136,10 +172,11 @@ impl Osier {
         } else if let Some(editor) = &self.editor {
             // No border of its own: the header's bottom border already separates it, and a
             // second line under it reads as one thick rule.
-            Editor::new(&editor.state)
-                .bordered(false)
-                .size_full()
-                .into_any_element()
+            crate::editor_hover::hover_lines(
+                Editor::new(&editor.state).bordered(false).size_full(),
+                &editor.state,
+                cx,
+            )
         } else if three_way {
             match self.merge_view(window, cx) {
                 Ok(Some(view)) => view.into_any_element(),
@@ -268,106 +305,26 @@ impl Osier {
             };
             self.empty_state(title, hint, cx).into_any_element()
         } else if self.diff_files == 0 {
-            self.empty_state("No changes", "This selection has no textual changes.", cx)
-                .into_any_element()
+            match &self.diff_unchanged {
+                Some(reason) => {
+                    let (title, hint) = unchanged_text(reason);
+                    self.empty_state(title, &hint, cx).into_any_element()
+                }
+                None => self
+                    .empty_state("No changes", "This selection has no textual changes.", cx)
+                    .into_any_element(),
+            }
         } else {
             let mut view = Diff::new(&self.diff)
                 .line_number(self.settings.diff.line_numbers)
                 .soft_wrap(self.settings.diff.soft_wrap);
-            if let Some((path, a)) = &area
-                && !HunkAction::for_area(*a).is_empty()
-                && let Some(file) = self.diff_file_model(path)
+            if let Some((path, Area::Changed)) = &area
+                && let Some(staging) = self.diff_staging.clone()
             {
-                // One marker per hunk, on its first line, opening a small menu.
-                let markers: Vec<DiffGutterMarker> = file
-                    .hunks
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, h)| {
-                        let position = if h.new_lines > 0 {
-                            DiffLinePosition::new(
-                                path.clone(),
-                                DiffSide::Modified,
-                                h.new_start as usize,
-                            )
-                        } else {
-                            DiffLinePosition::new(
-                                path.clone(),
-                                DiffSide::Original,
-                                h.old_start as usize,
-                            )
-                        };
-                        DiffGutterMarker::new(("hunk", ix), position).with_label(match a {
-                            Area::Staged => "unstage",
-                            _ => "stage",
-                        })
-                    })
-                    .collect();
-                let model = self.diff_model.clone();
-                let weak = cx.entity().downgrade();
-                let actions = HunkAction::for_area(*a);
-                let path = path.clone();
-                view = view
-                    .gutter_markers(markers)
-                    .render_gutter_marker(move |marker, _, _| {
-                        let line = marker.position().line() as u32;
-                        let side = marker.position().side();
-                        let hunk_ix = model
-                            .iter()
-                            .find(|f| f.path == *marker.position().path())
-                            .and_then(|f| {
-                                f.hunks.iter().position(|h| {
-                                    (h.new_lines > 0
-                                        && side == DiffSide::Modified
-                                        && h.new_start == line)
-                                        || (h.new_lines == 0
-                                            && side == DiffSide::Original
-                                            && h.old_start == line)
-                                })
-                            });
-                        // An icon, not a bare "+" or "−": next to the diff's own +/- column
-                        // a text sign reads as part of the line.
-                        let icon = if marker.label().as_ref() == "unstage" {
-                            Lucide::SquareMinus
-                        } else {
-                            Lucide::SquarePlus
-                        };
-                        let button = Button::new(marker.id().clone())
-                            .ghost()
-                            .xsmall()
-                            .icon(icon)
-                            .tooltip("Hunk actions");
-                        let Some(hunk_ix) = hunk_ix else {
-                            return button.into_any_element();
-                        };
-                        let weak = weak.clone();
-                        let path = path.clone();
-                        button
-                            .dropdown_menu(move |mut menu, _, _| {
-                                for action in actions {
-                                    let weak = weak.clone();
-                                    let path = path.clone();
-                                    let action = *action;
-                                    menu = menu.item(
-                                        PopupMenuItem::new(format!("{} hunk", action.label()))
-                                            .on_click(move |_, window, cx| {
-                                                let _ = weak.update(cx, |this, cx| {
-                                                    this.hunk_action(
-                                                        path.clone(),
-                                                        hunk_ix,
-                                                        action,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                });
-                                            }),
-                                    );
-                                }
-                                menu
-                            })
-                            .into_any_element()
-                    });
+                view = self.staging_gutter(view, path.clone(), staging, cx);
             }
+            // An unversioned file has no hunk controls: its diff is one all-added change,
+            // and the file's checkbox adds it (selected lines can still be staged).
             view.into_any_element()
         };
 
@@ -991,21 +948,21 @@ impl Osier {
                 )
                 .into_any_element(),
             Some(Viewer::Code { .. }) => match &editor {
-                Some(state) => Editor::new(state)
-                    .readonly(true)
-                    .bordered(false)
-                    .size_full()
-                    .into_any_element(),
+                Some(state) => crate::editor_hover::hover_lines(
+                    Editor::new(state).readonly(true).bordered(false).size_full(),
+                    state,
+                    cx,
+                ),
                 None => div().into_any_element(),
             },
             Some(Viewer::Markdown { text, .. }) => {
                 if self.markdown_as_code {
                     match &editor {
-                        Some(state) => Editor::new(state)
-                            .readonly(true)
-                            .bordered(false)
-                            .size_full()
-                            .into_any_element(),
+                        Some(state) => crate::editor_hover::hover_lines(
+                            Editor::new(state).readonly(true).bordered(false).size_full(),
+                            state,
+                            cx,
+                        ),
                         None => div().into_any_element(),
                     }
                 } else {
@@ -1046,5 +1003,204 @@ impl Osier {
                 }
             }
         }
+    }
+}
+
+impl Osier {
+    /// A changed file's diff (HEAD against the working tree): per hunk a checkbox (ticked,
+    /// empty or a dash, from `osier_git::staging`) on its first added line and a roll-back
+    /// arrow on its first removed line, and every staged line in a stronger shade of its change
+    /// colour.
+    fn staging_gutter(
+        &self,
+        view: Diff,
+        path: String,
+        staging: std::rc::Rc<osier_git::staging::FileStaging>,
+        cx: &mut Context<Self>,
+    ) -> Diff {
+        use osier_git::diff::LineKind;
+        use osier_git::staging::Check;
+
+        // Staged lines: their own change colour, stronger (like PhpStorm's included changes).
+        let (added_tint, removed_tint) = (
+            cx.theme().success.opacity(0.14),
+            cx.theme().danger.opacity(0.14),
+        );
+        let line_range = |kind: LineKind, n: u32| {
+            let side = if kind == LineKind::Removed {
+                DiffSide::Original
+            } else {
+                DiffSide::Modified
+            };
+            DiffLineRange::new(path.clone(), side, n as usize, n as usize)
+        };
+        let mut decorations = Vec::new();
+        let mut markers = Vec::new();
+        for (hix, h) in staging.shown.hunks.iter().enumerate() {
+            for (lix, l) in h.lines.iter().enumerate() {
+                if staging.line_staged(hix, lix) == Some(true)
+                    && let Some(n) = if l.kind == LineKind::Removed {
+                        l.old_no
+                    } else {
+                        l.new_no
+                    }
+                {
+                    let tint = if l.kind == LineKind::Removed {
+                        removed_tint
+                    } else {
+                        added_tint
+                    };
+                    decorations
+                        .push(DiffDecoration::new(line_range(l.kind, n)).with_background(tint));
+                }
+            }
+            // Like PhpStorm: the roll-back arrow on the change's first removed (red) line,
+            // the checkbox on its first added (green) line, so the arrow is always above the
+            // checkbox. One control fits a row, so a change with only one kind of line uses
+            // that kind's first two lines; a one-line change borrows the context line above
+            // (additions) or below (removals), or the other side when the file ends there.
+            let at = |l: &osier_git::diff::Line| match l.kind {
+                LineKind::Removed => l
+                    .old_no
+                    .map(|n| DiffLinePosition::new(path.clone(), DiffSide::Original, n as usize)),
+                _ => l
+                    .new_no
+                    .map(|n| DiffLinePosition::new(path.clone(), DiffSide::Modified, n as usize)),
+            };
+            let of_kind = |kind: LineKind| h.lines.iter().filter(move |l| l.kind == kind);
+            let changed = |l: &&osier_git::diff::Line| l.kind != LineKind::Context;
+            let above = h
+                .lines
+                .iter()
+                .position(|l| changed(&l))
+                .and_then(|ix| ix.checked_sub(1))
+                .and_then(|ix| at(&h.lines[ix]));
+            let below = h
+                .lines
+                .iter()
+                .rposition(|l| changed(&l))
+                .and_then(|ix| h.lines.get(ix + 1))
+                .and_then(at);
+            let added: Vec<_> = of_kind(LineKind::Added).filter_map(&at).take(2).collect();
+            let removed: Vec<_> = of_kind(LineKind::Removed).filter_map(&at).take(2).collect();
+            // (arrow, checkbox), top to bottom.
+            let one_kind = |lines: &[DiffLinePosition], borrowed_above: bool| match lines {
+                [first, second, ..] => (Some(first.clone()), Some(second.clone())),
+                [only] => match (borrowed_above, &above, &below) {
+                    (true, Some(a), _) => (Some(a.clone()), Some(only.clone())),
+                    (false, _, Some(b)) => (Some(only.clone()), Some(b.clone())),
+                    (_, _, Some(b)) => (Some(only.clone()), Some(b.clone())),
+                    (_, Some(a), _) => (Some(a.clone()), Some(only.clone())),
+                    // A one-line file: the checkbox alone; the file's own roll back remains.
+                    _ => (None, Some(only.clone())),
+                },
+                [] => (None, None),
+            };
+            let (revert_at, check_at) = match (added.first(), removed.first()) {
+                (Some(a), Some(r)) => (Some(r.clone()), Some(a.clone())),
+                (Some(_), None) => one_kind(&added, true),
+                (None, Some(_)) => one_kind(&removed, false),
+                (None, None) => (None, None),
+            };
+            let check = match staging.hunk_check(hix) {
+                Check::Staged => "staged",
+                Check::Unstaged => "unstaged",
+                Check::Partial => "partial",
+            };
+            if let Some(position) = check_at {
+                markers
+                    .push(DiffGutterMarker::new(("hunk-check", hix), position).with_label(check));
+            }
+            if let Some(position) = revert_at {
+                markers.push(
+                    DiffGutterMarker::new(("hunk-revert", hix), position).with_label("revert"),
+                );
+            }
+        }
+        let weak = cx.entity().downgrade();
+        view.decorations(decorations)
+            .gutter_markers(markers)
+            .render_gutter_marker(move |marker, _, _| {
+                let ElementId::NamedInteger(kind, hix) = marker.id().clone() else {
+                    return div().into_any_element();
+                };
+                let hix = hix as usize;
+                let act = {
+                    let (weak, path) = (weak.clone(), path.clone());
+                    move |action: HunkAction| {
+                        let (weak, path) = (weak.clone(), path.clone());
+                        move |window: &mut Window, cx: &mut App| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.hunk_action(path.clone(), hix, action, window, cx)
+                            });
+                        }
+                    }
+                };
+                if kind.as_ref() == "hunk-revert" {
+                    let revert = act(HunkAction::Discard);
+                    return Button::new(marker.id().clone())
+                        .test_id(|| format!("hunk-revert:{hix}"))
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide::Undo2)
+                        .tooltip("Roll back this change")
+                        .on_click(move |_, window, cx| revert(window, cx))
+                        .into_any_element();
+                }
+                let label = marker.label().clone();
+                let staged = label.as_ref() == "staged";
+                let toggle = act(if staged {
+                    HunkAction::Unstage
+                } else {
+                    HunkAction::Stage
+                });
+                let (stage, unstage, revert) = (
+                    act(HunkAction::Stage),
+                    act(HunkAction::Unstage),
+                    act(HunkAction::Discard),
+                );
+                div()
+                    .id(marker.id().clone())
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        crate::checkbox::Checkbox::new(("hunk-checkbox", hix))
+                            .test_id(|| format!("hunk-check:{hix}"))
+                            .accessibility_label(if staged {
+                                "Unstage this change"
+                            } else {
+                                "Stage this change"
+                            })
+                            .small()
+                            .checked(staged)
+                            .indeterminate(label.as_ref() == "partial")
+                            .on_click(move |_, window, cx| {
+                                cx.stop_propagation();
+                                toggle(window, cx)
+                            }),
+                    )
+                    .context_menu(move |menu, _, _| {
+                        let (stage, unstage, revert) =
+                            (stage.clone(), unstage.clone(), revert.clone());
+                        menu.item(
+                            PopupMenuItem::new("Stage this change")
+                                .disabled(staged)
+                                .on_click(move |_, window, cx| stage(window, cx)),
+                        )
+                        .item(
+                            PopupMenuItem::new("Unstage this change")
+                                .disabled(label.as_ref() == "unstaged")
+                                .on_click(move |_, window, cx| unstage(window, cx)),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Roll back this change…")
+                                .on_click(move |_, window, cx| revert(window, cx)),
+                        )
+                    })
+                    .into_any_element()
+            })
     }
 }

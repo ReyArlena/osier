@@ -76,6 +76,13 @@ impl RepoStatus {
         self.entries.iter().filter(|e| e.is_unstaged())
     }
 
+    /// Tracked files with changes in the index, the working tree or both (one list).
+    pub fn changed(&self) -> impl Iterator<Item = &StatusEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.is_staged() || e.is_unstaged())
+    }
+
     pub fn untracked(&self) -> impl Iterator<Item = &StatusEntry> {
         self.entries.iter().filter(|e| e.is_untracked())
     }

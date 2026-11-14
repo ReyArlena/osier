@@ -8,17 +8,43 @@ pub fn scan(dirs: &[PathBuf], depth: u8) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for dir in dirs {
         let dir = expand_home(dir);
-        walk(&dir, depth.max(1), &mut found);
+        walk(&dir, depth.max(1), &mut found, &mut WatchSet::default());
     }
     found.sort();
     found.dedup();
     found
 }
 
-fn walk(dir: &Path, depth: u8, found: &mut Vec<PathBuf>) {
+/// The folders to watch so a repository appearing under `dirs`, or going away, is noticed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct WatchSet {
+    /// The folders `scan` reads: a folder created, removed or renamed in one can change the
+    /// list.
+    pub scanned: Vec<PathBuf>,
+    /// The plain folders at the last level: only a `.git` appearing in one (`git init`)
+    /// changes the list.
+    pub leaves: Vec<PathBuf>,
+}
+
+/// What to watch for a scan of `dirs` to `depth`. Repositories themselves are not watched.
+pub fn watch_set(dirs: &[PathBuf], depth: u8) -> WatchSet {
+    let mut set = WatchSet::default();
+    for dir in dirs {
+        let dir = expand_home(dir);
+        walk(&dir, depth.max(1), &mut Vec::new(), &mut set);
+    }
+    for list in [&mut set.scanned, &mut set.leaves] {
+        list.sort();
+        list.dedup();
+    }
+    set
+}
+
+fn walk(dir: &Path, depth: u8, found: &mut Vec<PathBuf>, watch: &mut WatchSet) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    watch.scanned.push(dir.to_path_buf());
     let mut children: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
@@ -34,7 +60,9 @@ fn walk(dir: &Path, depth: u8, found: &mut Vec<PathBuf>) {
         if child.join(".git").exists() {
             found.push(child);
         } else if depth > 1 {
-            walk(&child, depth - 1, found);
+            walk(&child, depth - 1, found, watch);
+        } else {
+            watch.leaves.push(child);
         }
     }
 }
@@ -87,6 +115,33 @@ mod tests {
             Some(&root.path().to_path_buf())
         );
         assert_eq!(provider(&[PathBuf::from("/nowhere")], &found[0]), None);
+    }
+
+    #[test]
+    fn watches_the_folders_a_repository_could_appear_in() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in ["repo/.git", "plain/inner", ".hidden", "repo/sub"] {
+            std::fs::create_dir_all(root.path().join(dir)).unwrap();
+        }
+        let rel = |list: &[PathBuf]| -> Vec<String> {
+            list.iter()
+                .map(|p| {
+                    p.strip_prefix(root.path())
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        };
+        // The scan directory is read; its plain folder could become a repository. The
+        // repository and the hidden folder are not watched.
+        let one = watch_set(&[root.path().to_path_buf()], 1);
+        assert_eq!(rel(&one.scanned), [""]);
+        assert_eq!(rel(&one.leaves), ["plain"]);
+        // One level deeper: the plain folder is read, and its own plain folder is a leaf.
+        let two = watch_set(&[root.path().to_path_buf()], 2);
+        assert_eq!(rel(&two.scanned), ["", "plain"]);
+        assert_eq!(rel(&two.leaves), ["plain/inner"]);
     }
 
     #[test]

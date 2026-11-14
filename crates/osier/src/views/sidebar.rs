@@ -5,7 +5,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::sidebar::{
-    Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem, SidebarMenuItem,
+    Sidebar, SidebarFooter, SidebarHeader, SidebarItem, SidebarMenuItem,
 };
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
@@ -13,13 +13,14 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::rc::Rc;
 
 use crate::app::Osier;
 use crate::app::panes::ResizeSidebar;
 use crate::format::{ahead_behind as arrows_text, tilde};
 use crate::test_ids::TestId as _;
 
-type MoveHandler = std::rc::Rc<dyn Fn(usize, usize, &mut App)>;
+type MoveHandler = Rc<dyn Fn(usize, usize, &mut App)>;
 
 // Geometry of gpui-kit's sidebar row: 8px padding, 16px icon, 8px gap, 28px tall.
 const DOT_SIZE: f32 = 6.0;
@@ -164,6 +165,97 @@ impl ReorderMenu {
     }
 }
 
+/// One item of the sidebar's list: a group title, or a single row.
+///
+/// gpui-kit's `Sidebar` lays out only the items on screen, but a group is one item, so the
+/// Recent group with hundreds of scanned repositories was built, laid out and painted whole on
+/// every hover in the sidebar. Every title and row is its own item instead; the titles look like
+/// `SidebarGroup`'s, and `gap_after` stands in for the gap between a group's rows.
+#[derive(Clone)]
+enum SidebarEntry {
+    Title(SharedString),
+    Row {
+        build: RowBuilder,
+        gap_after: bool,
+        collapsed: bool,
+    },
+}
+
+impl SidebarEntry {
+    /// `title`, then the rows; nothing when there are no rows.
+    fn group(out: &mut Vec<SidebarEntry>, title: &str, rows: Vec<RowBuilder>) {
+        if rows.is_empty() {
+            return;
+        }
+        out.push(SidebarEntry::Title(SharedString::from(title.to_string())));
+        let last = rows.len() - 1;
+        out.extend(
+            rows.into_iter()
+                .enumerate()
+                .map(|(ix, build)| SidebarEntry::Row {
+                    build,
+                    gap_after: ix < last,
+                    collapsed: false,
+                }),
+        );
+    }
+}
+
+impl Collapsible for SidebarEntry {
+    fn collapsed(self, collapsed: bool) -> Self {
+        match self {
+            SidebarEntry::Row {
+                build, gap_after, ..
+            } => SidebarEntry::Row {
+                build,
+                gap_after,
+                collapsed,
+            },
+            title => title,
+        }
+    }
+
+    fn is_collapsed(&self) -> bool {
+        match self {
+            SidebarEntry::Row { collapsed, .. } => *collapsed,
+            SidebarEntry::Title(_) => false,
+        }
+    }
+}
+
+impl SidebarItem for SidebarEntry {
+    fn render(
+        self,
+        id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
+        match self {
+            // Same as gpui-kit's `SidebarGroup` label.
+            SidebarEntry::Title(label) => h_flex()
+                .flex_shrink_0()
+                .px_2()
+                .rounded(cx.theme().radius)
+                .text_xs()
+                .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                .h_8()
+                .child(label)
+                .into_any_element(),
+            SidebarEntry::Row {
+                build,
+                gap_after,
+                collapsed,
+            } => {
+                let menu = build(cx).collapsed(collapsed);
+                div()
+                    .when(gap_after, |this| this.pb_2())
+                    .child(menu.render(id, window, cx))
+                    .into_any_element()
+            }
+        }
+    }
+}
+
 impl Collapsible for ReorderMenu {
     fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
@@ -246,34 +338,55 @@ impl SidebarItem for ReorderMenu {
     }
 }
 
+/// Builds one sidebar row when the sidebar's list shows it.
+type RowBuilder = Rc<dyn Fn(&mut App) -> ReorderMenu>;
+
+/// What a not-open project's row shows of its status: the changes marker and ↑/↓.
+#[derive(Clone)]
+struct StatusMarks {
+    dirty: bool,
+    /// The changes marker is a dot (`appearance.changes_indicator`), not the icon's colour.
+    by_dot: bool,
+    arrows: Option<String>,
+}
+
+/// A row for a project that is not open, with its last known status: ↑/↓ suffix and the
+/// changes marker (icon colour or a dot, per `appearance.changes_indicator`).
+fn status_item(
+    marks: &StatusMarks,
+    name: &str,
+    icon: Lucide,
+    cx: &App,
+) -> (SidebarMenuItem, Option<Hsla>) {
+    let color = cx.theme().warning;
+    let (dirty, by_dot) = (marks.dirty, marks.by_dot);
+    let arrows = marks.arrows.clone();
+    let fade = RowFade::new(cx);
+    let item = SidebarMenuItem::new(name.to_string())
+        .icon(Icon::new(icon).when(dirty && !by_dot, |i| i.text_color(color)))
+        .label_style(label_style(by_dot))
+        .suffix(move |_, _| {
+            row_suffix(fade, false).when_some(arrows.clone(), |this, a| {
+                this.child(Tag::secondary().xsmall().child(a))
+            })
+        });
+    (item, by_dot.then_some(color))
+}
+
 impl Osier {
-    /// A row for a project that is not open, with its last known status: ↑/↓ suffix and the
-    /// changes marker (icon colour or a dot, per `appearance.changes_indicator`).
-    fn status_item(
-        &self,
-        path: &std::path::Path,
-        name: &str,
-        icon: Lucide,
-        cx: &App,
-    ) -> (SidebarMenuItem, Option<Hsla>) {
+    /// The last known status of a project that is not open, for its row (`status_item`).
+    fn status_marks(&self, path: &std::path::Path) -> StatusMarks {
         let badge = self.recent_badge(path);
-        let color = cx.theme().warning;
         let dirty =
             self.recent_status.shows_changes() && badge.and_then(|b| b.dirty).unwrap_or(false);
         let by_dot = dirty
             && self.settings.appearance.changes_indicator
                 == osier_config::settings::ChangesIndicator::Dot;
-        let arrows = badge.and_then(|b| arrows_text(b.ahead, b.behind));
-        let fade = RowFade::new(cx);
-        let item = SidebarMenuItem::new(name.to_string())
-            .icon(Icon::new(icon).when(dirty && !by_dot, |i| i.text_color(color)))
-            .label_style(label_style(by_dot))
-            .suffix(move |_, _| {
-                row_suffix(fade, false).when_some(arrows.clone(), |this, a| {
-                    this.child(Tag::secondary().xsmall().child(a))
-                })
-            });
-        (item, by_dot.then_some(color))
+        StatusMarks {
+            dirty,
+            by_dot,
+            arrows: badge.and_then(|b| arrows_text(b.ahead, b.behind)),
+        }
     }
 
     /// The `is:` suggestion dropdown under the focused filter box, painted above the sidebar.
@@ -393,27 +506,33 @@ impl Osier {
         )
     }
 
-    pub(crate) fn render_sidebar(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    /// The project sidebar's content (a pane, `crate::pane`); [`Self::render_sidebar_frame`]
+    /// gives it its width and draggable edge.
+    pub(crate) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let weak = cx.entity().downgrade();
         let filter = self.sidebar_filter_text(cx);
         let query = self.sidebar_query(cx);
         let project_count = self.projects.len();
         let name_hints = self.sidebar_name_hints();
 
-        let mut open = ReorderMenu::new();
-        let mut open_rows: Vec<(usize, SharedString)> = Vec::new();
+        // Every row is built only when the sidebar's list shows it (`SidebarEntry`): here each
+        // row gets its data and a builder. Clicks go through `weak`, since a row is built
+        // outside this render.
+        let mut open: Vec<RowBuilder> = Vec::new();
         let mut shown_open = 0;
+        // Drag to reorder; the menu's Move up/down stays for keyboard users.
+        let on_move: MoveHandler = {
+            let w = weak.clone();
+            Rc::new(move |from, to, cx| {
+                let _ = w.update(cx, |this, cx| this.move_project_to(from, to, cx));
+            })
+        };
         for (ix, project) in self.projects.iter().enumerate() {
             if !query.matches(&project.path, Self::open_row_status(project)) {
                 continue;
             }
             shown_open += 1;
             let label = crate::format::name_with_hint(&project.name, name_hints.get(&project.path));
-            open_rows.push((ix, label.clone().into()));
             let pinned = self.state.is_pinned(&project.path);
             let (dirty, ahead, behind) = project
                 .snapshot
@@ -423,258 +542,274 @@ impl Osier {
                     (!s.status.entries.is_empty(), b.ahead, b.behind)
                 })
                 .unwrap_or_default();
-            let loading = project.loading;
-            let menu_weak = weak.clone();
             let path = project.path.clone();
-            let changes_color = cx.theme().warning;
             let by_dot = dirty
                 && self.settings.appearance.changes_indicator
                     == osier_config::settings::ChangesIndicator::Dot;
             let by_icon = dirty && !by_dot;
-            let fade = RowFade::new(cx);
             let is_active = self.active == Some(ix);
             let on_github = project.snapshot.as_ref().is_some_and(|s| {
                 crate::app::github::repo_url(&s.remotes, s.status.branch.upstream.as_deref())
                     .is_some()
             });
-            let item = SidebarMenuItem::new(label)
-                .icon(
-                    Icon::new(Lucide::FolderGit2)
-                        .when(by_icon, |icon| icon.text_color(changes_color)),
-                )
-                .label_style(label_style(by_dot))
-                .active(is_active)
-                .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
-                .suffix(move |_, _| {
-                    // Ahead/behind the upstream, like the status bar, only when non-zero.
-                    let arrows = arrows_text(ahead, behind);
-                    row_suffix(fade, is_active)
-                        .when(loading, |this| {
-                            this.child(Tag::secondary().xsmall().child("…"))
-                        })
-                        .when_some(arrows.filter(|_| !loading), |this, a| {
-                            this.child(Tag::secondary().xsmall().child(a))
-                        })
-                        .when(pinned, |this| this.child(Icon::new(Lucide::Pin).xsmall()))
-                        .into_any_element()
-                })
-                .context_menu(move |menu, _, _| {
-                    let w = menu_weak.clone();
-                    let p = path.clone();
-                    let act = |f: fn(&mut Osier, usize, &mut Window, &mut Context<Osier>)| {
-                        let w = w.clone();
-                        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                            let _ = w.update(cx, |this, cx| f(this, ix, window, cx));
+            let test_id = format!("sidebar-open:{}", project.name);
+            let (weak, on_move) = (weak.clone(), on_move.clone());
+            open.push(Rc::new(move |cx: &mut App| {
+                let changes_color = cx.theme().warning;
+                let fade = RowFade::new(cx);
+                let menu_weak = weak.clone();
+                let path = path.clone();
+                let item = SidebarMenuItem::new(label.clone())
+                    .icon(
+                        Icon::new(Lucide::FolderGit2)
+                            .when(by_icon, |icon| icon.text_color(changes_color)),
+                    )
+                    .label_style(label_style(by_dot))
+                    .active(is_active)
+                    .on_click({
+                        let w = weak.clone();
+                        move |_, window, cx| {
+                            let _ = w.update(cx, |this, cx| this.activate(ix, window, cx));
                         }
-                    };
-                    menu.item(PopupMenuItem::new("Open in editor").on_click(act(
-                        |this, ix, window, cx| {
-                            this.activate(ix, window, cx);
-                            this.open_in_editor(None, window, cx);
-                        },
-                    )))
-                    .item(PopupMenuItem::new("Open in terminal").on_click(act(
-                        |this, ix, window, cx| {
-                            this.activate(ix, window, cx);
-                            this.open_terminal(window, cx);
-                        },
-                    )))
-                    .item(PopupMenuItem::new("Open in file manager").on_click(act(
-                        |this, ix, window, cx| {
-                            this.activate(ix, window, cx);
-                            this.reveal_in_file_manager(None, window, cx);
-                        },
-                    )))
-                    .when(on_github, |menu| {
-                        let (w, p) = (w.clone(), p.clone());
-                        menu.item(PopupMenuItem::new("Open on GitHub").on_click(
+                    })
+                    .suffix(move |_, _| {
+                        // Ahead/behind the upstream, like the status bar, only when non-zero.
+                        // A background refresh keeps the last known counts on screen: it is
+                        // quiet work (the status bar names it with "Show background tasks" on).
+                        let arrows = arrows_text(ahead, behind);
+                        row_suffix(fade, is_active)
+                            .when_some(arrows, |this, a| {
+                                this.child(
+                                    div()
+                                        .test_id(|| format!("sidebar-arrows:{ix}"))
+                                        .child(Tag::secondary().xsmall().child(a)),
+                                )
+                            })
+                            .when(pinned, |this| this.child(Icon::new(Lucide::Pin).xsmall()))
+                            .into_any_element()
+                    })
+                    .context_menu(move |menu, _, _| {
+                        let w = menu_weak.clone();
+                        let p = path.clone();
+                        let act = |f: fn(&mut Osier, usize, &mut Window, &mut Context<Osier>)| {
+                            let w = w.clone();
+                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                let _ = w.update(cx, |this, cx| f(this, ix, window, cx));
+                            }
+                        };
+                        menu.item(PopupMenuItem::new("Open in editor").on_click(act(
+                            |this, ix, window, cx| {
+                                this.activate(ix, window, cx);
+                                this.open_in_editor(None, window, cx);
+                            },
+                        )))
+                        .item(PopupMenuItem::new("Open in terminal").on_click(act(
+                            |this, ix, window, cx| {
+                                this.activate(ix, window, cx);
+                                this.open_terminal(window, cx);
+                            },
+                        )))
+                        .item(PopupMenuItem::new("Open in file manager").on_click(act(
+                            |this, ix, window, cx| {
+                                this.activate(ix, window, cx);
+                                this.reveal_in_file_manager(None, window, cx);
+                            },
+                        )))
+                        .when(on_github, |menu| {
+                            let (w, p) = (w.clone(), p.clone());
+                            menu.item(PopupMenuItem::new("Open on GitHub").on_click(
+                                move |_, window, cx| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        this.open_project_on_github(&p, window, cx)
+                                    });
+                                },
+                            ))
+                        })
+                        .item(PopupMenuItem::new("Git config").on_click({
+                            let (w, p) = (w.clone(), p.clone());
                             move |_, window, cx| {
                                 let _ = w.update(cx, |this, cx| {
-                                    this.open_project_on_github(&p, window, cx)
+                                    this.open_repo_config(p.clone(), window, cx)
                                 });
-                            },
-                        ))
-                    })
-                    .item(PopupMenuItem::new("Git config").on_click({
-                        let (w, p) = (w.clone(), p.clone());
-                        move |_, window, cx| {
-                            let _ = w.update(cx, |this, cx| {
-                                this.open_repo_config(p.clone(), window, cx)
-                            });
-                        }
-                    }))
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("Move up")
-                            .disabled(ix == 0)
-                            .on_click(act(|this, ix, _, cx| this.move_project(ix, -1, cx))),
-                    )
-                    .item(
-                        PopupMenuItem::new("Move down")
-                            .disabled(ix + 1 >= project_count)
-                            .on_click(act(|this, ix, _, cx| this.move_project(ix, 1, cx))),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" }).on_click({
-                            let (w, p) = (w.clone(), p.clone());
-                            move |_, _, cx| {
-                                let _ = w.update(cx, |this, cx| this.toggle_pin(&p, cx));
                             }
-                        }),
-                    )
-                    .item(PopupMenuItem::new("Copy path").on_click({
-                        let w = w.clone();
-                        move |_, window, cx| {
-                            let p = p.to_string_lossy().into_owned();
-                            let _ = w.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
-                        }
-                    }))
-                    .item(PopupMenuItem::new("Close project").on_click(act(
-                        |this, ix, window, cx| this.close_project(ix, window, cx),
-                    )))
-                });
-            let test_id = format!("sidebar-open:{}", project.name);
-            open = if by_dot {
-                open.child_with_dot(test_id, item, changes_color)
-            } else {
-                open.child(test_id, item)
-            };
+                        }))
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Move up")
+                                .disabled(ix == 0)
+                                .on_click(act(|this, ix, _, cx| this.move_project(ix, -1, cx))),
+                        )
+                        .item(
+                            PopupMenuItem::new("Move down")
+                                .disabled(ix + 1 >= project_count)
+                                .on_click(act(|this, ix, _, cx| this.move_project(ix, 1, cx))),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" }).on_click({
+                                let (w, p) = (w.clone(), p.clone());
+                                move |_, _, cx| {
+                                    let _ = w.update(cx, |this, cx| this.toggle_pin(&p, cx));
+                                }
+                            }),
+                        )
+                        .item(PopupMenuItem::new("Copy path").on_click({
+                            let w = w.clone();
+                            move |_, window, cx| {
+                                let p = p.to_string_lossy().into_owned();
+                                let _ =
+                                    w.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                            }
+                        }))
+                        .item(
+                            PopupMenuItem::new("Close project").on_click(act(
+                                |this, ix, window, cx| this.close_project(ix, window, cx),
+                            )),
+                        )
+                    });
+                let menu = if by_dot {
+                    ReorderMenu::new().child_with_dot(test_id.clone(), item, changes_color)
+                } else {
+                    ReorderMenu::new().child(test_id.clone(), item)
+                };
+                menu.reorderable(vec![(ix, label.clone().into())], on_move.clone())
+            }));
         }
 
-        // Drag to reorder; the menu's Move up/down stays for keyboard users.
-        let move_weak = weak.clone();
-        let open = open.reorderable(
-            open_rows,
-            std::rc::Rc::new(move |from, to, cx| {
-                let _ = move_weak.update(cx, |this, cx| this.move_project_to(from, to, cx));
-            }),
-        );
-
         // Pinned repositories that are not open right now.
-        let pinned = self.pinned_entries(cx);
-        let has_pinned = !pinned.is_empty();
-        let mut pinned_menu = ReorderMenu::new();
-        for path in pinned {
+        let mut pinned: Vec<RowBuilder> = Vec::new();
+        for path in self.pinned_entries(cx) {
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            let missing = self.project_missing(&path);
-            let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
-            let (item, dot) = self.status_item(
-                &path,
-                &crate::format::name_with_hint(&name, name_hints.get(&path)),
-                if missing {
-                    Lucide::FolderX
-                } else {
-                    Lucide::Pin
-                },
-                cx,
-            );
-            pinned_menu = pinned_menu.row(
-                format!("sidebar-pinned:{name}"),
-                item.on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_project_notify(&open_path, window, cx);
-                }))
-                .context_menu(move |menu, _, _| {
-                    let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
-                    let (p1, p2) = (menu_path.clone(), menu_path.clone());
-                    let (w3, p3) = (menu_weak.clone(), menu_path.clone());
-                    let (w4, p4) = (menu_weak.clone(), menu_path.clone());
-                    menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
-                        let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
-                    }))
-                    .item(
-                        PopupMenuItem::new("Open on GitHub").on_click(move |_, window, cx| {
-                            let _ = w3.update(cx, |this, cx| {
-                                this.open_project_on_github(&p3, window, cx)
-                            });
-                        }),
-                    )
-                    .item(
-                        PopupMenuItem::new("Git config").on_click(move |_, window, cx| {
-                            let _ = w4.update(cx, |this, cx| {
-                                this.open_repo_config(p4.clone(), window, cx)
-                            });
-                        }),
-                    )
-                    .item(
-                        PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
-                            let p = p2.to_string_lossy().into_owned();
-                            let _ = w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
-                        }),
-                    )
-                }),
-                dot,
-            );
+            let icon = if self.project_missing(&path) {
+                Lucide::FolderX
+            } else {
+                Lucide::Pin
+            };
+            let label = crate::format::name_with_hint(&name, name_hints.get(&path));
+            let marks = self.status_marks(&path);
+            let weak = weak.clone();
+            pinned.push(Rc::new(move |cx: &mut App| {
+                let (item, dot) = status_item(&marks, &label, icon, cx);
+                let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
+                let w = weak.clone();
+                ReorderMenu::new().row(
+                    format!("sidebar-pinned:{name}"),
+                    item.on_click(move |_, window, cx| {
+                        let _ = w.update(cx, |this, cx| {
+                            this.open_project_notify(&open_path, window, cx)
+                        });
+                    })
+                    .context_menu(move |menu, _, _| {
+                        let (w1, w2) = (menu_weak.clone(), menu_weak.clone());
+                        let (p1, p2) = (menu_path.clone(), menu_path.clone());
+                        let (w3, p3) = (menu_weak.clone(), menu_path.clone());
+                        let (w4, p4) = (menu_weak.clone(), menu_path.clone());
+                        menu.item(PopupMenuItem::new("Unpin").on_click(move |_, _, cx| {
+                            let _ = w1.update(cx, |this, cx| this.toggle_pin(&p1, cx));
+                        }))
+                        .item(PopupMenuItem::new("Open on GitHub").on_click(
+                            move |_, window, cx| {
+                                let _ = w3.update(cx, |this, cx| {
+                                    this.open_project_on_github(&p3, window, cx)
+                                });
+                            },
+                        ))
+                        .item(
+                            PopupMenuItem::new("Git config").on_click(move |_, window, cx| {
+                                let _ = w4.update(cx, |this, cx| {
+                                    this.open_repo_config(p4.clone(), window, cx)
+                                });
+                            }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                                let p = p2.to_string_lossy().into_owned();
+                                let _ =
+                                    w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                            }),
+                        )
+                    }),
+                    dot,
+                )
+            }));
         }
 
         let recents = self.recent_entries(cx);
         let has_recent = !recents.is_empty();
-        let mut recent = ReorderMenu::new();
+        let mut recent: Vec<RowBuilder> = Vec::new();
         for (path, provider) in recents {
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
             let missing = self.project_missing(&path);
-            let open_path = path.clone();
-            let menu_weak = weak.clone();
-            let menu_path = path.clone();
-            let from_scan = provider.is_some();
             let icon = if missing {
                 Lucide::FolderX
-            } else if from_scan {
+            } else if provider.is_some() {
                 Lucide::FolderSearch
             } else {
                 Lucide::Folder
             };
             let label = crate::format::name_with_hint(&name, name_hints.get(&path));
-            let (item, dot) = self.status_item(&path, &label, icon, cx);
-            recent = recent.row(
-                format!("sidebar-recent:{name}"),
-                item.on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_project_notify(&open_path, window, cx);
-                }))
-                .context_menu(move |menu, _, _| {
-                    let (w1, w2, w3) = (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
-                    let (p1, p2, p3) = (menu_path.clone(), menu_path.clone(), menu_path.clone());
-                    let (w4, p4) = (menu_weak.clone(), menu_path.clone());
-                    let (w5, p5) = (menu_weak.clone(), menu_path.clone());
-                    menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
-                        let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
-                    }))
-                    .item(
-                        PopupMenuItem::new("Open on GitHub").on_click(move |_, window, cx| {
-                            let _ = w4.update(cx, |this, cx| {
-                                this.open_project_on_github(&p4, window, cx)
-                            });
-                        }),
-                    )
-                    .when(!missing, |menu| {
-                        menu.item(PopupMenuItem::new("Git config").on_click(
+            let marks = self.status_marks(&path);
+            let weak = weak.clone();
+            recent.push(Rc::new(move |cx: &mut App| {
+                let (item, dot) = status_item(&marks, &label, icon, cx);
+                let (open_path, menu_path, menu_weak) = (path.clone(), path.clone(), weak.clone());
+                let w = weak.clone();
+                ReorderMenu::new().row(
+                    format!("sidebar-recent:{name}"),
+                    item.on_click(move |_, window, cx| {
+                        let _ = w.update(cx, |this, cx| {
+                            this.open_project_notify(&open_path, window, cx)
+                        });
+                    })
+                    .context_menu(move |menu, _, _| {
+                        let (w1, w2, w3) =
+                            (menu_weak.clone(), menu_weak.clone(), menu_weak.clone());
+                        let (p1, p2, p3) =
+                            (menu_path.clone(), menu_path.clone(), menu_path.clone());
+                        let (w4, p4) = (menu_weak.clone(), menu_path.clone());
+                        let (w5, p5) = (menu_weak.clone(), menu_path.clone());
+                        menu.item(PopupMenuItem::new("Pin").on_click(move |_, _, cx| {
+                            let _ = w3.update(cx, |this, cx| this.toggle_pin(&p3, cx));
+                        }))
+                        .item(PopupMenuItem::new("Open on GitHub").on_click(
                             move |_, window, cx| {
-                                let _ = w5.update(cx, |this, cx| {
-                                    this.open_repo_config(p5.clone(), window, cx)
+                                let _ = w4.update(cx, |this, cx| {
+                                    this.open_project_on_github(&p4, window, cx)
                                 });
                             },
                         ))
-                    })
-                    .item(PopupMenuItem::new("Remove from recents").on_click(
-                        move |_, window, cx| {
-                            let _ = w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
-                        },
-                    ))
-                    .item(
-                        PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
-                            let p = p2.to_string_lossy().into_owned();
-                            let _ = w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
-                        }),
-                    )
-                }),
-                dot,
-            );
+                        .when(!missing, |menu| {
+                            menu.item(PopupMenuItem::new("Git config").on_click(
+                                move |_, window, cx| {
+                                    let _ = w5.update(cx, |this, cx| {
+                                        this.open_repo_config(p5.clone(), window, cx)
+                                    });
+                                },
+                            ))
+                        })
+                        .item(PopupMenuItem::new("Remove from recents").on_click(
+                            move |_, window, cx| {
+                                let _ =
+                                    w1.update(cx, |this, cx| this.forget_recent(&p1, window, cx));
+                            },
+                        ))
+                        .item(
+                            PopupMenuItem::new("Copy path").on_click(move |_, window, cx| {
+                                let p = p2.to_string_lossy().into_owned();
+                                let _ =
+                                    w2.update(cx, |this, cx| this.copy_to_clipboard(p, window, cx));
+                            }),
+                        )
+                    }),
+                    dot,
+                )
+            }));
         }
 
         // Not collapsible: Osier hides the sidebar as a whole, and a collapsible one animates
@@ -745,9 +880,13 @@ impl Osier {
                         ),
                 ),
             )
-            .when(has_pinned, |this| this.child(SidebarGroup::new("Pinned").child(pinned_menu)))
-            .when(shown_open > 0, |this| this.child(SidebarGroup::new("Open").child(open)))
-            .when(has_recent, |this| this.child(SidebarGroup::new("Recent").child(recent)))
+            .children({
+                let mut entries = Vec::new();
+                SidebarEntry::group(&mut entries, "Pinned", pinned);
+                SidebarEntry::group(&mut entries, "Open", open);
+                SidebarEntry::group(&mut entries, "Recent", recent);
+                entries
+            })
             .footer(
                 SidebarFooter::new().child(
                     v_flex()
@@ -795,15 +934,24 @@ impl Osier {
                         ),
                 ),
             );
-        // The sidebar with a draggable right edge. The drag is followed here rather than on
-        // the handle, since the pointer leaves the handle as soon as it moves.
+        sidebar.into_any_element()
+    }
+
+    /// The sidebar pane with a draggable right edge (shell). The drag is followed here rather
+    /// than on the handle, since the pointer leaves the handle as soon as it moves.
+    pub(crate) fn render_sidebar_frame(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .test_id("sidebar-pane")
             .relative()
             .flex()
             .flex_none()
             .h_full()
-            .child(sidebar)
+            .w(px(self.sidebar_width(window)))
+            .child(crate::pane::cached(&self.panes.sidebar, window))
             .child(
                 resize_handle("sidebar-edge", Axis::Horizontal)
                     .inside(HandleEdge::Trailing)

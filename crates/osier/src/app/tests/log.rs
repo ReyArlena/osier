@@ -68,6 +68,184 @@ fn log_badges_sit_before_the_subject_or_at_the_end(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_long_subject_stays_inside_its_row_in_every_text_ending(cx: &mut TestAppContext) {
+    use osier_config::settings::{LogBadges, TextOverflow};
+    let repo = TempRepo::new();
+    let long = "a commit subject far too long for the narrow center column ".repeat(4);
+    repo.commit_file("a.txt", "a\n", long.trim());
+    repo.git(["tag", "v1"]);
+    repo.commit_file("b.txt", "b\n", long.trim());
+    let mut state = State::default();
+    state.layout.center_width = Some(440.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    for style in [
+        TextOverflow::Fade,
+        TextOverflow::Ellipsis,
+        TextOverflow::Both,
+    ] {
+        for badges in [LogBadges::Left, LogBadges::Right] {
+            h.act(cx, |o, _, cx| {
+                o.settings.appearance.text_overflow = style;
+                o.settings.git.log_badges = badges;
+                cx.notify();
+            });
+            let pane = h.bounds(cx, "center-pane").expect("center pane");
+            // Row 0 has no badge, row 1 the tag.
+            for row in [0, 1] {
+                let id: &'static str = Box::leak(format!("log-subject:{row}").into_boxed_str());
+                let subject = h.bounds(cx, id).expect("subject");
+                assert!(
+                    subject.right() <= pane.right() && subject.size.width > gpui::px(40.),
+                    "{style:?}, badges {badges:?}, row {row}: subject {subject:?} in {pane:?}"
+                );
+            }
+        }
+    }
+}
+
+#[gpui::test]
+fn badge_styles_show_all_fade_or_collapse_into_more(cx: &mut TestAppContext) {
+    use osier_config::settings::{LogBadgeStyle, LogBadges};
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "a subject");
+    let names = ["alpha", "beta", "delta", "epsilon", "gamma"];
+    for b in names {
+        repo.branch(b);
+    }
+    // The centre column's width is taken at startup.
+    let open = |cx: &mut TestAppContext, width: f32| {
+        let mut state = State::default();
+        state.layout.center_width = Some(width);
+        let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+        h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+        h
+    };
+    let set = |h: &Harness, cx: &mut TestAppContext, style, side| {
+        h.act(cx, move |o, _, cx| {
+            o.settings.git.log_badge_style = style;
+            o.settings.git.log_badges = side;
+            cx.notify();
+        });
+        // "Collapse" fits its badges to the width measured while drawing.
+        cx.run_until_parked();
+    };
+    let shown = |h: &Harness, cx: &mut TestAppContext| {
+        std::iter::once("main")
+            .chain(names)
+            .filter(|b| h.bounds(cx, &format!("log-ref:0:{b}")).is_some())
+            .count()
+    };
+    let more = |h: &Harness, cx: &mut TestAppContext| h.bounds(cx, "log-ref-more:0");
+    let narrow = open(cx, 440.);
+    let wide = open(cx, 900.);
+
+    // Show them all: every ref, no "+N".
+    set(&narrow, cx, LogBadgeStyle::All, LogBadges::Left);
+    assert_eq!(shown(&narrow, cx), 6);
+    assert!(more(&narrow, cx).is_none());
+
+    // Fade them out: three and "+3".
+    set(&narrow, cx, LogBadgeStyle::Fade, LogBadges::Left);
+    assert_eq!(shown(&narrow, cx), 3);
+    assert!(more(&narrow, cx).is_some());
+
+    // Collapse: what fits beside a "+N" that stays fully visible, more in a wider column.
+    for side in [LogBadges::Left, LogBadges::Right] {
+        set(&narrow, cx, LogBadgeStyle::Collapse, side);
+        let few = shown(&narrow, cx);
+        let plus = more(&narrow, cx).expect("+N in a narrow column");
+        let pane = narrow.bounds(cx, "center-pane").expect("pane");
+        assert!(few >= 1 && plus.right() <= pane.right(), "{side:?}: {few}");
+        if side == LogBadges::Left {
+            let subject = narrow.bounds(cx, "log-subject:0").expect("subject");
+            assert!(plus.right() <= subject.left(), "{plus:?} {subject:?}");
+        }
+        set(&wide, cx, LogBadgeStyle::Collapse, side);
+        assert!(
+            shown(&wide, cx) > few,
+            "{side:?}: wider shows more than {few}"
+        );
+    }
+}
+
+#[gpui::test]
+fn long_left_badges_leave_room_for_the_subject(cx: &mut TestAppContext) {
+    use osier_config::settings::TextOverflow;
+    // Badges on the left (the default) take at most 45% of the row, as on the right; two
+    // long branch names used to leave the subject no width at all.
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "a subject that should stay readable");
+    repo.branch("feature/topic-01-a-long-descriptive-branch-name-for-overflow");
+    repo.branch("feature/topic-02-another-long-descriptive-branch-name");
+    let mut state = State::default();
+    state.layout.center_width = Some(440.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    for style in [
+        TextOverflow::Fade,
+        TextOverflow::Ellipsis,
+        TextOverflow::Both,
+    ] {
+        h.act(cx, |o, _, cx| {
+            o.settings.appearance.text_overflow = style;
+            cx.notify();
+        });
+        let subject = h.bounds(cx, "log-subject:0").expect("subject");
+        let badge = h.bounds(cx, "log-ref:0:main").expect("branch badge");
+        assert!(badge.right() < subject.left(), "{style:?}: badges first");
+        assert!(
+            subject.size.width > gpui::px(80.),
+            "{style:?}: subject {subject:?}"
+        );
+    }
+}
+
+#[gpui::test]
+fn ui_long_ref_names_are_shortened_and_shown_in_full_on_hover(cx: &mut TestAppContext) {
+    // Only a name too wide for its badge is shortened (in the middle, whatever the text
+    // ending setting); every badge, in the Log and the commit details, names its ref in full
+    // in a tooltip.
+    let long = "feature/a-very-long-descriptive-branch-name-that-overflows";
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.branch(long);
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    let badge = h
+        .bounds(cx, &format!("log-ref:0:{long}"))
+        .expect("long badge");
+    assert!(badge.size.width < gpui::px(180.), "{badge:?}");
+    assert!(h.bounds(cx, "ref-short:main").is_none());
+    let short = h
+        .bounds(cx, &format!("ref-short:{long}"))
+        .expect("shortened, in the Log and the details");
+    let hover = |h: &Harness, cx: &mut TestAppContext, at| {
+        h.visual(cx)
+            .simulate_mouse_move(at, None, gpui::Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+    };
+    hover(&h, cx, short.center());
+    assert!(h.bounds(cx, "ref-tooltip").is_some(), "Log badge tooltip");
+    hover(&h, cx, gpui::point(gpui::px(1.), gpui::px(1.)));
+    let refs = h.bounds(cx, "commit-refs").expect("details refs");
+    // The first badge in the details: the checked-out `main`.
+    hover(
+        &h,
+        cx,
+        gpui::point(refs.left() + gpui::px(12.), refs.bottom() - gpui::px(8.)),
+    );
+    assert!(
+        h.bounds(cx, "ref-tooltip").is_some(),
+        "details badge tooltip"
+    );
+}
+
+#[gpui::test]
 fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
@@ -77,8 +255,15 @@ fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppCon
     repo.branch("feat/a");
     repo.branch("feat/b");
     repo.git(["tag", "v1"]);
-    let h = Harness::open(cx, &repo);
-    h.act(cx, |o, _, cx| o.set_tab(Tab::Log, cx));
+    // Wide enough for the "+N" badge: it sits inside the badges' 45% cap and goes with them.
+    let mut state = State::default();
+    state.layout.center_width = Some(900.);
+    let h = Harness::open_with(cx, state, Some(repo.path().to_path_buf()));
+    // "Fade them out": three badges, the rest counted (Collapse fits as many as there is room).
+    h.act(cx, |o, _, cx| {
+        o.settings.git.log_badge_style = osier_config::settings::LogBadgeStyle::Fade;
+        o.set_tab(Tab::Log, cx);
+    });
     // Local branches first, the checked-out one leading, the others by name.
     let x = |h: &Harness, cx: &mut TestAppContext, id: &'static str| {
         h.bounds(cx, id).unwrap_or_else(|| panic!("{id}")).origin.x
@@ -97,9 +282,7 @@ fn ui_log_badges_put_local_branches_first_and_count_the_rest(cx: &mut TestAppCon
     ] {
         assert!(h.bounds(cx, id).is_none(), "{id}");
     }
-    // Its visible left edge: in this narrow window the row's end fade lies over the rest.
-    let more = h.bounds(cx, "log-ref-more:0").expect("+2 badge");
-    let more = gpui::point(more.origin.x + gpui::px(3.), more.center().y);
+    let more = h.bounds(cx, "log-ref-more:0").expect("+2 badge").center();
     h.visual(cx)
         .simulate_mouse_move(more, None, gpui::Modifiers::none());
     cx.executor()
@@ -363,6 +546,21 @@ fn ui_commit_details_panel_shows_toggles_and_remembers(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn ui_commit_details_put_refs_at_the_top(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    repo.commit_file("a.txt", "a\n", "first");
+    repo.git(["tag", "v1"]);
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-log");
+    let refs = h
+        .bounds(cx, "commit-refs")
+        .expect("refs of the latest commit");
+    let date = h.bounds(cx, "commit-date:Date").expect("date");
+    let hash = h.bounds(cx, "copy-commit-hash").expect("hash");
+    assert!(refs.bottom() <= hash.top() && hash.top() < date.top());
+}
+
+#[gpui::test]
 fn ui_commit_details_list_both_dates_only_when_they_differ(cx: &mut TestAppContext) {
     let repo = TempRepo::new();
     repo.commit_file("a.txt", "a\n", "first");
@@ -580,4 +778,23 @@ fn tags_compare_picks_and_view_at_head(cx: &mut TestAppContext) {
         Some(crate::viewer::Viewer::Code { text, .. }) => assert_eq!(text.as_ref(), "two\n"),
         other => panic!("unexpected viewer {other:?}"),
     });
+}
+
+#[gpui::test]
+fn ui_reflog_lists_entries_and_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let repo = TempRepo::new();
+    for i in 0..120 {
+        repo.commit_file("a.txt", &format!("{i}\n"), &format!("commit {i}"));
+    }
+    let h = Harness::open(cx, &repo);
+    h.click(cx, "tab-log");
+    h.click(cx, "toggle-reflog");
+    assert!(h.bounds(cx, "reflog-row:0").is_some(), "newest entry drawn");
+    assert!(
+        h.bounds(cx, "reflog-row:119").is_none(),
+        "entries below the fold are not built"
+    );
+    h.click(cx, "close-reflog");
+    assert!(h.bounds(cx, "reflog-row:0").is_none());
+    assert!(h.bounds(cx, "log-row:0").is_some());
 }

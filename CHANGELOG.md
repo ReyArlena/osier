@@ -6,6 +6,121 @@ All notable changes to Osier are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
+### Added
+
+- The divider between the commit message and the details beside it (refs, hash, author,
+  dates) can be dragged; the width is kept.
+
+- Settings > Git > "Badges that do not fit" (`git.log_badge_style`), for a Log row with
+  more branch and tag badges than room: collapse them (the default), showing as many as
+  fit in 45% of the row and the rest in a "+N" badge that lists them on hover; fade them
+  out (up to three, as before); or show them all (the subject may get pushed out).
+
+- Settings > Appearance > Lists > "Text that does not fit" (`appearance.text_overflow`):
+  commit messages, paths, names and URLs too long for their row in the Changes, Log,
+  Branches, Stashes, Files and Patches tabs fade out (the default), end in an ellipsis, or end
+  in an ellipsis that fades out.
+
+- Scan directories are watched: a repository cloned, created or deleted in one shows up in
+  (or leaves) the sidebar and the project palette within a second, without a manual rescan.
+
+- Checkboxes change colour under the pointer (the box takes an accent edge and a tint), so
+  it is clear they can be clicked.
+
+- The line under the pointer is highlighted in every code editor: the file viewer, the edit
+  pane and the three panes of the merge tool.
+
+- A changed file with no diff to show says why it is in the list: only its permissions
+  changed, it was moved without an edit, it is a new or deleted empty file, or it was
+  changed back on disk after it was staged.
+
+- Settings > Git > Roll back: "Always rewrite files on roll back"
+  (`git.rollback_always_rewrite`, on by default, which is how git behaves). Git replaces a file
+  it rolls back even when its content is already the same, and a program that hot-reloads the
+  file (a desktop environment and its config files, say) can catch the moment it is missing.
+  With the setting off, such a file only has its staged change cleared and is not touched on
+  disk.
+
+### Changed
+
+- Ref badges with long names (in the Log and the commit details) are shortened in the
+  middle, `feature/rew…algorithm`, instead of losing their end, and every badge names its
+  ref in full in a tooltip.
+
+- The commit details list a commit's refs first, above its hash, author and dates.
+
+- A project refreshing in the background no longer swaps its ahead/behind badge for "…" in
+  the sidebar and the project switcher: the counts stay until the new ones are in. Like
+  other background work, the refresh shows in the status bar with "Show background tasks"
+  on.
+
+- Files in the Changes tab are indented under their group heading (Changes, Unversioned
+  Files, Conflicts), so they read as its sub-items.
+
+- The status letters (M, A, D, R, ?) in the Changes and Files tabs use the monospace font,
+  so their coloured boxes are the same width and the file names line up.
+
+- Checkboxes keep their outlined box when ticked: the tick and the dash are drawn in the
+  accent colour instead of filling the box with it, and the box is a little larger with a softer outline.
+
+- The Changes tab is one list, like PhpStorm: each changed file shows once with a checkbox
+  that is the git index (ticked = staged, a dash = partly staged, with "N of M changes" when
+  some of its changes are staged). Conflicts and Unversioned Files keep their own groups, and
+  each group has a checkbox for all its files; adding more than 100 unversioned files at once
+  asks first. A changed file's diff is HEAD against the working tree, with a checkbox per
+  change in the gutter to stage or unstage it, a roll-back arrow that puts the change back as
+  in HEAD (staged part included, after a confirmation), and staged lines shown in a stronger
+  colour.
+
+- GitHub release notes list every commit in the release, grouped by type, above the list of
+  pull requests.
+
+- Hovering list rows redraws only the part of the window under the pointer (the list, the
+  sidebar, the diff, the commit details and the bottom panel each redraw on their own), so
+  the hover highlight keeps up with the mouse: on the Log tab a hover now takes about a third
+  less time to draw.
+
+- The Branches tab builds only the rows on screen, so long lists of branches and tags stay
+  quick to hover and scroll, and moving the selection with the arrow keys scrolls it into
+  view.
+
+- The reflog, the Stashes and Patches tabs, the git command log and the notification list
+  also build only the rows on screen. Moving through stashes with the arrow keys scrolls the
+  selected one into view.
+
+- The project sidebar stays quick with hundreds of projects (scan directories): it builds
+  only the rows on screen, and listing recent and scanned projects no longer compares every
+  project with every other on each redraw. A hover over a sidebar with ~480 projects went from
+  5.5 ms to 1.9 ms to draw.
+
+### Fixed
+
+- Long branch names in the Log no longer push a commit's subject out of its row when badges
+  sit before the subject (the default). The badges take at most 45% of the row, as they do
+  at the end of the line, and fade out past that.
+
+- The Files tab colours its status letters like the Changes tab: renamed and copied files
+  were grey there instead of blue, type changes grey instead of yellow.
+
+- Staging or unstaging a hunk or lines no longer makes the diff's word highlights and syntax
+  colours flicker: when the diff's text is unchanged it is kept as it is, with its expanded
+  sections and scroll.
+
+- Making the window narrower no longer pushes the diff pane off screen. The Changes/Log
+  column and the diff pane keep the split you dragged (as a share, not a width) and resize
+  together; a sidebar of standard width stays as it is, a wider one shrinks with the window,
+  and both get their dragged widths back when the window grows again.
+
+- A file that was moved and then edited shows as one renamed file with only its real changes,
+  even when the file is small or most of it changed. Git reports such a file as one deleted
+  and one added once less than half of it is unchanged, and the Changes diff showed it that
+  way while its row said renamed. (A file with nothing left in common still shows that way.)
+
+- The diff no longer flickers when a change in it is staged, unstaged or rolled back, or when
+  the file changes on disk: the diff stays on screen while it reloads.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added
@@ -400,7 +515,8 @@ First release.
   update check with an "Update available" badge, and updates from Settings or
   `osier --update` for script installs.
 
-[Unreleased]: https://github.com/ReyArlena/osier/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ReyArlena/osier/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ReyArlena/osier/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ReyArlena/osier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ReyArlena/osier/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ReyArlena/osier/releases/tag/v0.1.0

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
+use crate::fade::EndText as _;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
@@ -389,7 +390,7 @@ impl Osier {
     }
 
     pub(crate) fn render_files(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (repo, status_src, files, ignored, selection) = {
+        let (repo, status_src, files, ignored) = {
             let Some(project) = self.active_project() else {
                 return self
                     .empty_state(
@@ -424,7 +425,6 @@ impl Osier {
                 snapshot.status.clone(),
                 snapshot.files.clone(),
                 snapshot.ignored.clone().filter(|_| self.show_ignored),
-                project.selection.clone(),
             )
         };
         // Badges and the tracked set are built once per snapshot, in the background: walking
@@ -539,10 +539,7 @@ impl Osier {
         }
 
         let muted = cx.theme().muted_foreground;
-        let selected_path = match &selection {
-            crate::project::Selection::WorkFile { path, .. } => Some(path.clone()),
-            _ => None,
-        };
+        let text_overflow = self.settings.appearance.text_overflow;
         let weak = cx.entity().downgrade();
         let count = paths.len();
 
@@ -563,12 +560,15 @@ impl Osier {
                             .text_color(muted)
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .child(if filtering {
-                                format!("{count} of {}", crate::format::count(total, "file"))
-                            } else {
-                                crate::format::count(count, "file")
-                            }),
+                            .end_text(
+                                self.settings.appearance.text_overflow,
+                                crate::fade::Behind::plain(cx),
+                                if filtering {
+                                    format!("{count} of {}", crate::format::count(total, "file"))
+                                } else {
+                                    crate::format::count(count, "file")
+                                },
+                            ),
                     )
                     .child(
                         div()
@@ -609,7 +609,7 @@ impl Osier {
                         let status = status.clone();
                         let dirty_dirs = dirty_dirs.clone();
                         let ignored_rows = ignored_rows.clone();
-                        move |ix, entry, _selected, _window, cx| {
+                        move |ix, entry, selected, _window, cx| {
                             let item = entry.item();
                             let id = item.id.to_string();
                             let is_folder = entry.is_folder();
@@ -634,16 +634,47 @@ impl Osier {
                             let dim = ignored_row.is_some();
                             let weak = weak.clone();
                             let click_id = id.clone();
-                            let is_selected = selected_path.as_deref() == Some(id.as_str());
+                            // The tree's own cursor, which is what gpui-kit paints as the
+                            // selected row. Not the file the viewer shows: clicking a folder
+                            // moves the cursor there and leaves the viewer on its file.
+                            let is_selected = selected;
+                            // The colours ListItem paints behind the name, for its fade: a
+                            // selected row keeps its colour under the pointer.
+                            let behind = {
+                                let theme = cx.theme();
+                                let bg = theme.background;
+                                let selected_bg = if theme.list.active_highlight {
+                                    theme.list_active
+                                } else {
+                                    theme.accent
+                                };
+                                let base = if is_selected {
+                                    bg.blend(selected_bg)
+                                } else {
+                                    bg
+                                };
+                                let hover = if is_selected {
+                                    base
+                                } else {
+                                    bg.blend(theme.list_hover)
+                                };
+                                crate::fade::Behind::colors(base, hover, "files-row")
+                            };
                             // a11y: the tree names its own items.
                             ListItem::new(ix)
                                 .test_id(|| format!("files-row:{id}"))
+                                .group("files-row")
                                 .w_full()
                                 .px_2()
                                 .pl(px(14.) * entry.depth() + px(8.))
                                 .selected(is_selected)
                                 .child(
                                     h_flex()
+                                        // Tests: the row whose fade blends into the selected
+                                        // colour.
+                                        .when(is_selected, |row| {
+                                            row.test_id(|| format!("files-row-selected:{id}"))
+                                        })
                                         .gap_2()
                                         .items_center()
                                         .min_w_0()
@@ -670,12 +701,16 @@ impl Osier {
                                         })
                                         .child(
                                             div()
+                                                .test_id(|| format!("files-name:{id}"))
                                                 .text_sm()
-                                                .truncate()
                                                 .min_w_0()
                                                 .flex_1()
                                                 .when(dim, |d| d.text_color(muted))
-                                                .child(item.label.clone()),
+                                                .end_text(
+                                                    text_overflow,
+                                                    behind,
+                                                    item.label.clone(),
+                                                ),
                                         )
                                         // Ignored: where the rule lives, the rule itself in
                                         // the tooltip.
@@ -722,17 +757,6 @@ impl Osier {
                                             },
                                         )
                                         .when_some(badge, |this, b| {
-                                            let tag = match b {
-                                                'M' => Tag::warning().xsmall().child("M"),
-                                                'A' | '?' => {
-                                                    Tag::success().xsmall().child(b.to_string())
-                                                }
-                                                'D' => Tag::danger().xsmall().child("D"),
-                                                'U' => Tag::danger().xsmall().child("U"),
-                                                other => Tag::secondary()
-                                                    .xsmall()
-                                                    .child(other.to_string()),
-                                            };
                                             let meaning = match b {
                                                 'M' => "Modified",
                                                 'A' => "Added",
@@ -752,7 +776,8 @@ impl Osier {
                                                     cx,
                                                 )
                                                 .flex_none()
-                                                .child(tag),
+                                                .test_id(|| format!("files-status:{id}"))
+                                                .child(super::changes::status_letter(b, cx)),
                                             )
                                         }),
                                 )

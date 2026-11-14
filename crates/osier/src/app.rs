@@ -217,7 +217,19 @@ pub struct Osier {
     pub(crate) diff_files: usize,
     /// Our own parse of the same patch, for building hunk and line patches.
     pub(crate) diff_model: std::rc::Rc<Vec<osier_git::diff::DiffFile>>,
+    /// For a changed file in the Changes tab: which of its lines are staged
+    /// (`osier_git::staging`), behind the hunk checkboxes and the staged-line tint.
+    pub(crate) diff_staging: Option<std::rc::Rc<osier_git::staging::FileStaging>>,
     pub(crate) diff_loading: bool,
+    /// The selection whose diff is on screen. Reloading the same one (after a tick, a roll
+    /// back or a file change) keeps it shown instead of the "Reading diff" placeholder, so
+    /// the diff does not flicker.
+    pub(crate) diff_shown: Option<crate::project::Selection>,
+    /// Hash of the text the diff's files were parsed from (`None` after anything else was
+    /// set): an identical reload keeps the files and their prepared highlights.
+    pub(crate) diff_text_key: Option<u64>,
+    /// A reload of `diff_shown` is running (the old diff stays up meanwhile).
+    pub(crate) diff_refreshing: bool,
     pub(crate) diff_error: Option<String>,
     pub(crate) diff_revision: u64,
     pub(crate) log_scroll: UniformListScrollHandle,
@@ -240,6 +252,9 @@ pub struct Osier {
     pub(crate) diff_expanded: bool,
     /// The selected conflicted file has no conflict markers left (inline view).
     pub(crate) diff_no_markers: bool,
+    /// Why the selected changed file has no diff to show (its text is the same in HEAD and
+    /// the working tree), when git says why.
+    pub(crate) diff_unchanged: Option<osier_git::staging::Unchanged>,
     /// Merged branches with a deleted upstream already offered for deletion this session
     /// (project, branch), so a dismissed offer does not come back after every fetch.
     pub(crate) gone_offered: std::collections::HashSet<(PathBuf, String)>,
@@ -291,6 +306,9 @@ pub struct Osier {
     pub(crate) signoff: bool,
     /// State changed by frequent events (bounds, pane drags); saved by the tick loop.
     pub(crate) state_dirty: bool,
+    /// Width of a Log row's subject cell as last drawn, for "Collapse" badges (how many
+    /// fit); zero until measured. Set while painting (`log_tab::measure_badge_room`).
+    pub(crate) log_badge_room: std::rc::Rc<std::cell::Cell<Pixels>>,
     /// Running fetch/pull/push, if any.
     pub(crate) remote_job: Option<crate::app::remote_ops::RemoteJob>,
     /// gh accounts discovered at startup (no tokens).
@@ -312,6 +330,10 @@ pub struct Osier {
     pub(crate) scan_cache: crate::cached_list::CachedLists<Vec<PathBuf>>,
     /// The current scan directories' key in `scan_cache`; `None` with no scan directories.
     pub(crate) scan_key: Option<String>,
+    /// Watches the scan directories so a new or removed repository triggers a rescan.
+    scan_watch: Option<crate::scan_watch::ScanWatch>,
+    /// The `scan_key` that `scan_watch` was built (or is being built) for.
+    scan_watch_key: Option<String>,
     /// Sidebar filter box.
     pub(crate) sidebar_filter: Entity<gpui_kit::component::input::InputState>,
     /// Where the filter box was painted, to anchor the dropdown.
@@ -382,6 +404,20 @@ pub struct Osier {
     /// Command log opened by the dev env var: do not persist that as a preference.
     command_log_from_env: bool,
     diff_task: Task<()>,
+    /// The parts of the window that redraw on their own (`crate::pane`).
+    pub(crate) panes: panes::Panes,
+    /// The Branches tab's list (`crate::lazy_list`).
+    pub(crate) branches_list: crate::lazy_list::LazyList,
+    /// The Log tab's reflog list.
+    pub(crate) reflog_list: crate::lazy_list::LazyList,
+    /// The bottom panel's git command list.
+    pub(crate) command_log_list: crate::lazy_list::LazyList,
+    /// The bottom panel's notification list.
+    pub(crate) notices_list: crate::lazy_list::LazyList,
+    /// The Stashes tab's list.
+    pub(crate) stashes_list: crate::lazy_list::LazyList,
+    /// The Patches tab's list.
+    pub(crate) patches_list: crate::lazy_list::LazyList,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -527,6 +563,7 @@ impl Osier {
             merges: crate::app::merge_ops::Merges::default(),
             diff_expanded: false,
             diff_no_markers: false,
+            diff_unchanged: None,
             diff_file_ix: 0,
             gone_offered: std::collections::HashSet::new(),
             viewer: None,
@@ -589,7 +626,11 @@ impl Osier {
             commit_branches_loading: None,
             diff_files: 0,
             diff_model: std::rc::Rc::new(Vec::new()),
+            diff_staging: None,
             diff_loading: false,
+            diff_shown: None,
+            diff_text_key: None,
+            diff_refreshing: false,
             diff_error: None,
             diff_revision: 0,
             log_scroll: UniformListScrollHandle::new(),
@@ -600,6 +641,7 @@ impl Osier {
             diff_force_large: false,
             list_focus: cx.focus_handle(),
             state_dirty: false,
+            log_badge_room: Default::default(),
             remote_job: None,
             gh_accounts: Vec::new(),
             gh_accounts_loaded: false,
@@ -613,6 +655,8 @@ impl Osier {
                 crate::background::SCAN_DIRS,
             ),
             scan_key: None,
+            scan_watch: None,
+            scan_watch_key: None,
             sidebar_filter,
             sidebar_filter_bounds: Default::default(),
             session_only_accounts: Default::default(),
@@ -654,6 +698,13 @@ impl Osier {
             prefix_timeout,
             compact: window.bounds().size.width < px(1500.),
             diff_task: Task::ready(()),
+            panes: panes::Panes::new(&cx.entity(), cx),
+            branches_list: Default::default(),
+            reflog_list: Default::default(),
+            command_log_list: Default::default(),
+            notices_list: Default::default(),
+            stashes_list: Default::default(),
+            patches_list: Default::default(),
             _subscriptions: vec![
                 message_subscription,
                 filter_subscription,
@@ -963,7 +1014,6 @@ impl Render for Osier {
                 }
             });
         }
-        let has_project = self.active.is_some();
         let merge_fills = self.diff_expanded;
         let mut root = v_flex()
             .track_focus(&self.focus_handle)
@@ -1145,13 +1195,13 @@ impl Render for Osier {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.render_title_bar(cx))
+            .child(crate::pane::live(&self.panes.title_bar))
             .child(
                 div().flex_1().min_h_0().child(
                     h_flex()
                         .size_full()
                         .when(self.sidebar_visible && !merge_fills, |this| {
-                            this.child(self.render_sidebar(window, cx))
+                            this.child(self.render_sidebar_frame(window, cx))
                         })
                         .child(
                             v_flex()
@@ -1163,7 +1213,7 @@ impl Render for Osier {
                                         div()
                                             .flex_1()
                                             .min_h_0()
-                                            .child(self.render_diff_pane(window, cx)),
+                                            .child(crate::pane::cached(&self.panes.diff, window)),
                                     )
                                 })
                                 .when(!merge_fills, |this| {
@@ -1178,17 +1228,16 @@ impl Render for Osier {
                                             ))
                                             .child(
                                                 resizable_panel()
-                                                    .size(px(self
-                                                        .state
-                                                        .layout
-                                                        .center_width
-                                                        .unwrap_or(440.)))
-                                                    .size_range(px(260.)..px(1400.))
-                                                    // Keep the saved width when the window
-                                                    // resizes (a tiling compositor resizes it
-                                                    // right after it opens); the diff pane
-                                                    // takes up the difference.
-                                                    .fixed()
+                                                    // The dragged share of the space beside
+                                                    // the sidebar; the panels keep that split
+                                                    // as the window resizes.
+                                                    .size(px(self.center_width(window)))
+                                                    // At most what leaves the diff pane its
+                                                    // narrowest, so it stays on screen.
+                                                    .size_range(
+                                                        px(panes::CENTER_MIN)
+                                                            ..px(self.center_width_most(window)),
+                                                    )
                                                     .child(
                                                         div()
                                                             .test_id("center-pane")
@@ -1198,19 +1247,27 @@ impl Render for Osier {
                                             )
                                             .child(
                                                 resizable_panel()
-                                                    .size_range(px(240.)..px(4000.))
-                                                    .child(self.render_diff_pane(window, cx)),
+                                                    .size_range(px(panes::DIFF_MIN)..px(4000.))
+                                                    .child(
+                                                        div()
+                                                            .test_id("diff-pane")
+                                                            .size_full()
+                                                            .child(crate::pane::cached(
+                                                                &self.panes.diff,
+                                                                window,
+                                                            )),
+                                                    ),
                                             ),
                                     ),
                                 )
                                 })
                                 .when(self.command_log_visible, |this| {
-                                    this.child(self.render_bottom_panel(window, cx))
+                                    this.child(self.render_bottom_panel_frame(window, cx))
                                 }),
                         ),
                 ),
             )
-            .child(self.render_status_bar(has_project, cx))
+            .child(crate::pane::live(&self.panes.status_bar))
     }
 }
 

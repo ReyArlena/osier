@@ -197,6 +197,7 @@ impl Osier {
     /// Load the diff for the active project's selection into the diff pane.
     pub(crate) fn reload_selection(&mut self, cx: &mut Context<Self>) {
         self.blame = None;
+        self.diff_unchanged = None;
         self.diff_key = self.active_project().map(|p| p.content_key(&p.selection));
         self.diff_revision += 1;
         let revision = self.diff_revision;
@@ -204,37 +205,74 @@ impl Osier {
         let whitespace = self.settings.diff.whitespace;
         let Some(project) = self.active_project() else {
             self.diff_model = std::rc::Rc::new(Vec::new());
+            self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             return;
         };
         let repo = project.repo.clone();
         let selection = project.selection.clone();
+        // Where a renamed file came from: the combined diff of a changed file needs both paths.
+        let orig_path = match &selection {
+            Selection::File { path, .. } => project
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.status.entries.iter().find(|e| &e.path == path))
+                .and_then(|e| e.orig_path.clone()),
+            _ => None,
+        };
         if selection == Selection::None {
             self.diff_model = std::rc::Rc::new(Vec::new());
+            self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             return;
         }
         if let Selection::WorkFile { path, rev } = &selection {
             self.diff_model = std::rc::Rc::new(Vec::new());
+            self.diff_staging = None;
+            self.diff_shown = None;
+            self.diff_refreshing = false;
             self.set_diff_files(Vec::new(), cx);
             self.load_viewer(path.clone(), rev.clone(), cx);
             return;
         }
         self.viewer = None;
-        self.diff_loading = true;
-        self.diff_error = None;
-        self.diff_too_large = None;
-        self.diff_no_markers = false;
-        self.diff_file_ix = 0;
+        // The same file again (its content moved): keep its diff up until the new one lands.
+        let refresh = self.diff_shown.as_ref() == Some(&selection)
+            && !self.diff_loading
+            && self.diff_files > 0
+            && self.diff_error.is_none()
+            && self.diff_too_large.is_none()
+            && !self.diff_no_markers;
+        self.diff_refreshing = refresh;
+        if !refresh {
+            self.diff_shown = None;
+            self.diff_loading = true;
+            self.diff_error = None;
+            self.diff_too_large = None;
+            self.diff_no_markers = false;
+            self.diff_file_ix = 0;
+        }
         let limit = if self.diff_force_large {
             u64::MAX
         } else {
             self.settings.diff.large_file_bytes
         };
+        let shown = selection.clone();
         self.diff_task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    load_patch(&repo, &selection, context, limit, whitespace)
+                    load_patch(
+                        &repo,
+                        &selection,
+                        orig_path.as_deref(),
+                        context,
+                        limit,
+                        whitespace,
+                    )
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -242,24 +280,46 @@ impl Osier {
                     return;
                 }
                 this.diff_loading = false;
+                this.diff_refreshing = false;
+                // The same selection reloaded to the same text (staging a hunk changes only
+                // which lines are staged): keep the files the diff already has, so its word
+                // and syntax highlights, expanded context and scroll stay instead of being
+                // prepared again (they flickered).
+                let same_selection = this.diff_shown.as_ref() == Some(&shown);
+                this.diff_shown = Some(shown);
                 match result {
-                    Ok((files, model)) => {
+                    Ok((files, model, staging, key)) => {
                         this.diff_model = std::rc::Rc::new(model);
-                        this.set_diff_files(files, cx);
+                        this.diff_staging = staging.map(std::rc::Rc::new);
+                        let unchanged =
+                            same_selection && !files.is_empty() && this.diff_text_key == Some(key);
+                        if !unchanged {
+                            this.set_diff_files(files, cx);
+                            this.diff_text_key = Some(key);
+                        }
                     }
                     Err(LoadError::NoMarkers) => {
                         this.diff_no_markers = true;
                         this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.diff_staging = None;
+                        this.set_diff_files(Vec::new(), cx);
+                    }
+                    Err(LoadError::Unchanged(reason)) => {
+                        this.diff_unchanged = Some(reason);
+                        this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.diff_staging = None;
                         this.set_diff_files(Vec::new(), cx);
                     }
                     Err(LoadError::TooLarge(size)) => {
                         this.diff_too_large = Some(size);
                         this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.diff_staging = None;
                         this.set_diff_files(Vec::new(), cx);
                     }
                     Err(LoadError::Git(error)) => {
                         this.diff_error = Some(error);
                         this.diff_model = std::rc::Rc::new(Vec::new());
+                        this.diff_staging = None;
                         this.set_diff_files(Vec::new(), cx);
                     }
                 }
@@ -270,6 +330,7 @@ impl Osier {
     }
 
     fn set_diff_files(&mut self, files: Vec<DiffFile>, cx: &mut Context<Self>) {
+        self.diff_text_key = None;
         self.diff_files = files.len();
         self.diff.update(cx, |state, cx| state.set_files(files, cx));
     }
@@ -367,13 +428,12 @@ pub(crate) fn kit_mode(mode: osier_config::settings::DiffMode) -> DiffMode {
     }
 }
 
-/// Conflicts first, then staged, unstaged, untracked.
+/// Conflicts first, then changes, then unversioned files.
 pub(crate) fn first_change(status: &osier_git::status::RepoStatus) -> Option<(String, Area)> {
     status
         .conflicted()
         .map(|e| (e.path.clone(), Area::Conflicted))
-        .chain(status.staged().map(|e| (e.path.clone(), Area::Staged)))
-        .chain(status.unstaged().map(|e| (e.path.clone(), Area::Unstaged)))
+        .chain(status.changed().map(|e| (e.path.clone(), Area::Changed)))
         .chain(
             status
                 .untracked()
@@ -387,6 +447,9 @@ pub(crate) enum LoadError {
     Git(String),
     /// A conflicted file whose working copy has no conflict markers left.
     NoMarkers,
+    /// A changed file whose text is the same in HEAD and the working tree, and why git
+    /// lists it.
+    Unchanged(osier_git::staging::Unchanged),
 }
 
 impl From<osier_git::GitError> for LoadError {
@@ -405,13 +468,31 @@ pub(crate) fn whitespace_applies(selection: &Selection) -> bool {
 }
 
 /// Blocking: raw patch for the selection, parsed by gpui-kit's diff parser.
+/// What a loaded diff gives the pane: gpui-kit's files, our hunk model, for a changed file
+/// in the Changes tab its staging, and a hash of the text the files were parsed from.
+type Loaded = (
+    Vec<DiffFile>,
+    Vec<osier_git::diff::DiffFile>,
+    Option<osier_git::staging::FileStaging>,
+    u64,
+);
+
+/// Hash of the text a diff was parsed from: a reload with the same hash shows the same diff.
+fn text_key(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn load_patch(
     repo: &Repository,
     selection: &Selection,
+    orig_path: Option<&str>,
     context: u32,
     size_limit: u64,
     whitespace: osier_config::settings::DiffWhitespace,
-) -> Result<(Vec<DiffFile>, Vec<osier_git::diff::DiffFile>), LoadError> {
+) -> Result<Loaded, LoadError> {
     let hide = |o: &mut DiffOptions| {
         use osier_config::settings::DiffWhitespace as W;
         o.ignore_whitespace = whitespace == W::All;
@@ -437,18 +518,33 @@ fn load_patch(
         }
         let file = DiffFile::parse_conflicts(path.clone(), &text)
             .map_err(|e| LoadError::Git(e.to_string()))?;
-        return Ok((vec![file], Vec::new()));
+        return Ok((vec![file], Vec::new(), None, text_key(&text)));
+    }
+    // A changed file: HEAD against the working tree, every line marked staged or not.
+    if let Selection::File {
+        path,
+        area: Area::Changed,
+    } = selection
+    {
+        let Some(staging) = osier_git::staging::file_staging(repo, path, orig_path, context)?
+        else {
+            // Nothing to show: say why the file is listed, when git knows.
+            return match osier_git::staging::unchanged_reason(repo, path, orig_path)? {
+                Some(reason) => Err(LoadError::Unchanged(reason)),
+                None => Ok((Vec::new(), Vec::new(), None, 0)),
+            };
+        };
+        let files =
+            DiffFile::parse(&staging.shown_text).map_err(|e| LoadError::Git(e.to_string()))?;
+        let model = vec![staging.shown.clone()];
+        let key = text_key(&staging.shown_text);
+        return Ok((files, model, Some(staging), key));
     }
     let patch = match selection {
-        Selection::None => return Ok((Vec::new(), Vec::new())),
+        Selection::None => return Ok((Vec::new(), Vec::new(), None, 0)),
         Selection::File { path, area } => match area {
             Area::Untracked => osier_git::diff::untracked_patch_text(repo, path, context)?,
-            Area::Staged => {
-                let mut o = DiffOptions::new(DiffTarget::Staged).path(path.clone());
-                o.context_lines = context;
-                osier_git::diff::patch_text(repo, &o)?
-            }
-            Area::Unstaged | Area::Conflicted => {
+            Area::Changed | Area::Conflicted => {
                 let mut o = DiffOptions::new(DiffTarget::Unstaged).path(path.clone());
                 o.context_lines = context;
                 osier_git::diff::patch_text(repo, &o)?
@@ -460,7 +556,7 @@ fn load_patch(
             hide(&mut o);
             osier_git::diff::patch_text(repo, &o)?
         }
-        Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new())),
+        Selection::WorkFile { .. } => return Ok((Vec::new(), Vec::new(), None, 0)),
         Selection::Patch { file, .. } => osier_git::ops::patches::normalize(
             &std::fs::read_to_string(file)
                 .map_err(|e| LoadError::Git(format!("{}: {e}", file.display())))?,
@@ -488,7 +584,7 @@ fn load_patch(
         }
     };
     if patch.trim().is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), None, 0));
     }
     let files = DiffFile::parse(&patch).map_err(|e| LoadError::Git(e.to_string()))?;
     // Our parser is stricter; a failure here only disables hunk actions.
@@ -496,5 +592,5 @@ fn load_patch(
         tracing::debug!(error = %e, "hunk model unavailable for this patch");
         Vec::new()
     });
-    Ok((files, model))
+    Ok((files, model, None, text_key(&patch)))
 }

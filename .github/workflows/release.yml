@@ -78,11 +78,21 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history and tags, so the commits since the previous release can be listed.
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      - name: Write the release notes
+        env:
+          # For the authors' GitHub logins and GitHub's list of pull requests.
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          # The commits by type, then the pull requests.
+          body_path: ${{ runner.temp }}/notes.md
