@@ -8,6 +8,14 @@ permissions:
   contents: write
 
 jobs:
+  # The full CI checks on the tagged commit, in parallel with the builds. Nothing is
+  # published unless both pass.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -25,20 +33,14 @@ jobs:
         with:
           # Full history and tags, so build.rs can tell this is exactly the release tag.
           fetch-depth: 0
-      - name: Native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libxcb-xkb-dev \
-            libwayland-dev libvulkan-dev libfontconfig1-dev libfreetype-dev libssl-dev
-      - name: Read the pinned Rust version
-        id: rust
-        run: echo "version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/rust-setup
         with:
-          toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A cache saved under a tag can only be restored by that same tag, so saving one
+          # would only push main's caches out of the repository's 10 GB.
+          save-if: false
       - name: Build
         run: cargo build --release -p osier --target ${{ matrix.target }}
       - name: Check the binary reports the tag's version
@@ -75,7 +77,7 @@ jobs:
 
   release:
     name: GitHub release
-    needs: build
+    needs: [ci, build]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

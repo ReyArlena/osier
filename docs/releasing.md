@@ -1,8 +1,9 @@
 # Releasing
 
 A release is a `vX.Y.Z` tag on `main`. Pushing the tag starts
-`.github/workflows/release.yml`, which builds x86_64 and ARM64 binaries, checks that each one
-reports the tag's version and publishes them as a GitHub release. `install.sh` and
+`.github/workflows/release.yml`, which runs the CI checks on the tagged commit while it builds
+x86_64 and ARM64 binaries, checks that each one reports the tag's version and, only when the
+checks and both builds pass, publishes them as a GitHub release. `install.sh` and
 `osier --update` pick the new release up from there.
 
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html): `fix` commits
